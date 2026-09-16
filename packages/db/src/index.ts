@@ -1,33 +1,17 @@
 export * from "./schema/index.js";
-export { assertAppMigrationAllowed, MigrationPolicyViolation } from "./migration-policy.js";
+export { classify, type StatementKind } from "./classify.js";
+export { UnfencedWrite, unfencedWriteOf } from "./fenced-client.js";
 export {
-  assertAppName,
-  provisionRoles,
-  roleNames,
-  RoleProvisioningError,
-  type ProvisionedRoles,
-  type ProvisionRolesOptions,
-  type RoleNames,
-} from "./roles.js";
-export {
-  migrate,
-  runDbosSchema,
-  MigratorError,
-  CORE_MIGRATIONS_DIR,
-  CORE_MIGRATIONS_SCHEMA,
-  CORE_MIGRATIONS_TABLE,
-  DBOS_SCHEMA,
-  type MigrateOptions,
-  type MigrateResult,
-} from "./migrate.js";
-export {
-  installDeleteGuards,
-  DELETE_GUARD_FUNCTION,
-  DELETE_GUARD_REFERENCING_TABLES,
-  type DeleteGuardResult,
-  type RecordTable,
-} from "./delete-guard.js";
-export { grantReadOnly, GRANT_RO_EXCLUDED_TABLES, type GrantRoResult } from "./grant-ro.js";
+  createStepPool,
+  StaleAttempt,
+  FENCE_STATEMENT,
+  STEP_POOL_SIZE,
+  type StepDatabase,
+  type StepPool,
+  type StepPoolOptions,
+} from "./step-pool.js";
+/** `runBootChecks` takes these, so the type travels with `.` even though the guards do not. */
+export type { RecordTable } from "./delete-guard.js";
 export {
   runBootChecks,
   checkE001,
