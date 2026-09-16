@@ -1,10 +1,14 @@
-import { randomUUID } from "node:crypto";
-import { migrate } from "@hyperfixation/db/migrator";
+import {
+  createTestDatabase,
+  spawnWorker,
+  testBuildSha,
+  WORKER_READY,
+  type SpawnedWorker,
+  type TestDatabase,
+} from "@hyperfixation/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { LAUNCHING_MARKER } from "./start-worker.js";
-import { createTestDatabase, type TestDatabase } from "./test-support/database.js";
-import { FIXTURE_READY } from "./test-support/fixture-protocol.js";
-import { spawnFixture, type Fixture } from "./test-support/spawn-fixture.js";
+import { WORKER_FIXTURE_MODULE } from "./test-support/fixture-module.js";
 
 /**
  * redeploy.test.ts case 6 — advisory-lock isolation. Two workers for one app never run at
@@ -14,11 +18,10 @@ import { spawnFixture, type Fixture } from "./test-support/spawn-fixture.js";
  */
 describe("redeploy case 6 — a second worker exits without launching", () => {
   let database: TestDatabase;
-  let first: Fixture | undefined;
+  let first: SpawnedWorker | undefined;
 
   beforeAll(async () => {
     database = await createTestDatabase();
-    await migrate(database.migratorUrl, { appName: database.appName });
   }, 120_000);
 
   afterAll(async () => {
@@ -27,28 +30,29 @@ describe("redeploy case 6 — a second worker exits without launching", () => {
   });
 
   it("refuses the second worker, and never reaches DBOS.launch in it", async () => {
-    const buildSha = `test-${randomUUID()}`;
-    first = spawnFixture({
-      appName: database.appName,
-      databaseUrl: database.applicationUrl,
-      buildSha,
-    });
-    await first.waitFor(FIXTURE_READY);
+    // One version for both: what keeps them apart is the lock, not the application version.
+    const version = testBuildSha();
+    const spawn = (): SpawnedWorker =>
+      spawnWorker({
+        module: WORKER_FIXTURE_MODULE,
+        appName: database.appName,
+        databaseUrl: database.applicationUrl,
+        version,
+      });
 
-    const second = spawnFixture({
-      appName: database.appName,
-      databaseUrl: database.applicationUrl,
-      buildSha,
-    });
+    first = spawn();
+    await first.ready();
+
+    const second = spawn();
     const exit = await second.exited;
 
     expect(exit.code).toBe(1);
     expect(second.output()).toContain("WorkerLockUnavailable");
     expect(second.output()).not.toContain(LAUNCHING_MARKER);
-    expect(second.output()).not.toContain(FIXTURE_READY);
+    expect(second.output()).not.toContain(WORKER_READY);
   }, 180_000);
 
-  it("leaves the first worker running and holding the lock", async () => {
-    expect(first?.child.exitCode).toBeNull();
+  it("leaves the first worker running and holding the lock", () => {
+    expect(first?.exit()).toBeUndefined();
   });
 });

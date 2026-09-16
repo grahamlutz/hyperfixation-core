@@ -1,6 +1,10 @@
-import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
-import { migrate } from "@hyperfixation/db/migrator";
+import {
+  createTestDatabase,
+  spawnWorker,
+  type SpawnedWorker,
+  type TestDatabase,
+} from "@hyperfixation/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   DRAIN_TIMEOUT_MS,
@@ -8,9 +12,11 @@ import {
   SHUTDOWN_IGNORED_MARKER,
   SHUTDOWN_MARKER,
 } from "./start-worker.js";
-import { createTestDatabase, type TestDatabase } from "./test-support/database.js";
-import { FIXTURE_READY, FIXTURE_SENTRY_ARMED } from "./test-support/fixture-protocol.js";
-import { spawnFixture, type Fixture } from "./test-support/spawn-fixture.js";
+import {
+  SENTRY_ARMED_MARKER,
+  WORKER_FIXTURE_MODULE,
+  type FixtureControl,
+} from "./test-support/fixture-module.js";
 
 /** node-pg's message when two `shutdown()` calls both reach `pool.end()` — round-3 finding 9. */
 const DOUBLE_END = "Called end on pool more than once";
@@ -21,7 +27,7 @@ const DOUBLE_END = "Called end on pool more than once";
  */
 describe("redeploy case 11 — SIGTERM", () => {
   let database: TestDatabase | undefined;
-  let worker: Fixture | undefined;
+  let worker: SpawnedWorker | undefined;
 
   // The child outlives a failed assertion otherwise: every path through these tests leaves it
   // either exited or SIGKILLed.
@@ -34,8 +40,14 @@ describe("redeploy case 11 — SIGTERM", () => {
 
   it("treats a second SIGTERM 50ms later as a no-op and exits 0", async () => {
     // The drain has to still be open 50ms in for the second delivery to be a second delivery
-    // at all; see the fixture's `delayShutdown`.
-    worker = await bootWorker({ delayShutdownMs: 500 });
+    // at all. With nothing enqueued the real drain finishes in under a millisecond, so
+    // `drainMs` stands in for the mid-run worker chunk 9's flows do not yet exist to provide.
+    //
+    // What that reaches is the handler's guard, not node-pg's double `pool.end()` — with the
+    // guard removed the second delivery gets its own delay and the first handler's
+    // `process.exit(0)` still wins, which is the masking round-3 finding 9 describes. This
+    // case discriminates on the marker count.
+    worker = await bootWorker({ drainMs: 500 });
 
     const started = performance.now();
     worker.child.kill("SIGTERM");
@@ -59,7 +71,7 @@ describe("redeploy case 11 — SIGTERM", () => {
    */
   it("exits 1 within a second when shutdown rejects behind Sentry's listener", async () => {
     worker = await bootWorker({ rejectShutdownAfterMs: 200 });
-    await worker.waitFor(FIXTURE_SENTRY_ARMED);
+    await worker.waitFor(SENTRY_ARMED_MARKER);
 
     const started = performance.now();
     worker.child.kill("SIGTERM");
@@ -73,20 +85,17 @@ describe("redeploy case 11 — SIGTERM", () => {
     expect(worker.output()).toContain(SHUTDOWN_FAILED_MARKER);
   }, 180_000);
 
-  async function bootWorker(
-    options: { delayShutdownMs?: number; rejectShutdownAfterMs?: number } = {},
-  ): Promise<Fixture> {
+  async function bootWorker(control: FixtureControl): Promise<SpawnedWorker> {
     database = await createTestDatabase();
-    await migrate(database.migratorUrl, { appName: database.appName });
 
-    const fixture = spawnFixture({
+    const spawned = spawnWorker({
+      module: WORKER_FIXTURE_MODULE,
       appName: database.appName,
       databaseUrl: database.applicationUrl,
-      buildSha: `test-${randomUUID()}`,
-      ...options,
+      control,
     });
-    await fixture.waitFor(FIXTURE_READY);
-    return fixture;
+    await spawned.ready();
+    return spawned;
   }
 });
 

@@ -25,8 +25,8 @@
     "pg": "^8.23.0"
   },
   "devDependencies": {
+    "@hyperfixation/testing": "workspace:*",
     "@sentry/node": "^10.74.0",
-    "@types/pg": "^8.23.1",
-    "tsx": "^4.20.0"
+    "@types/pg": "^8.23.1"
   }
 }

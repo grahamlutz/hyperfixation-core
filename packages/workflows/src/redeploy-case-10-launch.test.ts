@@ -1,14 +1,18 @@
 import { randomUUID } from "node:crypto";
 import type { DBOSClient } from "@dbos-inc/dbos-sdk";
 import { bumpAttempt, controlPlaneTx } from "@hyperfixation/db";
-import { migrate } from "@hyperfixation/db/migrator";
+import {
+  asRole,
+  createTestDatabase,
+  spawnWorker,
+  type SpawnedWorker,
+  type TestDatabase,
+} from "@hyperfixation/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { getClient } from "./client.js";
 import { createControlPool, type ControlPool } from "./control-pool.js";
 import { LAUNCHED_MARKER } from "./start-worker.js";
-import { asRole, createTestDatabase, type TestDatabase } from "./test-support/database.js";
-import { FIXTURE_READY } from "./test-support/fixture-protocol.js";
-import { spawnFixture, type Fixture } from "./test-support/spawn-fixture.js";
+import { WORKER_FIXTURE_MODULE } from "./test-support/fixture-module.js";
 
 const RUN_ID = "case10-run";
 const QUEUE = "resolve";
@@ -23,13 +27,12 @@ const QUEUE = "resolve";
  */
 describe("redeploy case 10 — the launch half", () => {
   let database: TestDatabase;
-  let worker: Fixture;
+  let worker: SpawnedWorker;
   let control: ControlPool;
   let client: DBOSClient;
 
   beforeAll(async () => {
     database = await createTestDatabase();
-    await migrate(database.migratorUrl, { appName: database.appName });
     await asRole(database.applicationUrl, async (pg) => {
       await pg.query(
         `INSERT INTO hf_run (run_id, flow, input, status, attempt, current_workflow_id)
@@ -38,12 +41,12 @@ describe("redeploy case 10 — the launch half", () => {
       );
     });
 
-    worker = spawnFixture({
+    worker = spawnWorker({
+      module: WORKER_FIXTURE_MODULE,
       appName: database.appName,
       databaseUrl: database.applicationUrl,
-      buildSha: `test-${randomUUID()}`,
     });
-    await worker.waitFor(FIXTURE_READY);
+    await worker.ready();
   }, 180_000);
 
   afterAll(async () => {
@@ -55,7 +58,7 @@ describe("redeploy case 10 — the launch half", () => {
 
   it("launches DBOS in a real worker process", () => {
     expect(worker.output()).toContain(LAUNCHED_MARKER);
-    expect(worker.child.exitCode).toBeNull();
+    expect(worker.exit()).toBeUndefined();
   });
 
   it("registers the three queues at their fixed concurrencies", async () => {

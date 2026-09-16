@@ -1,0 +1,113 @@
+/**
+ * The child half of the crash harness: what a worker entrypoint spawned by `spawnWorker()`
+ * calls to speak the protocol. A real process is the only shape in which `startWorker()` can
+ * be tested at all — DBOS refuses a second launch in one process — so every worker test runs
+ * a module like this one.
+ */
+import { DBOS } from "@dbos-inc/dbos-sdk";
+import { fencingFailureOf } from "./fencing.js";
+import {
+  WORKER_APP_NAME_ENV,
+  WORKER_CONTROL_ENV,
+  WORKER_DATABASE_URL_ENV,
+  WORKER_FAILED,
+  WORKER_FENCING_FAILURE,
+  WORKER_READY,
+  WORKER_SHUTDOWN,
+  type WorkerControl,
+} from "./worker-protocol.js";
+
+export interface WorkerModuleContext<C extends WorkerControl> {
+  appName: string;
+  databaseUrl: string;
+  control: C;
+}
+
+export interface WorkerModuleOptions<C extends WorkerControl> {
+  /** Brings the worker up. Resolving prints the ready marker; throwing fails the worker. */
+  start(context: WorkerModuleContext<C>): Promise<unknown>;
+  /** Runs on a `shutdown` line on stdin; defaults to `DBOS.shutdown()`. */
+  shutdown?(): Promise<void>;
+}
+
+/**
+ * Prints the line `spawnWorker()` parses. A fencing refusal gets its own marker carrying the
+ * statement or operation, so a test never has to read a stack trace to see that the step pool
+ * or a control-plane helper refused something.
+ */
+export function reportWorkerFailure(error: unknown): void {
+  const fencing = fencingFailureOf(error);
+  if (fencing !== undefined) {
+    console.error(`${WORKER_FENCING_FAILURE} ${JSON.stringify(fencing)}`);
+    return;
+  }
+  const thrown = error as Error | undefined;
+  console.error(`${WORKER_FAILED} ${thrown?.name ?? "Error"}: ${thrown?.message ?? String(error)}`);
+}
+
+export function workerControl<C extends WorkerControl = WorkerControl>(): C {
+  const raw = process.env[WORKER_CONTROL_ENV];
+  return (raw === undefined || raw === "" ? {} : JSON.parse(raw)) as C;
+}
+
+export async function runWorkerModule<C extends WorkerControl = WorkerControl>(
+  options: WorkerModuleOptions<C>,
+): Promise<void> {
+  // No `unhandledRejection` listener is installed on purpose: whether one exists is itself
+  // under test (redeploy case 11's Sentry half), and a listener here would change the answer.
+  process.on("uncaughtException", (error) => {
+    reportWorkerFailure(error);
+    process.exit(1);
+  });
+
+  const control = workerControl<C>();
+  if (control.drainMs !== undefined && control.drainMs > 0) delayDrain(control.drainMs);
+
+  try {
+    await options.start({
+      appName: required(WORKER_APP_NAME_ENV),
+      databaseUrl: required(WORKER_DATABASE_URL_ENV),
+      control,
+    });
+  } catch (error) {
+    reportWorkerFailure(error);
+    // Writes to a pipe are synchronous on POSIX, so the line above is out before this lands.
+    process.exit(1);
+  }
+  console.log(WORKER_READY);
+
+  // A launched worker's dispatch loops hold the process open; stdin is how a test asks it to
+  // stop without a signal. SIGTERM is `startWorker()`'s own to handle.
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", (chunk: string) => {
+    if (!chunk.includes(WORKER_SHUTDOWN)) return;
+    const shutdown = options.shutdown ?? (() => DBOS.shutdown());
+    shutdown().then(
+      () => process.exit(0),
+      (error: unknown) => {
+        console.error(error);
+        process.exit(1);
+      },
+    );
+  });
+}
+
+/**
+ * Patches `DBOS.shutdown` rather than the stdin handler because the drain a test wants to
+ * lengthen is usually the one `startWorker()`'s SIGTERM handler enters, which this module
+ * never calls. The real shutdown still runs; only its entry is delayed.
+ *
+ * It reaches that handler because `@dbos-inc/dbos-sdk` is pinned to one exact version across
+ * the workspace, so every package links the same copy and `DBOS` is one object in the child.
+ */
+function delayDrain(byMs: number): void {
+  const shutdown = DBOS.shutdown.bind(DBOS);
+  DBOS.shutdown = (options) =>
+    new Promise<void>((resolve) => setTimeout(resolve, byMs)).then(() => shutdown(options));
+}
+
+function required(name: string): string {
+  const value = process.env[name];
+  if (value === undefined || value === "") throw new Error(`${name} is unset`);
+  return value;
+}

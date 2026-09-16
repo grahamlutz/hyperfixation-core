@@ -3,71 +3,22 @@
  * DBOS refuses a second launch in one process (`DBOSConflictingRegistrationError`), so
  * isolation and second-worker cases cannot be driven in-process.
  *
- * Reads `HF_APP_NAME`, `HF_DATABASE_URL`, `HF_FIXTURE_DELAY_SHUTDOWN_MS` and
- * `HF_FIXTURE_REJECT_SHUTDOWN_MS`; `HF_PROCESS` and `HF_BUILD_SHA` are read by
- * `startWorker()` itself and are set by whoever spawns this. Prints `FIXTURE_READY` once
- * launched and `FIXTURE_FAILED <name>: <message>` on any refusal, then waits for either a
- * `FIXTURE_SHUTDOWN` line on stdin or a signal.
- *
- * Chunk 8 replaces this with `@hyperfixation/testing`'s `spawnWorker`/`killAt`.
+ * `@hyperfixation/testing`'s `spawnWorker` runs this and speaks the protocol on the other
+ * side; everything below is what only a `startWorker()` fixture can supply.
  */
 import { DBOS } from "@dbos-inc/dbos-sdk";
+import { runWorkerModule } from "@hyperfixation/testing/worker";
 import { startWorker } from "../start-worker.js";
-import {
-  FIXTURE_FAILED,
-  FIXTURE_READY,
-  FIXTURE_SENTRY_ARMED,
-  FIXTURE_SHUTDOWN,
-} from "./fixture-protocol.js";
+import { SENTRY_ARMED_MARKER, type FixtureControl } from "./fixture-module.js";
 
-try {
-  const delayShutdownMs = Number(process.env.HF_FIXTURE_DELAY_SHUTDOWN_MS ?? "");
-  if (delayShutdownMs > 0) delayShutdown(delayShutdownMs);
+await runWorkerModule<FixtureControl>({
+  async start({ appName, databaseUrl, control }) {
+    const rejectShutdownAfterMs = control.rejectShutdownAfterMs ?? 0;
+    if (rejectShutdownAfterMs > 0) await armRejectingShutdown(rejectShutdownAfterMs);
 
-  const rejectShutdownAfterMs = Number(process.env.HF_FIXTURE_REJECT_SHUTDOWN_MS ?? "");
-  if (rejectShutdownAfterMs > 0) await armRejectingShutdown(rejectShutdownAfterMs);
-
-  await startWorker({
-    appName: required("HF_APP_NAME"),
-    databaseUrl: required("HF_DATABASE_URL"),
-  });
-  console.log(FIXTURE_READY);
-} catch (error) {
-  const thrown = error as Error;
-  console.error(`${FIXTURE_FAILED} ${thrown.name}: ${thrown.message}`);
-  // Writes to a pipe are synchronous on POSIX, so the line above is out before this lands.
-  process.exit(1);
-}
-
-// DBOS's dispatch loops hold the process open; stdin is how a test asks it to stop. SIGTERM is
-// handled by `startWorker()` itself, which is what redeploy case 11 drives.
-process.stdin.setEncoding("utf8");
-process.stdin.on("data", (chunk: string) => {
-  if (!chunk.includes(FIXTURE_SHUTDOWN)) return;
-  DBOS.shutdown().then(
-    () => process.exit(0),
-    (error: unknown) => {
-      console.error(error);
-      process.exit(1);
-    },
-  );
+    return startWorker({ appName, databaseUrl });
+  },
 });
-
-/**
- * Stands in for redeploy case 11's mid-run worker, which chunk 9's flows do not yet exist to
- * provide: with nothing enqueued the drain finishes in under a millisecond and the second
- * SIGTERM arrives after the process is already gone, so the guard is never asked anything.
- * The real `DBOS.shutdown()` still runs; only its entry is delayed.
- *
- * What this reaches is the guard, not node-pg's double `pool.end()` — with the guard removed
- * the second delivery gets its own delay and the first handler's `process.exit(0)` still wins,
- * which is the masking round-3 finding 9 describes. Case 11 discriminates on the marker count.
- */
-function delayShutdown(byMs: number): void {
-  const shutdown = DBOS.shutdown.bind(DBOS);
-  DBOS.shutdown = (options) =>
-    new Promise<void>((resolve) => setTimeout(resolve, byMs)).then(() => shutdown(options));
-}
 
 /**
  * Redeploy case 11's second half. Sentry's `unhandledRejection` listener is the thing that
@@ -96,11 +47,5 @@ async function armRejectingShutdown(afterMs: number): Promise<void> {
       setTimeout(() => reject(new Error("fixture: DBOS.shutdown rejected")), afterMs);
     });
 
-  console.log(FIXTURE_SENTRY_ARMED);
-}
-
-function required(name: string): string {
-  const value = process.env[name];
-  if (value === undefined || value === "") throw new Error(`${name} is unset`);
-  return value;
+  console.log(SENTRY_ARMED_MARKER);
 }
