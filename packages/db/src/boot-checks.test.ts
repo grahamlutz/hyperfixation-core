@@ -104,6 +104,17 @@ describe("boot checks E001-E006", () => {
       expect(failure.code).toBe("E002");
       expect(failure.details).toContain('hf_approval: "widget"');
     });
+
+    it("ignores a row attached to no record at all", async () => {
+      await migrator.query(
+        `INSERT INTO hf_run (run_id, flow, status, current_workflow_id)
+         VALUES ('e002-no-record', 'demo', 'running', 'e002-no-record')`,
+      );
+
+      await expect(
+        checkE002(migrator, [{ table: "widget", recordType: "widget" }]),
+      ).resolves.toBeUndefined();
+    });
   });
 
   describe("E003 — registered record tables carry the trigram index", () => {

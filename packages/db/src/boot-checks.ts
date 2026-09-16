@@ -122,8 +122,10 @@ export async function checkE002(
 
   const failures: string[] = [];
   for (const { table_name } of tableRows) {
+    // A null `record_type` is a row attached to no record — every `hf_run` that is not about
+    // one — not a row naming a type nobody registered.
     const { rows } = (await db.query(
-      `SELECT DISTINCT record_type FROM "${table_name.replace(/"/g, '""')}"`,
+      `SELECT DISTINCT record_type FROM "${table_name.replace(/"/g, '""')}" WHERE record_type IS NOT NULL`,
     )) as { rows: { record_type: string }[] };
     for (const { record_type } of rows) {
       if (!registered.has(record_type)) failures.push(`${table_name}: "${record_type}"`);
