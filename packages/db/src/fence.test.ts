@@ -1,6 +1,18 @@
 import { EventEmitter } from "node:events";
+import { DBOS, DBOSClient } from "@dbos-inc/dbos-sdk";
 import { sql } from "drizzle-orm";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { Pool } from "pg";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  bumpAttempt,
+  CommitLost,
+  ConcurrentBump,
+  ControlPlaneInWorkflow,
+  controlPlaneTx,
+  RunLockTimeout,
+  WorkflowIdCollision,
+  type BumpedAttempt,
+} from "./control-plane.js";
 import { UnfencedWrite, unfencedWriteOf } from "./fenced-client.js";
 import { migrate } from "./migrate.js";
 import { createStepPool, StaleAttempt, type StepDatabase, type StepPool } from "./step-pool.js";
@@ -11,11 +23,17 @@ const RUN_ID = "fence-run";
 const WORKFLOW_ID = "fence-run";
 const READ = "SELECT 1";
 
+/** The queue and flow the bumped attempt would be enqueued on; chunk 9 sources both from the registry. */
+const QUEUE = "llm";
+const FLOW = "demoFlow";
+
 const writeSql = (marker: string) =>
   `UPDATE hf_run SET version = '${marker}' WHERE run_id = '${RUN_ID}'`;
 
 let database: TestDatabase;
 let step: StepPool;
+let control: Pool;
+let dbos: DBOSClient;
 
 /** Reads the marker outside the fence entirely, so it is evidence and not another subject. */
 async function version(): Promise<string | null> {
@@ -78,9 +96,19 @@ beforeAll(async () => {
     );
   });
   step = createStepPool({ connectionString: database.applicationUrl });
+  // The control pool as `startWorker()` builds it: two connections, no fence. Built from `pg`
+  // here rather than through `createControlPool`, which lives behind `src/internal` and is
+  // therefore out of reach of every module the exports map publishes — this file included.
+  control = new Pool({ connectionString: database.applicationUrl, max: 2 });
+  dbos = await DBOSClient.create({
+    systemDatabaseUrl: database.applicationUrl,
+    systemDatabaseSchemaName: "dbos",
+  });
 }, 60_000);
 
 afterAll(async () => {
+  await dbos?.destroy();
+  await control?.end();
   await step?.end();
   await database?.drop();
 });
@@ -344,6 +372,298 @@ describe("ctx.tx", () => {
     await expectRefused(captured.execute(sql.raw(writeSql("after-throw"))));
   });
 });
+
+describe("fence.test.ts case (i) — a bump blocks on a held ctx.tx", () => {
+  it("does not resolve until the held transaction commits", async () => {
+    const runId = await createRun();
+    const held = holdCtxTx(runId);
+    await held.fenced;
+
+    let resolvedAt = 0;
+    const bump = bumpOnce(runId).then((bumped) => {
+      resolvedAt = Date.now();
+      return bumped;
+    });
+
+    await sleep(250);
+    expect(resolvedAt).toBe(0);
+    expect(await runRow(runId)).toMatchObject({ attempt: 1, current_workflow_id: runId });
+
+    const releasedAt = Date.now();
+    await held.release();
+    const bumped = await bump;
+
+    expect(resolvedAt).toBeGreaterThanOrEqual(releasedAt);
+    expect(bumped).toMatchObject({ attempt: 2, workflowId: `${runId}:2` });
+    expect(await runRow(runId)).toMatchObject({ attempt: 2, status: "running" });
+  });
+});
+
+describe("fence.test.ts case (ii) — ctx.tx on the attempt the bump moved past", () => {
+  it("throws StaleAttempt before any write", async () => {
+    const runId = await createRun();
+    await bumpOnce(runId);
+
+    let ran = false;
+    await expect(
+      step.tx(runId, runId, async (tx) => {
+        ran = true;
+        await tx.execute(sql.raw(`UPDATE hf_run SET version = 'ii' WHERE run_id = '${runId}'`));
+      }),
+    ).rejects.toBeInstanceOf(StaleAttempt);
+
+    expect(ran).toBe(false);
+    expect(await runRow(runId)).toMatchObject({ version: null });
+  });
+});
+
+describe("fence.test.ts case (iii) — the compare-and-set", () => {
+  it("lets exactly one of two bumps that read the same attempt win", async () => {
+    const runId = await createRun();
+
+    const settled = await controlPlaneTx(control, { operation: "case-iii" }, (client) =>
+      // Issued together on one connection so both reads land before either write. Every bump
+      // holds `FOR UPDATE`, so a bump on a second connection would wait and then re-read the
+      // bumped row — it would reach attempt 3, not the compare-and-set. `allSettled` swallows
+      // nothing Postgres raised: a row count of 0 is an answer, not an error, so the
+      // transaction is not aborted and the commit below is a real one.
+      Promise.allSettled([bumpAttempt(client, runId), bumpAttempt(client, runId)]),
+    );
+
+    const won = settled.filter((outcome) => outcome.status === "fulfilled");
+    const lost = settled.filter((outcome) => outcome.status === "rejected");
+    expect(won).toHaveLength(1);
+    expect((won[0] as PromiseFulfilledResult<BumpedAttempt>).value).toMatchObject({
+      attempt: 2,
+      workflowId: `${runId}:2`,
+    });
+    expect(lost).toHaveLength(1);
+    expect((lost[0] as PromiseRejectedResult).reason).toBeInstanceOf(ConcurrentBump);
+
+    expect(await runRow(runId)).toMatchObject({ attempt: 2, current_workflow_id: `${runId}:2` });
+  });
+});
+
+describe("fence.test.ts case (iv) — the workflow id existence assert", () => {
+  it("throws WorkflowIdCollision and rolls the bump back", async () => {
+    const runId = await createRun();
+    await dbos.enqueue({ queueName: QUEUE, workflowName: FLOW, workflowID: `${runId}:2` }, { runId });
+
+    await expect(bumpOnce(runId)).rejects.toBeInstanceOf(WorkflowIdCollision);
+
+    expect(await runRow(runId)).toMatchObject({ attempt: 1, current_workflow_id: runId });
+  });
+});
+
+describe("fence.test.ts case (v) — a swallowed failure inside a control-plane transaction", () => {
+  it("throws CommitLost from the commit and persists nothing", async () => {
+    const runId = await createRun();
+
+    const error = await controlPlaneTx(control, { operation: "case-v" }, async (client) => {
+      await client.query("UPDATE hf_run SET version = 'v-lost' WHERE run_id = $1", [runId]);
+      try {
+        // The shape the rule exists for: the audit insert of a control-plane operation fails
+        // and its error is caught. From here Postgres answers COMMIT with a ROLLBACK tag.
+        await client.query(
+          "INSERT INTO hf_run (run_id, flow, status, current_workflow_id) VALUES ($1, 'demo', 'running', $1)",
+          [runId],
+        );
+      } catch {
+        /* swallowed on purpose: this is the rule being broken */
+      }
+    }).then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
+
+    expect(error).toBeInstanceOf(CommitLost);
+    expect((error as CommitLost).commandTag).toBe("ROLLBACK");
+    expect(await runRow(runId)).toMatchObject({ version: null });
+  });
+});
+
+describe("fence.test.ts case (vii) — control-plane operations", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("refuses both stand-ins from inside a workflow, before any statement", async () => {
+    const runId = await createRun();
+    vi.spyOn(DBOS, "isWithinWorkflow").mockReturnValue(true);
+    const connect = vi.spyOn(control, "connect");
+
+    await expect(decide(runId)).rejects.toBeInstanceOf(ControlPlaneInWorkflow);
+    await expect(archive(runId)).rejects.toBeInstanceOf(ControlPlaneInWorkflow);
+
+    expect(connect).not.toHaveBeenCalled();
+    expect(await runRow(runId)).toMatchObject({ attempt: 1, status: "running" });
+  });
+
+  it("fails with 55P03 naming the run when it waits out the lock_timeout on a held ctx.tx", async () => {
+    const runId = await createRun();
+    const held = holdCtxTx(runId);
+    await held.fenced;
+
+    const error = await decide(runId, "250ms").then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
+    await held.release();
+
+    expect(error).toBeInstanceOf(RunLockTimeout);
+    expect((error as RunLockTimeout).code).toBe("55P03");
+    expect((error as RunLockTimeout).message).toContain(runId);
+    expect(((error as RunLockTimeout).cause as { code?: string }).code).toBe("55P03");
+    expect(await runRow(runId)).toMatchObject({ attempt: 1, current_workflow_id: runId });
+  });
+});
+
+describe("the bump path and enqueueInTransaction", () => {
+  it("enqueues the new attempt in the bump's own transaction", async () => {
+    const runId = await createRun();
+
+    const bumped = await controlPlaneTx(control, { operation: "runs.resume" }, async (client) => {
+      const bump = await bumpAttempt(client, runId);
+      await dbos.enqueueInTransaction(
+        client,
+        { queueName: QUEUE, workflowName: bump.flow, workflowID: bump.workflowId },
+        { runId, attempt: bump.attempt, input: bump.input },
+      );
+      return bump;
+    });
+
+    expect(bumped).toMatchObject({ flow: FLOW, workflowId: `${runId}:2` });
+    expect(await workflowStatus(bumped.workflowId)).toMatchObject({
+      status: "ENQUEUED",
+      queue_name: QUEUE,
+    });
+  });
+
+  it("leaves no workflow row when the transaction rolls back", async () => {
+    const runId = await createRun();
+
+    await expect(
+      controlPlaneTx(control, { operation: "runs.resume" }, async (client) => {
+        const bump = await bumpAttempt(client, runId);
+        await dbos.enqueueInTransaction(
+          client,
+          { queueName: QUEUE, workflowName: bump.flow, workflowID: bump.workflowId },
+          { runId, attempt: bump.attempt, input: bump.input },
+        );
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+
+    expect(await workflowStatus(`${runId}:2`)).toBeUndefined();
+    expect(await runRow(runId)).toMatchObject({ attempt: 1, current_workflow_id: runId });
+  });
+});
+
+describe("redeploy case 8's unit half — the bump path driven twice", () => {
+  it("moves the fencing token to :2 and then :3", async () => {
+    const runId = await createRun();
+
+    expect(await bumpOnce(runId)).toMatchObject({ previousAttempt: 1, attempt: 2 });
+    expect(await runRow(runId)).toMatchObject({ attempt: 2, current_workflow_id: `${runId}:2` });
+
+    expect(await bumpOnce(runId)).toMatchObject({ previousAttempt: 2, attempt: 3 });
+    expect(await runRow(runId)).toMatchObject({ attempt: 3, current_workflow_id: `${runId}:3` });
+  });
+});
+
+/**
+ * Stand-ins for the two control-plane operations case (vii) names: `approvals.decide()` lands at
+ * chunk 12 and `records.archive()` at chunk 13. What (vii) is about is the helper's guard and its
+ * lock bound, which is all either of them has here.
+ */
+function decide(runId: string, lockTimeout?: string): Promise<BumpedAttempt> {
+  return controlPlaneTx(control, { operation: "approvals.decide", lockTimeout }, (client) =>
+    bumpAttempt(client, runId),
+  );
+}
+
+function archive(runId: string): Promise<void> {
+  return controlPlaneTx(control, { operation: "records.archive" }, async (client) => {
+    await client.query("UPDATE hf_run SET record_id = NULL WHERE run_id = $1", [runId]);
+  });
+}
+
+function bumpOnce(runId: string): Promise<BumpedAttempt> {
+  return controlPlaneTx(control, { operation: "reconcile" }, (client) => bumpAttempt(client, runId));
+}
+
+/** A `ctx.tx` parked after its fence statement, holding `FOR SHARE` on the run's row. */
+function holdCtxTx(runId: string): { fenced: Promise<void>; release: () => Promise<void> } {
+  let fenced!: () => void;
+  let release!: () => void;
+  const fencedAt = new Promise<void>((resolve) => {
+    fenced = resolve;
+  });
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const transaction = step.tx(runId, runId, async () => {
+    fenced();
+    await released;
+  });
+
+  return {
+    fenced: fencedAt,
+    release: async () => {
+      release();
+      await transaction;
+    },
+  };
+}
+
+let runs = 0;
+
+/** A fresh `hf_run` row per case, so a bump never moves the row case (vi) fences against. */
+async function createRun(): Promise<string> {
+  const runId = `bump-run-${++runs}`;
+  await asRole(database.applicationUrl, async (client) => {
+    await client.query(
+      `INSERT INTO hf_run (run_id, flow, input, status, attempt, current_workflow_id)
+       VALUES ($1, $2, $3, 'running', 1, $1)`,
+      [runId, FLOW, JSON.stringify({ run: runId })],
+    );
+  });
+  return runId;
+}
+
+interface RunRow {
+  attempt: number;
+  current_workflow_id: string;
+  status: string;
+  version: string | null;
+}
+
+/** Reads the row on a connection of its own, so an assertion never joins the transaction. */
+async function runRow(runId: string): Promise<RunRow> {
+  return asRole(database.applicationUrl, async (client) => {
+    const { rows } = await client.query<RunRow>(
+      "SELECT attempt, current_workflow_id, status, version FROM hf_run WHERE run_id = $1",
+      [runId],
+    );
+    return rows[0]!;
+  });
+}
+
+async function workflowStatus(
+  workflowId: string,
+): Promise<{ status: string; queue_name: string | null } | undefined> {
+  return asRole(database.applicationUrl, async (client) => {
+    const { rows } = await client.query<{ status: string; queue_name: string | null }>(
+      "SELECT status, queue_name FROM dbos.workflow_status WHERE workflow_uuid = $1",
+      [workflowId],
+    );
+    return rows[0];
+  });
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 async function backendPid(db: StepDatabase): Promise<number> {
   const result = await db.execute<{ pid: number }>(sql`SELECT pg_backend_pid() AS pid`);

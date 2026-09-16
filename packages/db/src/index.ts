@@ -10,6 +10,25 @@ export {
   type StepPool,
   type StepPoolOptions,
 } from "./step-pool.js";
+export {
+  assertNotInWorkflow,
+  attemptWorkflowId,
+  bumpAttempt,
+  controlPlaneTx,
+  CommitLost,
+  ConcurrentBump,
+  ControlPlaneInWorkflow,
+  RunLockTimeout,
+  RunNotFound,
+  WorkflowIdCollision,
+  CONTROL_PLANE_LOCK_TIMEOUT,
+  LOCK_NOT_AVAILABLE,
+  BUMP_STATEMENT,
+  LOCK_RUN_STATEMENT,
+  WORKFLOW_ID_TAKEN_STATEMENT,
+  type BumpedAttempt,
+  type ControlPlaneTxOptions,
+} from "./control-plane.js";
 /** `runBootChecks` takes these, so the type travels with `.` even though the guards do not. */
 export type { RecordTable } from "./delete-guard.js";
 export {
