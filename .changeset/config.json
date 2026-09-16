@@ -1,0 +1,22 @@
+{
+  "$schema": "https://unpkg.com/@changesets/config@3.0.0/schema.json",
+  "changelog": "@changesets/cli/changelog",
+  "commit": false,
+  "fixed": [
+    [
+      "@hyperfixation/db",
+      "@hyperfixation/core",
+      "@hyperfixation/ai",
+      "@hyperfixation/workflows",
+      "@hyperfixation/auth",
+      "@hyperfixation/admin",
+      "@hyperfixation/testing",
+      "@hyperfixation/cli"
+    ]
+  ],
+  "linked": [],
+  "access": "public",
+  "baseBranch": "main",
+  "updateInternalDependencies": "patch",
+  "ignore": []
+}
