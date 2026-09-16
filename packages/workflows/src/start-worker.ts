@@ -31,6 +31,19 @@ export type QueueName = (typeof QUEUES)[number]["name"];
 export const LAUNCHING_MARKER = "hf-worker: calling DBOS.launch";
 export const LAUNCHED_MARKER = "hf-worker: DBOS launched";
 
+/** One per SIGTERM the handler acts on; redeploy case 11 counts them. */
+export const SHUTDOWN_MARKER = "hf-worker: SIGTERM, calling DBOS.shutdown";
+export const SHUTDOWN_IGNORED_MARKER = "hf-worker: SIGTERM ignored, already draining";
+export const SHUTDOWN_FAILED_MARKER = "hf-worker: DBOS.shutdown rejected";
+
+/** How long the drain waits for workflows running here before it abandons them. */
+export const DRAIN_TIMEOUT_MS = 60_000;
+/**
+ * The handler's own bound, past the drain. Compose's `stop_grace_period: 90s` SIGKILL is the
+ * line after this one, and the advisory lock is released by neither before the process dies.
+ */
+export const SHUTDOWN_WATCHDOG_MS = 75_000;
+
 export class NotAWorkerProcess extends Error {
   readonly hfProcess: string | undefined;
 
@@ -112,6 +125,9 @@ export async function startWorker(options: StartWorkerOptions): Promise<Worker> 
       runMigrations: false,
     });
 
+    // Installed before `launch`, so a SIGTERM arriving during it is this process's to drain.
+    process.on("SIGTERM", handleSigterm);
+
     console.info(LAUNCHING_MARKER, applicationVersion);
     await DBOS.launch();
     console.info(LAUNCHED_MARKER, applicationVersion);
@@ -133,6 +149,44 @@ export async function startWorker(options: StartWorkerOptions): Promise<Worker> 
     await control.end().catch(() => undefined);
     throw error;
   }
+}
+
+/**
+ * Process-wide rather than per-worker because `DBOS.shutdown()` is static and carries no
+ * re-entry guard of its own: a second delivery that reached it ends in node-pg's "Called end
+ * on pool more than once" (round-3 finding 9).
+ */
+let shuttingDown = false;
+
+/**
+ * Deliberately not `async`. An `await`ed `DBOS.shutdown()` that rejects leaves an unhandled
+ * rejection, which Sentry's default listener swallows — the process then sits out the whole
+ * watchdog instead of exiting (round-3 finding 10). `.then()` with both arms explicit never
+ * produces one.
+ *
+ * The lock connection is untouched here on purpose: the drain abandons unfinished workflows,
+ * so step bodies of this process can still be writing, and process death is the only release
+ * of the advisory lock that cannot let the next worker in underneath them.
+ */
+function handleSigterm(): void {
+  if (shuttingDown) {
+    console.info(SHUTDOWN_IGNORED_MARKER);
+    return;
+  }
+  shuttingDown = true;
+
+  // Armed before anything that could yield, so a `shutdown()` that never settles still ends
+  // the process. `unref` so the watchdog is never itself a reason to stay up.
+  setTimeout(() => process.exit(1), SHUTDOWN_WATCHDOG_MS).unref();
+
+  console.info(SHUTDOWN_MARKER);
+  DBOS.shutdown({ workflowCompletionTimeoutMS: DRAIN_TIMEOUT_MS }).then(
+    () => process.exit(0),
+    (error: unknown) => {
+      console.error(SHUTDOWN_FAILED_MARKER, error);
+      process.exit(1);
+    },
+  );
 }
 
 function requireBuildSha(): string {

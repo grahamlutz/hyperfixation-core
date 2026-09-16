@@ -17,6 +17,13 @@ export interface FixtureOptions {
   buildSha: string;
   /** Overridden only to prove the guard; defaults to the one value that may launch DBOS. */
   hfProcess?: string;
+  /** Holds the fixture's drain open this long before the real `DBOS.shutdown()` is entered. */
+  delayShutdownMs?: number;
+  /**
+   * Makes the fixture's `DBOS.shutdown()` reject after this many ms behind Sentry's
+   * `unhandledRejection` listener — redeploy case 11's second half.
+   */
+  rejectShutdownAfterMs?: number;
 }
 
 export interface Fixture {
@@ -40,6 +47,8 @@ export function spawnFixture(options: FixtureOptions): Fixture {
       HF_BUILD_SHA: options.buildSha,
       HF_APP_NAME: options.appName,
       HF_DATABASE_URL: options.databaseUrl,
+      HF_FIXTURE_DELAY_SHUTDOWN_MS: options.delayShutdownMs?.toString() ?? "",
+      HF_FIXTURE_REJECT_SHUTDOWN_MS: options.rejectShutdownAfterMs?.toString() ?? "",
     },
   });
 
