@@ -20,6 +20,7 @@
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
+    "@dbos-inc/dbos-sdk": "4.27.6",
     "drizzle-orm": "^0.45.2",
     "pg": "^8.23.0",
     "pg-copy-streams": "^7.0.0",
