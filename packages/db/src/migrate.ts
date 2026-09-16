@@ -41,9 +41,9 @@ export interface MigrateOptions {
    * Runs step 3 as `dbos schema -s dbos` with no `-r`. Exists only so a test can
    * reproduce the deployment mistake E006 catches: the system schema is created
    * and the application role is granted nothing on it. A real deploy that sets
-   * this produces a worker that cannot launch.
+   * this produces a worker that cannot launch — the name is loud on purpose.
    */
-  skipApplicationRoleGrant?: boolean;
+  dangerouslySkipApplicationRoleGrant?: boolean;
 }
 
 export interface MigrateResult {
@@ -91,7 +91,7 @@ export async function migrate(
       await drizzleMigrate(db, { migrationsFolder: options.appMigrationsDir });
     }
 
-    const grantTo = options.skipApplicationRoleGrant === true ? null : applicationRole;
+    const grantTo = options.dangerouslySkipApplicationRoleGrant === true ? null : applicationRole;
     await runDbosSchema(migratorConnectionString, grantTo);
 
     const deleteGuards = await installDeleteGuards(client, options.recordTables ?? []);

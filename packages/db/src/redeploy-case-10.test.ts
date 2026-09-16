@@ -58,7 +58,7 @@ describe("redeploy case 10 — dbos grants", () => {
 
     beforeAll(async () => {
       db = await createTestDatabase();
-      await migrate(db.migratorUrl, { appName: db.appName, skipApplicationRoleGrant: true });
+      await migrate(db.migratorUrl, { appName: db.appName, dangerouslySkipApplicationRoleGrant: true });
     }, 60_000);
 
     afterAll(async () => {
