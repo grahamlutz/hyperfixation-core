@@ -1,6 +1,5 @@
 import { EventEmitter } from "node:events";
 import { sql } from "drizzle-orm";
-import type { PoolClient } from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { UnfencedWrite, unfencedWriteOf } from "./fenced-client.js";
 import { migrate } from "./migrate.js";
@@ -214,25 +213,12 @@ describe("fence.test.ts case (vi) — the six escape shapes", () => {
 
   describe("(e) drizzle's own db.transaction on the step pool", () => {
     /**
-     * Drizzle releases the client in a `finally` that only guards the body — a `BEGIN` that
-     * throws leaks the checkout — so the test reclaims it through the pool's `acquire` event
-     * rather than letting the leak drain the pool.
+     * Drizzle's own `db.transaction()` checks a client out and issues `BEGIN` before opening
+     * the try/finally that would release it, so a refusal here would leak the checkout if the
+     * fence didn't release proactively (see `fenceClient`'s `query`) — no workaround needed.
      */
-    async function transactionOnPool(work: (tx: StepDatabase) => Promise<unknown>) {
-      let acquired: PoolClient | undefined;
-      let leaked = true;
-      const capture = (client: PoolClient) => {
-        acquired = client;
-      };
-      step.pool.once("acquire", capture);
-      try {
-        const result = await step.db.transaction(work as never);
-        leaked = false;
-        return result;
-      } finally {
-        step.pool.removeListener("acquire", capture);
-        if (leaked) acquired?.release();
-      }
+    function transactionOnPool(work: (tx: StepDatabase) => Promise<unknown>) {
+      return step.db.transaction(work as never);
     }
 
     it("refuses the BEGIN, so the transaction never opens", async () => {
@@ -251,6 +237,26 @@ describe("fence.test.ts case (vi) — the six escape shapes", () => {
 
     it("commits the same write inside ctx.tx, the one sanctioned transaction", async () => {
       await insideCtxTx("e-inside");
+    });
+
+    it("does not leak the checkout: refusing db.transaction() many times over never exhausts the pool", async () => {
+      const solo = createStepPool({ connectionString: database.applicationUrl, max: 1 });
+      try {
+        for (let i = 0; i < 5; i++) {
+          await expectRefused(
+            solo.db.transaction(async (tx) => (tx as StepDatabase).execute(sql.raw(READ + " -- e-repeat"))),
+          );
+        }
+        // If any earlier refusal had leaked its checkout, a max:1 pool would hang here.
+        await expect(
+          Promise.race([
+            solo.pool.query(READ),
+            new Promise((_, reject) => setTimeout(() => reject(new Error("timed out")), 2_000)),
+          ]),
+        ).resolves.toBeDefined();
+      } finally {
+        await solo.end();
+      }
     });
   });
 

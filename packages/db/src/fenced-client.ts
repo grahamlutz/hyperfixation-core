@@ -96,18 +96,30 @@ function guard(args: unknown[], tagged: boolean): string | undefined {
  */
 function fenceClient(client: PoolClient): PoolClient {
   const fence: Fence = { client, lease: Symbol("hyperfixation.lease") };
+  let released = false;
+
+  // Untagging here rather than in `ctx.tx` makes it structural: no path returns a
+  // connection to the pool still carrying this checkout's tag. Idempotent because a refused
+  // query also releases (see below) — a caller's own release-in-finally must then be a no-op,
+  // not a double-release.
+  const release = (err?: Error | boolean): void => {
+    if (released) return;
+    released = true;
+    if (isTagged(fence)) taggedLease.delete(fence.client);
+    client.release(err);
+  };
 
   const query = (...args: unknown[]): unknown => {
     const refused = guard(args, isTagged(fence));
-    if (refused !== undefined) return refuse(args, refused);
+    if (refused !== undefined) {
+      // A refused statement never reaches the real connection, so it is always safe to hand
+      // straight back here. Without this, Drizzle's own `db.transaction()` leaks a checkout on
+      // every refusal: it checks a client out and issues `BEGIN` before opening the try/finally
+      // that would otherwise release it, so a refusal here would strand the connection forever.
+      release();
+      return refuse(args, refused);
+    }
     return (client.query as (...a: unknown[]) => unknown).apply(client, args);
-  };
-
-  // Untagging here rather than in `ctx.tx` makes it structural: no path returns a
-  // connection to the pool still carrying this checkout's tag.
-  const release = (err?: Error | boolean): void => {
-    if (isTagged(fence)) taggedLease.delete(fence.client);
-    client.release(err);
   };
 
   return new Proxy(client, {
