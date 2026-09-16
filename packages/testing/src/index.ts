@@ -15,14 +15,20 @@ export {
   type SpawnWorkerOptions,
   type WorkerExit,
 } from "./spawn-worker.js";
+export { killAt, killWhenParked } from "./kill-at.js";
 export {
+  parkedMarker,
   WORKER_APP_NAME_ENV,
   WORKER_CONTROL_ENV,
   WORKER_DATABASE_URL_ENV,
   WORKER_FAILED,
   WORKER_FENCING_FAILURE,
+  WORKER_PARKED,
   WORKER_READY,
+  WORKER_RELEASE,
   WORKER_SHUTDOWN,
+  type KillAtControl,
+  type KillAtMode,
   type WorkerControl,
 } from "./worker-protocol.js";
 export {

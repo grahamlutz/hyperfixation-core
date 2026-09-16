@@ -2,6 +2,7 @@ import { DBOS, type WorkflowQueue } from "@dbos-inc/dbos-sdk";
 import { createStepPool, runBootChecks, type RecordTable, type StepPool } from "@hyperfixation/db";
 import { createControlPool, type ControlPool } from "./control-pool.js";
 import { acquireWorkerLock, type WorkerLock } from "./worker-lock.js";
+import { setWorkerRuntime } from "./worker-runtime.js";
 
 /** The value of `HF_PROCESS` in the one process shape allowed to launch DBOS. */
 export const WORKER_PROCESS = "worker";
@@ -108,6 +109,10 @@ export async function startWorker(options: StartWorkerOptions): Promise<Worker> 
 
   const steps = createStepPool({ connectionString: options.databaseUrl });
   const control = createControlPool({ connectionString: options.databaseUrl });
+
+  // Before the lock and launch: DBOS recovery can run a flow the instant `launch()` returns,
+  // and a recovered flow reaches `workerRuntime()` the same as a freshly dispatched one.
+  setWorkerRuntime({ appName: options.appName, applicationVersion, steps, control });
 
   try {
     const lock = await acquireWorkerLock(options.databaseUrl, options.appName);

@@ -10,6 +10,7 @@ import {
   WORKER_FAILED,
   WORKER_FENCING_FAILURE,
   WORKER_READY,
+  WORKER_RELEASE,
   WORKER_SHUTDOWN,
   type WorkerControl,
 } from "./worker-protocol.js";
@@ -66,6 +67,8 @@ export interface SpawnedWorker {
   readonly exited: Promise<WorkerExit>;
   /** Writes one line to the worker's stdin. */
   send(line: string): void;
+  /** Lets a worker parked by `parkFor()` carry on from where it stopped. */
+  release(): void;
   /** Asks for a clean shutdown over stdin; resolves with the exit. */
   shutdown(): Promise<WorkerExit>;
   /** `SIGKILL`, which is also how a worker's advisory lock is released in production. */
@@ -206,6 +209,9 @@ export function spawnWorker(options: SpawnWorkerOptions): SpawnedWorker {
     exit: () => exit,
     exited,
     send,
+    release(): void {
+      send(WORKER_RELEASE);
+    },
     shutdown(): Promise<WorkerExit> {
       send(WORKER_SHUTDOWN);
       return exited;

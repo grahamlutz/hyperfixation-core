@@ -29,6 +29,18 @@ export function getClient(options: GetClientOptions): Promise<DBOSClient> {
   return client;
 }
 
+/**
+ * Drops the cached client so the next `getClient()` call creates a fresh one. A real process
+ * has one `databaseUrl` for its whole life and never needs this; it exists for tests that spin
+ * up more than one database in a single process, where the cache would otherwise hand a later
+ * test a client still bound to an earlier test's already-dropped database.
+ */
+export async function resetClient(): Promise<void> {
+  const current = client;
+  client = undefined;
+  await current?.then((c) => c.destroy()).catch(() => undefined);
+}
+
 async function createClient(options: GetClientOptions): Promise<DBOSClient> {
   await runBootChecks({
     databaseUrl: options.databaseUrl,

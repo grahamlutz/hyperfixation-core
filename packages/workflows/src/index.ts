@@ -18,8 +18,22 @@ export {
   type StartWorkerOptions,
   type Worker,
 } from "./start-worker.js";
-export { getClient, CLIENT_POOL_SIZE, type GetClientOptions } from "./client.js";
+export { getClient, resetClient, CLIENT_POOL_SIZE, type GetClientOptions } from "./client.js";
 export { WorkerLockUnavailable, type WorkerLock } from "./worker-lock.js";
+export {
+  defineFlow,
+  definedFlows,
+  DuplicateFlow,
+  UnknownQueue,
+  SUPERSEDED_MARKER,
+  type DefineFlowOptions,
+  type Flow,
+  type FlowArgs,
+} from "./define-flow.js";
+export { step, STEP_GATE_STATEMENT, type StepContext, type StepOptions } from "./step.js";
+export { Suspend, SUSPEND_STATUSES, type SuspendStatus } from "./suspend.js";
+export { currentRun, OutsideRun, type RunContext } from "./run-context.js";
+export { runsStart, START_RUN_STATEMENT, type RunsStartOptions, type StartedRun } from "./runs.js";
 /**
  * The types travel with `Worker`, the factory does not: `startWorker()` is the only way to
  * get a control pool, which is what keeps "no export resolves to the control pool" true of

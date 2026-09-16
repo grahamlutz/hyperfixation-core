@@ -7,13 +7,17 @@
 import { DBOS } from "@dbos-inc/dbos-sdk";
 import { fencingFailureOf } from "./fencing.js";
 import {
+  parkedMarker,
   WORKER_APP_NAME_ENV,
   WORKER_CONTROL_ENV,
   WORKER_DATABASE_URL_ENV,
   WORKER_FAILED,
   WORKER_FENCING_FAILURE,
   WORKER_READY,
+  WORKER_RELEASE,
   WORKER_SHUTDOWN,
+  type KillAtControl,
+  type KillAtMode,
   type WorkerControl,
 } from "./worker-protocol.js";
 
@@ -50,6 +54,35 @@ export function workerControl<C extends WorkerControl = WorkerControl>(): C {
   return (raw === undefined || raw === "" ? {} : JSON.parse(raw)) as C;
 }
 
+const parked = new Set<() => void>();
+
+/**
+ * The child half of `killAt`. A flow module calls this at each of the three points and the
+ * call that matches the worker's `killAt` control prints the marker and then **stops** —
+ * every mode is a park, never a timing guess, so the parent decides what happens next
+ * (`killWhenParked()` for a crash, `release()` to carry on) with the worker demonstrably
+ * still at that exact point.
+ */
+export async function parkFor(
+  at: KillAtControl | undefined,
+  mode: KillAtMode,
+  key: string,
+): Promise<void> {
+  if (at === undefined || at.mode !== mode || at.key !== key) return;
+  await new Promise<void>((resolve) => {
+    parked.add(resolve);
+    console.log(parkedMarker(at));
+  });
+}
+
+/** Lets every parked `parkFor()` go; the `release` line on stdin calls this. */
+export function releaseParked(): void {
+  for (const resolve of [...parked]) {
+    parked.delete(resolve);
+    resolve();
+  }
+}
+
 export async function runWorkerModule<C extends WorkerControl = WorkerControl>(
   options: WorkerModuleOptions<C>,
 ): Promise<void> {
@@ -80,6 +113,7 @@ export async function runWorkerModule<C extends WorkerControl = WorkerControl>(
   // stop without a signal. SIGTERM is `startWorker()`'s own to handle.
   process.stdin.setEncoding("utf8");
   process.stdin.on("data", (chunk: string) => {
+    if (chunk.includes(WORKER_RELEASE)) releaseParked();
     if (!chunk.includes(WORKER_SHUTDOWN)) return;
     const shutdown = options.shutdown ?? (() => DBOS.shutdown());
     shutdown().then(
