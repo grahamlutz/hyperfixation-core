@@ -5,3 +5,5 @@ dist/
 .env
 .env.*
 !.env.example
+.drizzle-journal-check/
+.claude/worktrees/
