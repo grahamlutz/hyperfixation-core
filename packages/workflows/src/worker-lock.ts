@@ -21,15 +21,18 @@ export class WorkerLockUnavailable extends Error {
   }
 }
 
+/**
+ * `Client` with `end` typed away. The lock must not be free while any step body of this
+ * process can still write — `DBOS.shutdown()`'s drain abandons unfinished workflows, so the
+ * only safe release is process death (round-2 finding 1, process half). Omitting `end` makes
+ * "never closed by code" a type error for any caller, not just a doc comment the SIGTERM
+ * handler has to remember to honor.
+ */
+export type HeldLockConnection = Omit<Client, "end">;
+
 export interface WorkerLock {
   readonly appName: string;
-  /**
-   * **Never closed by code.** The lock must not be free while any step body of this process
-   * can still write — `DBOS.shutdown()`'s drain abandons unfinished workflows, so the only
-   * safe release is process death (round-2 finding 1, process half). The SIGTERM handler must
-   * leave this connection alone.
-   */
-  readonly connection: Client;
+  readonly connection: HeldLockConnection;
 }
 
 /**
