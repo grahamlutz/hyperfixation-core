@@ -184,7 +184,33 @@ importers:
 
   packages/admin: {}
 
-  packages/ai: {}
+  packages/ai:
+    dependencies:
+      '@ai-sdk/provider':
+        specifier: ^4.0.15
+        version: 4.0.15
+      '@hyperfixation/db':
+        specifier: workspace:*
+        version: link:../db
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(pg@8.23.0)
+      pg:
+        specifier: ^8.23.0
+        version: 8.23.0
+    devDependencies:
+      '@dbos-inc/dbos-sdk':
+        specifier: 4.27.6
+        version: 4.27.6
+      '@hyperfixation/testing':
+        specifier: workspace:*
+        version: link:../testing
+      '@hyperfixation/workflows':
+        specifier: workspace:*
+        version: link:../workflows
+      '@types/pg':
+        specifier: ^8.23.1
+        version: 8.23.1
 
   packages/auth: {}
 

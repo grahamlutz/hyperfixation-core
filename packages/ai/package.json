@@ -17,5 +17,17 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@ai-sdk/provider": "^4.0.15",
+    "@hyperfixation/db": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "pg": "^8.23.0"
+  },
+  "devDependencies": {
+    "@dbos-inc/dbos-sdk": "4.27.6",
+    "@hyperfixation/testing": "workspace:*",
+    "@hyperfixation/workflows": "workspace:*",
+    "@types/pg": "^8.23.1"
   }
 }
