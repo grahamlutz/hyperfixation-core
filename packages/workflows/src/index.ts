@@ -31,6 +31,16 @@ export {
   type FlowArgs,
 } from "./define-flow.js";
 export { step, STEP_GATE_STATEMENT, type StepContext, type StepOptions } from "./step.js";
+export {
+  actions,
+  perform,
+  idempotencyKey,
+  stubChannel,
+  type ActionChannel,
+  type ActionDispatch,
+  type ActionResult,
+  type ActionsPerformOptions,
+} from "./actions.js";
 export { Suspend, SUSPEND_STATUSES, type SuspendStatus } from "./suspend.js";
 export { currentRun, OutsideRun, type RunContext } from "./run-context.js";
 export { runsStart, START_RUN_STATEMENT, type RunsStartOptions, type StartedRun } from "./runs.js";
