@@ -33,6 +33,22 @@ export interface LedgerRow {
   finished_at: Date | null;
 }
 
+export interface ApprovalRow {
+  id: string;
+  key: string;
+  status: string;
+  decided_by: string | null;
+  decided_via: string | null;
+  decision_key: string | null;
+  resume_workflow_id: string | null;
+}
+
+export interface ActionRow {
+  key: string;
+  status: string;
+  idempotency_key: string;
+}
+
 export interface RunRow {
   status: string;
   attempt: number;
@@ -60,6 +76,37 @@ export async function ledgerRows(probe: LedgerProbe, runId: string): Promise<Led
     [runId],
   );
   return rows;
+}
+
+export async function approvalRows(
+  probe: LedgerProbe,
+  runId: string,
+): Promise<ApprovalRow[]> {
+  const { rows } = await probe.pool.query<ApprovalRow>(
+    "SELECT id, key, status, decided_by, decided_via, decision_key, resume_workflow_id " +
+      "FROM hf_approval WHERE run_id = $1 ORDER BY id",
+    [runId],
+  );
+  return rows;
+}
+
+export async function actionRows(probe: LedgerProbe, runId: string): Promise<ActionRow[]> {
+  const { rows } = await probe.pool.query<ActionRow>(
+    "SELECT key, status, idempotency_key FROM hf_action_log WHERE run_id = $1 ORDER BY key",
+    [runId],
+  );
+  return rows;
+}
+
+export async function workflowRow(
+  probe: LedgerProbe,
+  workflowId: string,
+): Promise<{ status: string } | undefined> {
+  const { rows } = await probe.pool.query<{ status: string }>(
+    "SELECT status FROM dbos.workflow_status WHERE workflow_uuid = $1",
+    [workflowId],
+  );
+  return rows[0];
 }
 
 export async function currentPeriod(probe: LedgerProbe): Promise<string> {
