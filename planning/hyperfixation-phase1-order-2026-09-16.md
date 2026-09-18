@@ -18,9 +18,9 @@ and drifted silently through chunks 11–13 until this pass.
 | 🚧 In progress | partially built |
 | ⬜ Not started | nothing built yet |
 
-**Where the spine stands:** chunks 0–13 are ✅; chunk 14 is ⬜; tracks A–E are all ⬜. Ten of the twelve
-redeploy cases are written and committed; cases 5 (track A) and 7 (chunk 8b's harness exists, the case does
-not) are unwritten.
+**Where the spine stands:** chunks 0–13 are ✅; chunk 14 is 🚧; tracks A–E are all ⬜. Eleven of the twelve
+redeploy cases are written and committed; only case 5 — track A's done-check, which is a lint assertion and
+has no database dependency at all — is unwritten. Case 7 landed at e6bde42.
 
 **What this pass verified, and what it did not.** Every marker below was set by reading the source and the
 commit diffs — `packages/{db,ai,workflows,core}/src`, the migrations, and `git log -p` on the files in
@@ -291,7 +291,8 @@ the expected DBOS checkpoint state in each.
 > own, because `killAt` has nothing to park in until `step()` exists. The three-mode smoke test lives in
 > `packages/workflows/src/chunk9-smoke.test.ts`, not in `@hyperfixation/testing` — the harness is what
 > `testing` owns; what the three modes *mean* is a `workflows` assertion. Redeploy case 7, which this chunk's
-> harness was built to gate, is **not written yet** (see the gate-case map).
+> harness was built to gate, landed at e6bde42 under chunk 14 — five chunks after the harness, which is the
+> gap this document's 2026-09-17 pass found.
 
 ### 9 — `defineFlow`, the `step` wrapper, `runs.start` — ✅ Done
 
@@ -499,12 +500,47 @@ Committed — 496b903 for the package, 6deac13 for case 4.
 > `startWorker()`; or a `degraded` signal for `paused = false` with a zeroed queue holding a backlog.
 > Not invented here — the fix belongs to whoever takes chunk 14.
 
-### 14 — Phase 1 exit assembly — ⬜ Not started
+### 14 — Phase 1 exit assembly — 🚧 In progress
 
 Auth negatives and passkey enrolment through a software authenticator; the deep-import fixture fails `tsc`;
 `pnpm turbo typecheck lint test` and `pnpm turbo api-extractor` green across core; all 12 redeploy cases and
 all 7 fence cases green; `hf new demo-app --local && pnpm dev` signs in by emailed code, enrols a passkey,
 and 404s on `/admin` for a member; `docker compose -f docker-compose.prod.yml config` validates.
+
+**What landed (e6bde42).** Redeploy case 7, both halves, in
+`packages/workflows/src/redeploy-case-7.test.ts`; and `pnpm -w typecheck` plus `pnpm turbo test --force`
+run green across all 8 packages — 38 test files, 222 tests, ~3 min against a real pg17. That is the first
+time the whole suite has been *observed* green rather than inferred from each chunk's own gate, which is
+what the 2026-09-17 pass said it could not claim.
+
+**What is left, and why none of it is the spine's.** Every other bullet above belongs to a track: the auth
+negatives and passkey enrolment to C, the deep-import fixture and `api-extractor` and `lint` to A, `hf new`
+to E, `docker compose config` to B. **All five are still ⬜**, so chunk 14 cannot close. The gate itself is
+11 of 12 — case 5 is a lint assertion and lands with track A, not here.
+
+> **Deviation 1 — worker A writes slower than the plan's 250 ms, and only worker A.** The plan's process
+> half has A writing 60 rows 250 ms apart and taking `SIGTERM` at 6 s. Measured: `DBOS.shutdown()` waits
+> `DRAIN_TIMEOUT_MS` (60 s) for a workflow running in this process, so a 15-second step simply *finishes*
+> inside the drain — worker A exits having completed attempt 1, there is nothing for B to take over, and
+> every assertion downstream of the handover holds vacuously or not at all. The state round-2 finding 1 is
+> about is the one where the drain **abandons** the step with its bodies still writing, which needs the
+> remaining work to outlast the drain. So `intervalMs` moved from the run's input to the worker's control
+> and A uses 2 000 ms (~114 s left when the drain starts counting) while B uses the plan's 250 ms. The
+> plan's numbers were written against the adversary's own harness, where `SHUTDOWN_RETURNED` came back in
+> 3 002 ms because that harness had no DBOS in it. Cost: the process half takes ~86 s, almost all of it the
+> 60 s drain it is asserting on.
+>
+> **Deviation 2 — the `in-tx` half's bump is driven from the test, not from a worker B.** The plan says
+> "while B boots and reconciles". B cannot boot: A is parked inside an open `ctx.tx` and therefore alive and
+> holding the advisory lock, which is the *first* half's whole assertion. The test calls
+> `reconcile(control.pool, client, { applicationVersion: versionB })` itself, the same way redeploy case 12
+> drives its bumps, and measures that the pass does not settle while A holds the transaction.
+>
+> **Deviation 3 — one production line changed: `acquireWorkerLock` now logs when it got the lock.**
+> `WORKER_LOCK_STATEMENT` reads `now()` in the same statement as `pg_try_advisory_lock`, `WorkerLock`
+> carries `acquiredAt`, and a `LOCK_ACQUIRED_MARKER` line carries it to the harness. Ordering the handover
+> against a committed write needs one clock; A's write timestamps are the database's, and two process
+> clocks cannot be compared at all.
 
 ---
 
@@ -575,7 +611,7 @@ maintenance note.
 | `redeploy` 4 — pause and resume across a redeploy | 13 | ✅ Done | `packages/ai/src/redeploy-case-4.test.ts` |
 | `redeploy` 5 — bans fail `eslint` | **Track A** | ⬜ Not started | — |
 | `redeploy` 6 — advisory-lock isolation | 6 | ✅ Done | `packages/workflows/src/redeploy-case-6.test.ts` |
-| `redeploy` 7 — round-2 finding 1, process half and `in-tx` half | 8b (needs 4, 5, 7, 9) | ⬜ Not started — the `killAt` harness it needs shipped at 8b; the case itself was never written | — |
+| `redeploy` 7 — round-2 finding 1, process half and `in-tx` half | 8b (needs 4, 5, 7, 9); written at 14 | ✅ Done (deviated) | `packages/workflows/src/redeploy-case-7.test.ts`, over `test-support/writer-flow.ts`. See chunk 14's deviations 1–3 |
 | `redeploy` 8 — reconcile bump then approval | 12 | ✅ Done | `packages/ai/src/redeploy-case-8.test.ts`; the bump unit half in `fence.test.ts` |
 | `redeploy` 9 — orphaned reservation on a failed run | 10, idempotency half at 11 | ✅ Done | `packages/ai/src/redeploy-case-9.test.ts` |
 | `redeploy` 10 — grants, both directions | 3 | ✅ Done | `packages/db/src/redeploy-case-10.test.ts`; launch half in `packages/workflows/src/redeploy-case-10-launch.test.ts` |
@@ -594,9 +630,9 @@ maintenance note.
 | `compose-envs` | Track B | ⬜ Not started | — |
 | Worker isolation, deep-import `tsc` | 6, Track A | 🚧 In progress — worker isolation ✅ (`packages/workflows/src/worker-isolation.test.ts`), the deep-import `tsc` fixture ⬜ | — |
 
-**Ten of twelve redeploy cases and all seven fence cases are written and committed.** The two that are not — case 5 and
-case 7 — are the only gate cases left that belong to work already ordered: case 5 is track A's done-check
-and case 7 has had everything it needs since chunk 9.
+**Eleven of twelve redeploy cases and all seven fence cases are written, committed and observed green
+together** (`pnpm turbo test --force`, 2026-09-17: 38 files, 222 tests, ~3 min). The one that is not is
+case 5, which is track A's done-check and needs an ESLint config that does not exist yet.
 
 ## Decisions taken 2026-09-16
 
@@ -627,11 +663,17 @@ added is below it.
 2. 🚧 **The pause/resume liveness race on redeploy** (chunk 13). Queues can end up pinned at 0 with the app
    reporting unpaused and healthy; nothing self-heals it and the plan specs no fix. Needs a decision — a
    `reconcile()` hygiene step, a read-after-write in `startWorker()`, or a `degraded` signal. See chunk 13's
-   note. **The one open item with a correctness-adjacent smell**, and the only one that should block chunk 14.
+   note. **The one open item with a correctness-adjacent smell.** Still undecided after chunk 14's first
+   pass: it is a design choice among three shapes, not an implementation gap, and case 7 gave it no new
+   evidence either way. It has to be settled before chunk 14 closes.
 3. ⬜ **`hf_activity`'s insert in `decide()`** (chunk 12). The plan makes it fatal alongside `hf_audit`;
    the table is Phase 2's and does not exist. Wire it under the same rule when it lands.
-4. ⬜ **Redeploy case 7 and case 5.** Both gate cases are unwritten; case 7's harness has existed since
-   chunk 9 and case 5 is track A's done-check.
+4. ⬜ **Redeploy case 5**, the last unwritten gate case. It is a lint assertion with no database dependency
+   and lands with track A, not with the spine. **Case 7 is closed** (e6bde42, chunk 14).
 5. 🔁 **Migration-count literals** (chunk 12). `packages/db/src/migrate.test.ts` hard-codes the core
    migration count in three places; every future migration bumps them. Maintenance, not a defect — but it
    will be hit again by the first track-C or Phase 2 migration.
+6. ⬜ **Chunk 14 cannot close until tracks A–E do.** Every remaining bullet of its exit bar is a track's:
+   the auth negatives (C), the deep-import fixture and `api-extractor` and `lint` (A), `hf new demo-app
+   --local` (E), `docker compose config` (B). The spine has nothing left to build. **This, not the spine, is
+   what Phase 1 is now waiting on.**

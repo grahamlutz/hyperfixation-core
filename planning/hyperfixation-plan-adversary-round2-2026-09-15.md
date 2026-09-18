@@ -8,7 +8,7 @@ this doc is a record of what was found, not a tracker.
 
 | Finding | Fix status |
 |---|---|
-| 1 — two attempts of one run executing concurrently | ✅ Done — process half fe04650 (SIGTERM shape, lock held to exit), database half 57a1f5e + 7296766 (`ctx.tx`'s fence, the one bump path). 🚧 **Its gate case, redeploy case 7, is not written** — both halves are proven by `fence.test.ts` and case 11, but the adversary's own two-worker scenario is not yet reproduced as a test. |
+| 1 — two attempts of one run executing concurrently | ✅ Done — process half fe04650 (SIGTERM shape, lock held to exit), database half 57a1f5e + 7296766 (`ctx.tx`'s fence, the one bump path). ✅ **Its gate case, redeploy case 7, is written** (e6bde42): the adversary's own two-worker scenario, with worker A's step abandoned mid-loop by the drain and worker B polling for the lock, asserting that B's lock is younger than A's last committed write. Three deviations, all recorded under chunk 14 in the ordering doc. |
 | 2 — `decide()`'s workflow-id formula | ✅ Done — one bump path in `packages/workflows/src/bump.ts`, `N + 1` computed in application code with a compare-and-set (7296766, extracted out of `reconcile()` at b0b6242). Gate: redeploy case 8 (5b25f21) and `fence.test.ts`'s two-bump unit half. Step (2) is deleted in the built `reconcile()`, as disposed. |
 | 3 — the budget kill switch disabling itself | ✅ Done — `reserved_usd` never existed as a column; the reservation is derived under the period row's lock (753e923) and `reconcile()` step (4) moves non-live `started` rows to `abandoned` (a359f06). Gate: redeploy case 9 including its three-pass idempotency half (060aaef). |
 

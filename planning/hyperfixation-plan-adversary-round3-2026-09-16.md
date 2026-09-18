@@ -19,7 +19,7 @@ whether its fix is built and where; the findings are unchanged.
 | 10 — a rejecting `shutdown` swallowed by Sentry's listener | ✅ Done — non-`async` listener, explicit `.then(ok, err)` with both arms calling `process.exit`, watchdog armed synchronously before any await (fe04650). Gate: redeploy case 11, second half. |
 
 **All ten fixes are built.** What is outstanding is gate coverage, not mechanism: round-2 finding 1's own
-scenario (redeploy case 7) is unwritten, and findings 7 and 8 have Phase 2 assertions by design. One new gap
+scenario (redeploy case 7) landed at e6bde42, and findings 7 and 8 have Phase 2 assertions by design. One new gap
 was found during the build that round 3 did not attack — a pause/resume liveness race on redeploy; it is
 recorded in the plan's Risks and in the execution order's chunk 13.
 
