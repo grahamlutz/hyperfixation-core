@@ -5,8 +5,10 @@ after adversary rounds 2 and 3. **The design is fixed; this document only orders
 disagrees with the plan about *what* to build, the plan wins. Where it disagrees about *when*, this one does.
 
 **Status updated 2026-09-17** against the tree at `6deac13`, again **2026-09-18** for track A
-(`257f4a4`), and finally **2026-09-18** for chunk 14's closing pass (`c9231a2`, and 719dfc6..ebe3922 in
-`hyperfixation-template`). Every chunk, track and gate case below carries a
+(`257f4a4`), again **2026-09-18** for chunk 14's closing pass (`c9231a2`, and 719dfc6..ebe3922 in
+`hyperfixation-template`), and again **2026-09-18** for `hf status-token`, `hf_app_state` seeding, `hf up`,
+and — for the first time — a CI run that actually passed (`915afd5`, `f928e6d`; see the track E note and
+"Still open" item 7 below). Every chunk, track and gate case below carries a
 STATUS marker; a `(deviated)` marker is followed by a note naming what differs and the commit that decided it.
 The markers are the point of this document now — the plan it derives from was written before any of it existed,
 and drifted silently through chunks 11–13 until this pass.
@@ -43,6 +45,20 @@ serves, and running both is what caught the defect below.
 | `pnpm -w api-extractor` | green against the committed `etc/*.api.md` |
 | all 12 redeploy cases, all 7 fence cases | see the gate-case map |
 | `docker compose -f docker-compose.prod.yml config` | validates in a generated app |
+| GitHub Actions `CI` on `pull_request` | **green for the first time ever, 2026-09-18 (`f928e6d`)** — see the note below |
+
+**A correction to the row above it, worth stating plainly: every number in this table before 2026-09-18 was a
+local run, and GitHub Actions' own `CI` workflow had never once passed.** All 8 runs since `ci.yml` was added
+(`257f4a4`) failed identically — `ECONNREFUSED` connecting to Postgres — because `packages/{testing,db}`'s test
+harness defaults to the local `hf dev` compose port (5434) and nothing in `ci.yml` overrode it. Layered under
+that, once the port was fixed: Turbo 2.x's default `envMode: strict` silently drops any env var not declared
+on a task, so the fix didn't reach the test process either, until `turbo.json` declared it; and once *that*
+was fixed, CI's own job-level `DATABASE_URL` (a static, unmigrated database) started shadowing every test
+fixture's own migrated database, because `packages/cli/src/app.ts`'s `resolveApp` merges `{...envFile,
+...process.env}` — deleted rather than reconciled, since nothing reads it. Fixed in `f928e6d`. This repo's
+history is almost entirely direct pushes to `main` (1 merge commit in 57, `pull_request` essentially
+unexercised before today), which is how ~21 commits landed on a red pipeline without anyone noticing — the
+"green" this document asserted throughout was always the local numbers above, never GitHub's.
 
 **The one thing chunk 14 left unsettled** — "Still open" item 2, the pause/resume liveness race on redeploy
 — **was settled on 2026-09-18 (cd34053)**: the `reconcile()` hygiene step, of the three shapes chunk 13
@@ -633,10 +649,10 @@ deviations 4–7 below and the "Phase 1 status" section at the top. Core commits
 | Track | Contents | Can start | Must land by | Status |
 |---|---|---|---|---|
 | **A — lint and contract mechanics** | Shared ESLint config (the `DBOS` property ban, `no-restricted-imports` on `@hyperfixation/*/src/*` and `dist/*`, the `src/flows/**` raw-handle hint), ban fixtures, API Extractor in all 8 packages with committed `etc/*.api.md`, deep-import `tsc` fixture | chunk 0 | 14 | ✅ Done (deviated) — 95c166c, 51bc37e, 2bb9040, 257f4a4. See the track A note below |
-| **B — template and compose** | `Dockerfile` (`ARG SOURCE_COMMIT` → `ENV HF_BUILD_SHA`, `git rev-parse HEAD` fallback), both compose files with full `environment:` blocks, `mem_limit`, `stop_grace_period: 90s` on `worker`, `REQUIRED_ENV` + `compose-envs.test.ts`, CI workflows, dependabot, turbo generators, `components.json`, the two catch-all routes, `worker.ts`, `instrumentation.ts` | chunk 0 | 14 | ✅ Done (deviated) — built in the sibling `hyperfixation-template` repo, 9c900e5..a1c7b30. See the track B note below |
+| **B — template and compose** | `Dockerfile` (`ARG SOURCE_COMMIT` → `ENV HF_BUILD_SHA`, `git rev-parse HEAD` fallback), both compose files with full `environment:` blocks, `mem_limit`, `stop_grace_period: 90s` on `worker`, `REQUIRED_ENV` + `compose-envs.test.ts`, CI workflows, dependabot, turbo generators, `components.json`, the two catch-all routes, `worker.ts`, `instrumentation.ts` | chunk 0 | 14 | ✅ Done (deviated) — built in the sibling `hyperfixation-template` repo, 9c900e5..a1c7b30. "CI workflows" meant the `ci.yml` file existed, not that it passed — it did not, on any run, until `f928e6d` (2026-09-18). See the track B note below and "Phase 1 status" above |
 | **C — auth** | better-auth factory with `emailOTP` (`disableSignUp: true`), passkey, admin, organization; session-factor policy (`factor: 'code' \| 'passkey'`, code sessions confined to `/auth/*`, `/admin/*` needs `admin` and 404s otherwise); `requireSession({ factor, role })` in both layouts and every server action and route handler; bootstrap user; reset-second-factor action | chunk 2 | 14 | ✅ Done (deviated) — 8004d96, a86660f, 08cc4c3, 2c6a3df, 6b3657c. See the track C note below |
 | **D — admin** | Users resource generated from Drizzle metadata, reset-passkey action, guards | track C | 14 | ✅ Done (deviated) — fa14205, 66cfe45. See the track D note below |
-| **E — CLI** | `hf new --local` (giget copy, `__APP_NAME__`/`__DB_NAME__` substitution, `^[a-z][a-z0-9_]{0,62}$` validation), `hf migrate`, `hf bootstrap`, `hf check`, `hf gen`, `hf dev` (sets `HF_BUILD_SHA=dev-<timestamp>`) | track B for `new`; chunk 3 for `migrate` | 14 | ✅ Done (deviated) — 5e58814, 1268d13, plus d1822f8 in the template repo. See the track E note below |
+| **E — CLI** | `hf new --local` (giget copy, `__APP_NAME__`/`__DB_NAME__` substitution, `^[a-z][a-z0-9_]{0,62}$` validation, now also prompting for the bootstrap admin's email), `hf migrate`, `hf bootstrap` (grants the first admin **and**, since 2026-09-18, seeds `hf_app_state`'s singleton row), `hf status-token`, `hf up`, `hf check`, `hf gen`, `hf dev` (sets `HF_BUILD_SHA=dev-<timestamp>`) | track B for `new`; chunk 3 for `migrate` | 14 | ✅ Done (deviated) — 5e58814, 1268d13, plus d1822f8 in the template repo, plus 9618cd6/c000f2e/12b546f/ba54ae2 (915afd5). See the track E note below |
 
 **All five tracks are done and the spine is at 14 of 14.** The execution model below assumed the tracks
 would run alongside the spine from chunk 0; in practice the spine was built solo and the tracks were farmed
@@ -849,13 +865,18 @@ and a declared list field the table does not have throws at construction rather 
 > (the machinery-table resources are core's, Phase 2's). The template's admin page still renders its own
 > placeholder: wiring it is track B's file and track E's session to touch, not this one's.
 
-**Track E's done-check is `pnpm --filter @hyperfixation/cli test`.** ✅ Done — 45 tests in nine files,
-four of them against a real database. What they prove: `hf new demo-app` leaves **no** placeholder anywhere
+**Track E's done-check is `pnpm --filter @hyperfixation/cli test`.** ✅ Done — **64 tests in eleven files**
+as of 2026-09-18 (was 45 in nine before `hf status-token`, `hf_app_state` seeding and `hf up`), seven of them
+against a real database. What they prove: `hf new demo-app` leaves **no** placeholder anywhere
 in a copy of the real template checkout and writes `.env` from the substituted `.env.example`; a source with
 no marker, a target that exists, a name that is not an identifier and a missing `--local` are each refused
 before anything is written; `provisionLocalRoles` creates a role that can read the tables the migrator
 already made and is idempotent on a second pass; `hf bootstrap` grants the first admin as the application
-role and the second run is refused; and `hf check` names a declared-but-absent var, a pending app migration,
+role, seeds `hf_app_state`'s singleton row (`ON CONFLICT (id) DO NOTHING`, so a rerun never overwrites the
+budget) from `HF_BOOTSTRAP_BUDGET_USD`/`--budget-usd`, and the second admin-grant run is refused; `hf
+status-token` provisions `/api/status`'s read and write tokens, refusing to clobber one already set unless
+`--rotate`; `hf up` chains install → infra → migrate → bootstrap → status tokens → `hf dev`, safe to rerun;
+and `hf check` names a declared-but-absent var, a pending app migration,
 and the fact that it could not read the registry — rather than passing E001–E003 over an empty list.
 
 > **Track E, what landed and where it differs.** Two commits here — 5e58814 `hf new` and the app resolution
@@ -902,6 +923,22 @@ and the fact that it could not read the registry — rather than passing E001–
 > `allowBuilds` had permitted. Verified: the template's own `pnpm gen` fails this way in a freshly created
 > app, and `pnpm exec gen run record --args note` succeeds, writing the schema file, the export and the
 > registration.
+>
+> **Deviation 7 — `hf_app_state` had no seeder until 2026-09-18, and nothing had ever inserted its row.**
+> `budget_usd` is `NOT NULL` with no column default, so pause/resume, `/api/status`, and the first-of-month
+> budget gate in `llm-run.ts` (`INSERT INTO hf_budget_period ... SELECT budget_usd FROM hf_app_state`) all
+> silently had nothing to read outside test fixtures — `AppStateMissing`'s own error message already claimed
+> "the singleton is seeded by `hf bootstrap`," which was aspirational, not true, until `c000f2e`. Seeded via
+> `HF_BOOTSTRAP_BUDGET_USD` (or `--budget-usd`, mirroring `HF_BOOTSTRAP_EMAIL`/`--email`), `ON CONFLICT (id)
+> DO NOTHING` so a redeploy that reruns `hf bootstrap` against an already-admin'd app still seeds it if it
+> never was, without ever overwriting a live budget.
+>
+> **Deviation 8 — `hf status-token` and `hf up` are new CLI surface this document never specced.**
+> `hf status-token` (9618cd6) provisions `/api/status`'s read and write tokens with the same refuse-unless-
+> `--rotate` shape `hf bootstrap` uses for the admin grant. `hf up` (ba54ae2) is the one-command local loop
+> — install, infra, migrate, bootstrap, status tokens, `hf dev` — that `hf new`'s own "next:" line used to
+> spell out as six commands; it is safe to rerun, and `hf new --local` now prompts for the bootstrap admin's
+> email (or takes `--email`) rather than requiring `HF_BOOTSTRAP_EMAIL` to be set separately first.
 >
 > **How far the exit-bar proof got, exactly.** `hf new demo-app --local` against the real template, then
 > `pnpm install`, `hf dev --compose-only`, `hf migrate`, `hf bootstrap`, `hf check`, `hf gen` — all green
@@ -1085,6 +1122,14 @@ added is below it.
    shape of the same cost: adding `admin` moved six lines of `db.api.md` and `auth.api.md` by changing
    drizzle-orm's peer resolution (270fc6b), so a report can churn on a dependency-graph change with no API
    change at all, and `pnpm -w api-extractor` is red until someone regenerates it.
+   **This predicted exactly what happened next.** Because CI had never actually run `pnpm turbo api-extractor`
+   to completion (see "Phase 1 status" above), `db.api.md` and `auth.api.md` had drifted for real — the same
+   reordering-with-no-API-change shape as 270fc6b, this time with no dependency-graph change anyone could
+   find (drizzle-orm and typescript were pinned identically to the last regen); the working theory is TS's
+   own union-canonicalization order isn't fully stable across separate builds. `cli.api.md` drifted too,
+   separately and for a real reason — `hf up` (ba54ae2) landed without regenerating it. All three fixed
+   2026-09-18 (`8c3fcc9`, `8af64b3`, `5288a35`, folded into `915afd5`/`f928e6d`). The decision this item asks
+   for is still undecided.
 8. ⬜ **`hf_invitation` is a table with no code path** (track C). `invitationLimit: 0` because an invitation
    ends in a sign-up and `disableSignUp: true` means there is none. When invitations become a feature, the
    plan has to say what an invited user signs up *into* — the table is the only part already there.
