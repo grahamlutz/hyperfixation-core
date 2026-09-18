@@ -46,11 +46,7 @@ export async function dev(options: DevOptions = {}): Promise<DevResult> {
   const app = await resolveApp(options.dir);
   const buildSha = options.buildSha ?? devBuildSha();
 
-  if (options.skipCompose !== true && (await isFile(path.join(app.dir, DEV_COMPOSE_FILE)))) {
-    await run("docker", ["compose", "-f", DEV_COMPOSE_FILE, "up", "-d", "--wait"], {
-      cwd: app.dir,
-    });
-  }
+  if (options.skipCompose !== true) await ensureCompose(app);
 
   if (options.composeOnly === true) return { app, buildSha };
 
@@ -60,6 +56,21 @@ export async function dev(options: DevOptions = {}): Promise<DevResult> {
   });
 
   return { app, buildSha };
+}
+
+/**
+ * `docker compose up`, if the app has a compose file — shared with `hf up`, which brings the
+ * same infrastructure up ahead of `hf migrate` rather than duplicating this check.
+ *
+ * Returns whether compose was actually started, so a caller can report it distinctly from "there
+ * was nothing to bring up."
+ */
+export async function ensureCompose(app: ResolvedApp): Promise<boolean> {
+  if (!(await isFile(path.join(app.dir, DEV_COMPOSE_FILE)))) return false;
+  await run("docker", ["compose", "-f", DEV_COMPOSE_FILE, "up", "-d", "--wait"], {
+    cwd: app.dir,
+  });
+  return true;
 }
 
 async function isFile(target: string): Promise<boolean> {
