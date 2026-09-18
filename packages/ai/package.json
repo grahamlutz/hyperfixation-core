@@ -26,6 +26,7 @@
   },
   "devDependencies": {
     "@dbos-inc/dbos-sdk": "4.27.6",
+    "@hyperfixation/core": "workspace:*",
     "@hyperfixation/testing": "workspace:*",
     "@hyperfixation/workflows": "workspace:*",
     "@types/pg": "^8.23.1"

@@ -29,8 +29,16 @@ export {
   type BumpedAttempt,
   type ControlPlaneTxOptions,
 } from "./control-plane.js";
+export {
+  appPaused,
+  AppStateMissing,
+  APP_PAUSED_STATEMENT,
+  SET_APP_PAUSED_STATEMENT,
+} from "./app-state.js";
 /** `runBootChecks` takes these, so the type travels with `.` even though the guards do not. */
 export type { RecordTable } from "./delete-guard.js";
+/** `records.archive()` names a registered record table in SQL; it quotes it with this. */
+export { quoteIdent } from "./roles.js";
 export {
   runBootChecks,
   checkE001,

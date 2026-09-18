@@ -20,6 +20,12 @@ export {
   type Worker,
 } from "./start-worker.js";
 export { getClient, resetClient, CLIENT_POOL_SIZE, type GetClientOptions } from "./client.js";
+export {
+  setPausedQueueConcurrency,
+  PAUSED_CONCURRENCY,
+  PAUSED_QUEUES,
+  type QueueConcurrency,
+} from "./queue-concurrency.js";
 export { WorkerLockUnavailable, type WorkerLock } from "./worker-lock.js";
 export {
   defineFlow,

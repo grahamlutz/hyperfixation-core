@@ -17,5 +17,15 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@dbos-inc/dbos-sdk": "4.27.6",
+    "@hyperfixation/db": "workspace:*",
+    "@hyperfixation/workflows": "workspace:*",
+    "pg": "^8.23.0"
+  },
+  "devDependencies": {
+    "@hyperfixation/testing": "workspace:*",
+    "@types/pg": "^8.23.1"
   }
 }

@@ -1,6 +1,13 @@
 import { DBOS, DBOSClient, type WorkflowQueue } from "@dbos-inc/dbos-sdk";
-import { createStepPool, runBootChecks, type RecordTable, type StepPool } from "@hyperfixation/db";
+import {
+  appPaused,
+  createStepPool,
+  runBootChecks,
+  type RecordTable,
+  type StepPool,
+} from "@hyperfixation/db";
 import { createControlPool, type ControlPool } from "./control-pool.js";
+import { setPausedQueueConcurrency } from "./queue-concurrency.js";
 import { reconcile, startReconciler, type Reconciler } from "./reconcile.js";
 import { acquireWorkerLock, type WorkerLock } from "./worker-lock.js";
 import { setWorkerRuntime } from "./worker-runtime.js";
@@ -163,6 +170,12 @@ export async function startWorker(options: StartWorkerOptions): Promise<Worker> 
       systemDatabasePoolSize: RECONCILER_POOL_SIZE,
       applicationName: options.appName,
     });
+
+    // `registerQueue` above re-wrote each queue's row at its registered concurrency, which on a
+    // deploy into a paused app would undo `pause`'s queue half and let the new worker start
+    // dispatching. The pause flag is still what makes it correct — every dispatched step
+    // suspends at the gate — but a paused app should not be dequeuing at all.
+    if (await appPaused(control.pool)) await setPausedQueueConcurrency(client, true);
 
     // Once before the worker is ready, so a redeploy's backlog is moved onto this version
     // before anything else is dispatched, and every minute after. A failure here fails the
