@@ -27,6 +27,7 @@
   },
   "dependencies": {
     "@hyperfixation/auth": "workspace:*",
+    "@hyperfixation/core": "workspace:*",
     "@hyperfixation/db": "workspace:*",
     "pg": "^8.23.0"
   },

@@ -51,7 +51,16 @@ describe("the hf binary's argument handling", () => {
   });
 
   it("documents every command it dispatches", () => {
-    expect(COMMANDS).toEqual(["new", "migrate", "bootstrap", "check", "gen", "dev"]);
+    expect(COMMANDS).toEqual([
+      "new",
+      "migrate",
+      "bootstrap",
+      "status-token",
+      "check",
+      "gen",
+      "dev",
+      "up",
+    ]);
     for (const command of COMMANDS) expect(USAGE).toContain(`hf ${command}`);
   });
 });
@@ -61,7 +70,17 @@ describe("hf new through main", () => {
     const { io: sink, out } = io();
 
     const code = await main(
-      ["new", "demo-app", "--local", "--from", source, "--into", workspace],
+      [
+        "new",
+        "demo-app",
+        "--local",
+        "--from",
+        source,
+        "--into",
+        workspace,
+        "--email",
+        "graham@example.com",
+      ],
       sink,
     );
 

@@ -5,23 +5,46 @@ import { dev, devBuildSha } from "./dev.js";
 import { generate } from "./gen.js";
 import { migrateApp } from "./migrate.js";
 import { newApp } from "./new.js";
+import { statusTokenApp, type StatusTokenKind } from "./status-token.js";
 import { requireTemplateSource } from "./template-source.js";
+import { upApp } from "./up.js";
 
-export const COMMANDS = ["new", "migrate", "bootstrap", "check", "gen", "dev"] as const;
+export const COMMANDS = [
+  "new",
+  "migrate",
+  "bootstrap",
+  "status-token",
+  "check",
+  "gen",
+  "dev",
+  "up",
+] as const;
 
 export type Command = (typeof COMMANDS)[number];
 
 export const USAGE = `hf — the hyperfixation CLI
 
-  hf new <name> --local     copy the template into ./<name> and substitute its placeholders
+  hf new <name> --local     copy the template into ./<name>, substitute its placeholders, and
+                            prompt for the bootstrap admin's email
       --from <dir>            template checkout (default: the sibling hyperfixation-template)
       --into <dir>            where to create <name> (default: the working directory)
+      --email <address>       the bootstrap admin's address; skips the prompt
+
+  hf up                     install, infra, migrate, bootstrap, status tokens, then hf dev —
+                            the whole local loop after hf new, safe to rerun
 
   hf migrate                create the application role, then run the app's migrate.ts
       --skip-roles            the cloud path, where the roles already exist
 
-  hf bootstrap              grant the app its one bootstrap admin
+  hf bootstrap              grant the app its one bootstrap admin, and seed hf_app_state
       --email <address>       the address to promote; otherwise HF_BOOTSTRAP_EMAIL
+      --budget-usd <amount>    the app's starting budget; otherwise HF_BOOTSTRAP_BUDGET_USD
+
+  hf status-token           provision /api/status's read and write tokens
+      --read                   only the read token; refuses if it is already set
+      --write                  only the write token; refuses if it is already set
+      --rotate                 replace a token that is already set
+                               (no flags: fills in whichever of the two is unset)
 
   hf check                  declared env, pending migrations, and E001-E006
 
@@ -80,12 +103,16 @@ async function dispatch(command: Command, argv: readonly string[], io: Io): Prom
       return await commandMigrate(argv, io);
     case "bootstrap":
       return await commandBootstrap(argv, io);
+    case "status-token":
+      return await commandStatusToken(argv, io);
     case "check":
       return await commandCheck(argv, io);
     case "gen":
       return await commandGen(argv);
     case "dev":
       return await commandDev(argv, io);
+    case "up":
+      return await commandUp(argv, io);
   }
 }
 
@@ -96,6 +123,7 @@ async function commandNew(argv: readonly string[], io: Io): Promise<number> {
       local: { type: "boolean", default: false },
       from: { type: "string" },
       into: { type: "string" },
+      email: { type: "string" },
     },
     allowPositionals: true,
   });
@@ -107,16 +135,23 @@ async function commandNew(argv: readonly string[], io: Io): Promise<number> {
   }
 
   const from = values.from ?? (await requireTemplateSource());
-  const result = await newApp({ name, from, into: values.into, local: values.local });
+  const result = await newApp({
+    name,
+    from,
+    into: values.into,
+    local: values.local,
+    email: values.email,
+  });
 
   io.out(`created ${result.dir} from ${from}`);
   io.out(`  app ${result.appName}, database ${result.databaseName}`);
   io.out(
     `  ${result.substituted.length} file(s) substituted` +
-      (result.wroteEnv ? ", .env written from .env.example" : ""),
+      (result.wroteEnv ? ", .env written from .env.example" : "") +
+      (result.wroteBootstrapEmail ? ", HF_BOOTSTRAP_EMAIL set" : ""),
   );
   io.out("");
-  io.out(`next: cd ${result.given} && pnpm install && hf dev --compose-only && hf migrate`);
+  io.out(`next: cd ${result.given} && hf up`);
   return 0;
 }
 
@@ -143,13 +178,56 @@ async function commandBootstrap(argv: readonly string[], io: Io): Promise<number
       dir: { type: "string" },
       email: { type: "string" },
       name: { type: "string" },
+      "budget-usd": { type: "string" },
     },
   });
 
-  const result = await bootstrapApp({ dir: values.dir, email: values.email, name: values.name });
+  const result = await bootstrapApp({
+    dir: values.dir,
+    email: values.email,
+    name: values.name,
+    budgetUsd: values["budget-usd"],
+  });
   io.out(
     `${result.created ? "created" : "promoted"} ${result.email} as ${result.app.appName}'s admin`,
   );
+  return 0;
+}
+
+async function commandStatusToken(argv: readonly string[], io: Io): Promise<number> {
+  const { values } = parseArgs({
+    args: [...argv],
+    options: {
+      dir: { type: "string" },
+      read: { type: "boolean", default: false },
+      write: { type: "boolean", default: false },
+      rotate: { type: "boolean", default: false },
+    },
+  });
+
+  const explicit = values.read || values.write;
+  const kinds: StatusTokenKind[] = explicit
+    ? [...(values.read ? (["read"] as const) : []), ...(values.write ? (["write"] as const) : [])]
+    : ["read", "write"];
+
+  const result = await statusTokenApp({
+    dir: values.dir,
+    kinds,
+    rotate: values.rotate,
+    explicit,
+  });
+
+  const generated = kinds.filter((kind) => result.tokens[kind] !== undefined);
+  if (generated.length === 0) {
+    io.out(`${result.app.appName}: every requested token is already set; nothing to do`);
+    return 0;
+  }
+
+  io.out(`${result.app.appName}: status token(s) provisioned — shown once, not stored:`);
+  for (const kind of generated) io.out(`  ${kind}: ${result.tokens[kind]}`);
+  for (const kind of kinds) {
+    if (!generated.includes(kind)) io.out(`  ${kind}: already set, left alone`);
+  }
   return 0;
 }
 
@@ -197,5 +275,33 @@ async function commandDev(argv: readonly string[], io: Io): Promise<number> {
     composeOnly: values["compose-only"],
     buildSha,
   });
+  return 0;
+}
+
+async function commandUp(argv: readonly string[], io: Io): Promise<number> {
+  const { values } = parseArgs({ args: [...argv], options: { dir: { type: "string" } } });
+
+  const result = await upApp({ dir: values.dir });
+
+  io.out(
+    result.installedDependencies ? "installed dependencies" : "dependencies already installed",
+  );
+  io.out(
+    result.composeStarted ? "brought up the dev infrastructure" : "no docker-compose.yml to bring up",
+  );
+  io.out(`migrated ${result.app.appName}`);
+  io.out(result.bootstrapped ? "bootstrapped the admin" : "admin already bootstrapped; left alone");
+  io.out(
+    result.tokensProvisioned.length > 0
+      ? `provisioned status token(s): ${result.tokensProvisioned.join(", ")}`
+      : "status tokens already provisioned",
+  );
+
+  // Printed before the child starts, not after it exits: `pnpm dev` runs until interrupted,
+  // and the version is what the user needs in front of them while it does.
+  const buildSha = devBuildSha();
+  io.out(`HF_BUILD_SHA=${buildSha}`);
+
+  await dev({ dir: result.app.dir, skipCompose: true, buildSha });
   return 0;
 }

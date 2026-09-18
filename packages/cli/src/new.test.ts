@@ -28,9 +28,18 @@ afterEach(async () => {
   await rm(workspace, { recursive: true, force: true });
 });
 
+/** Every test but the email-prompt ones passes `--email` so none of them block on real stdin. */
+const NO_PROMPT = "skip@example.com";
+
 describe("hf new --local", () => {
   it("copies the template, substitutes both placeholders, and removes the marker", async () => {
-    const result = await newApp({ name: "demo-app", from: source, into: workspace, local: true });
+    const result = await newApp({
+      name: "demo-app",
+      from: source,
+      into: workspace,
+      local: true,
+      email: NO_PROMPT,
+    });
 
     expect(result.dir).toBe(path.join(workspace, "demo-app"));
     expect(await readFile(path.join(result.dir, "package.json"), "utf8")).toBe(
@@ -44,7 +53,13 @@ describe("hf new --local", () => {
   });
 
   it("derives the application role and the database from the same underscored name", async () => {
-    const result = await newApp({ name: "demo-app", from: source, into: workspace, local: true });
+    const result = await newApp({
+      name: "demo-app",
+      from: source,
+      into: workspace,
+      local: true,
+      email: NO_PROMPT,
+    });
 
     expect(await readFile(path.join(result.dir, ".env.example"), "utf8")).toBe(
       "DATABASE_URL=postgres://hf_demo_app@localhost:5432/hf_demo_app\n",
@@ -52,18 +67,80 @@ describe("hf new --local", () => {
   });
 
   it("writes .env from the substituted .env.example, so the app is runnable as copied", async () => {
-    const result = await newApp({ name: "demo-app", from: source, into: workspace, local: true });
+    const result = await newApp({
+      name: "demo-app",
+      from: source,
+      into: workspace,
+      local: true,
+      email: NO_PROMPT,
+    });
 
     expect(result.wroteEnv).toBe(true);
     expect(await readFile(path.join(result.dir, ".env"), "utf8")).toBe(
-      await readFile(path.join(result.dir, ".env.example"), "utf8"),
+      `${await readFile(path.join(result.dir, ".env.example"), "utf8")}HF_BOOTSTRAP_EMAIL=${NO_PROMPT}\n`,
     );
   });
 
   it("leaves node_modules behind", async () => {
-    const result = await newApp({ name: "demo-app", from: source, into: workspace, local: true });
+    const result = await newApp({
+      name: "demo-app",
+      from: source,
+      into: workspace,
+      local: true,
+      email: NO_PROMPT,
+    });
 
     expect(await readdir(result.dir)).not.toContain("node_modules");
+  });
+
+  it("writes --email to .env as HF_BOOTSTRAP_EMAIL and skips the prompt", async () => {
+    const result = await newApp({
+      name: "demo-app",
+      from: source,
+      into: workspace,
+      local: true,
+      email: "graham@example.com",
+    });
+
+    expect(result.wroteBootstrapEmail).toBe(true);
+    expect(await readFile(path.join(result.dir, ".env"), "utf8")).toContain(
+      "HF_BOOTSTRAP_EMAIL=graham@example.com",
+    );
+  });
+
+  it("prompts for the bootstrap email when --email is not given", async () => {
+    let asked = false;
+    const result = await newApp({
+      name: "demo-app",
+      from: source,
+      into: workspace,
+      local: true,
+      promptEmail: async () => {
+        asked = true;
+        return "prompted@example.com";
+      },
+    });
+
+    expect(asked).toBe(true);
+    expect(result.wroteBootstrapEmail).toBe(true);
+    expect(await readFile(path.join(result.dir, ".env"), "utf8")).toContain(
+      "HF_BOOTSTRAP_EMAIL=prompted@example.com",
+    );
+  });
+
+  it("leaves HF_BOOTSTRAP_EMAIL unwritten when the prompt answer is blank", async () => {
+    const result = await newApp({
+      name: "demo-app",
+      from: source,
+      into: workspace,
+      local: true,
+      promptEmail: async () => "",
+    });
+
+    expect(result.wroteBootstrapEmail).toBe(false);
+    expect(await readFile(path.join(result.dir, ".env"), "utf8")).not.toContain(
+      "HF_BOOTSTRAP_EMAIL",
+    );
   });
 
   it("refuses a source with no marker rather than rewriting whatever is there", async () => {
@@ -106,6 +183,7 @@ describe("hf new against the real template checkout", () => {
       from: template as string,
       into: workspace,
       local: true,
+      email: NO_PROMPT,
     });
 
     const leftovers: string[] = [];

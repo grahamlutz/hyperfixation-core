@@ -1,6 +1,7 @@
 import { readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { cp } from "node:fs/promises";
+import { createInterface } from "node:readline/promises";
 import { deriveNames, type AppNames } from "./names.js";
 
 /**
@@ -63,6 +64,10 @@ export interface NewAppOptions {
    * worse than none.
    */
   local: boolean;
+  /** The bootstrap admin's address, written to `.env` as `HF_BOOTSTRAP_EMAIL`. Skips the prompt. */
+  email?: string;
+  /** Overrides the real interactive prompt; for tests and other callers with their own stdin. */
+  promptEmail?: () => Promise<string>;
 }
 
 export interface NewAppResult extends AppNames {
@@ -72,6 +77,8 @@ export interface NewAppResult extends AppNames {
   substituted: readonly string[];
   /** True when `.env` was written from `.env.example`. */
   wroteEnv: boolean;
+  /** True when `HF_BOOTSTRAP_EMAIL` was written to `.env`, from `--email` or the prompt. */
+  wroteBootstrapEmail: boolean;
 }
 
 /**
@@ -109,9 +116,28 @@ export async function newApp(options: NewAppOptions): Promise<NewAppResult> {
 
   const example = path.join(dir, ".env.example");
   const wroteEnv = await exists(example);
-  if (wroteEnv) await writeFile(path.join(dir, ".env"), await readFile(example, "utf8"));
+  let wroteBootstrapEmail = false;
+  if (wroteEnv) {
+    let contents = await readFile(example, "utf8");
+    const email = options.email ?? (await (options.promptEmail ?? promptForBootstrapEmail)());
+    if (email !== "") {
+      contents = `${contents.trimEnd()}\nHF_BOOTSTRAP_EMAIL=${email}\n`;
+      wroteBootstrapEmail = true;
+    }
+    await writeFile(path.join(dir, ".env"), contents);
+  }
 
-  return { ...names, dir, substituted, wroteEnv };
+  return { ...names, dir, substituted, wroteEnv, wroteBootstrapEmail };
+}
+
+/** The one-time prompt: the address `hf up` later hands `hf bootstrap` via `.env`. */
+async function promptForBootstrapEmail(): Promise<string> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    return (await rl.question("bootstrap admin email (blank to skip): ")).trim();
+  } finally {
+    rl.close();
+  }
 }
 
 /** The placeholder map. Exported because `hf check` reports a leftover placeholder by name. */

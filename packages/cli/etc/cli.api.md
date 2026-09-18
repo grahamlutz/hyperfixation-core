@@ -34,6 +34,7 @@ export function bootstrapApp(options?: BootstrapAppOptions): Promise<BootstrapAp
 
 // @public (undocumented)
 export interface BootstrapAppOptions {
+    budgetUsd?: string;
     // (undocumented)
     dir?: string;
     email?: string;
@@ -83,7 +84,7 @@ export class CommandFailed extends Error {
 }
 
 // @public (undocumented)
-export const COMMANDS: readonly ["new", "migrate", "bootstrap", "check", "gen", "dev"];
+export const COMMANDS: readonly ["new", "migrate", "bootstrap", "status-token", "check", "gen", "dev", "up"];
 
 // @public
 export function credentialsOf(connectionString: string): {
@@ -216,16 +217,19 @@ export function newApp(options: NewAppOptions): Promise<NewAppResult>;
 
 // @public (undocumented)
 export interface NewAppOptions {
+    email?: string;
     from: string;
     into?: string;
     local: boolean;
     name: string;
+    promptEmail?: () => Promise<string>;
 }
 
 // @public (undocumented)
 export interface NewAppResult extends AppNames {
     dir: string;
     substituted: readonly string[];
+    wroteBootstrapEmail: boolean;
     wroteEnv: boolean;
 }
 
@@ -289,6 +293,35 @@ export interface RunOptions {
     stdio?: StdioOptions;
 }
 
+// @public
+export class StatusTokenAlreadySet extends Error {
+    constructor(kind: StatusTokenKind);
+    // (undocumented)
+    readonly kind: StatusTokenKind;
+}
+
+// @public
+export function statusTokenApp(options?: StatusTokenAppOptions): Promise<StatusTokenAppResult>;
+
+// @public (undocumented)
+export interface StatusTokenAppOptions {
+    // (undocumented)
+    dir?: string;
+    explicit?: boolean;
+    kinds?: readonly StatusTokenKind[];
+    rotate?: boolean;
+}
+
+// @public (undocumented)
+export interface StatusTokenAppResult {
+    // (undocumented)
+    app: ResolvedApp;
+    tokens: Partial<Record<StatusTokenKind, string>>;
+}
+
+// @public (undocumented)
+export type StatusTokenKind = "read" | "write";
+
 // @public (undocumented)
 export function substitute(contents: string, names: AppNames): string;
 
@@ -304,7 +337,7 @@ export class TemplateError extends Error {
 }
 
 // @public (undocumented)
-export const USAGE = "hf \u2014 the hyperfixation CLI\n\n  hf new <name> --local     copy the template into ./<name> and substitute its placeholders\n      --from <dir>            template checkout (default: the sibling hyperfixation-template)\n      --into <dir>            where to create <name> (default: the working directory)\n\n  hf migrate                create the application role, then run the app's migrate.ts\n      --skip-roles            the cloud path, where the roles already exist\n\n  hf bootstrap              grant the app its one bootstrap admin\n      --email <address>       the address to promote; otherwise HF_BOOTSTRAP_EMAIL\n\n  hf check                  declared env, pending migrations, and E001-E006\n\n  hf gen [generator]        the app's turbo generators\n\n  hf dev                    docker compose up, then pnpm dev under HF_BUILD_SHA=dev-<timestamp>\n      --no-compose            leave the dev infrastructure alone\n      --compose-only          bring the infrastructure up and stop\n\nEvery command but `new` runs against the app at or above the working directory, or --dir.\n";
+export const USAGE = "hf \u2014 the hyperfixation CLI\n\n  hf new <name> --local     copy the template into ./<name>, substitute its placeholders, and\n                            prompt for the bootstrap admin's email\n      --from <dir>            template checkout (default: the sibling hyperfixation-template)\n      --into <dir>            where to create <name> (default: the working directory)\n      --email <address>       the bootstrap admin's address; skips the prompt\n\n  hf up                     install, infra, migrate, bootstrap, status tokens, then hf dev \u2014\n                            the whole local loop after hf new, safe to rerun\n\n  hf migrate                create the application role, then run the app's migrate.ts\n      --skip-roles            the cloud path, where the roles already exist\n\n  hf bootstrap              grant the app its one bootstrap admin, and seed hf_app_state\n      --email <address>       the address to promote; otherwise HF_BOOTSTRAP_EMAIL\n      --budget-usd <amount>    the app's starting budget; otherwise HF_BOOTSTRAP_BUDGET_USD\n\n  hf status-token           provision /api/status's read and write tokens\n      --read                   only the read token; refuses if it is already set\n      --write                  only the write token; refuses if it is already set\n      --rotate                 replace a token that is already set\n                               (no flags: fills in whichever of the two is unset)\n\n  hf check                  declared env, pending migrations, and E001-E006\n\n  hf gen [generator]        the app's turbo generators\n\n  hf dev                    docker compose up, then pnpm dev under HF_BUILD_SHA=dev-<timestamp>\n      --no-compose            leave the dev infrastructure alone\n      --compose-only          bring the infrastructure up and stop\n\nEvery command but `new` runs against the app at or above the working directory, or --dir.\n";
 
 // (No @packageDocumentation comment for this package)
 
