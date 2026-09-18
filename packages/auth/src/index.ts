@@ -37,3 +37,12 @@ export {
   type RequireSessionOptions,
   type SessionGuardOptions,
 } from "./require-session.js";
+export {
+  bootstrapAdmin,
+  BootstrapRefused,
+  BOOTSTRAPPED_MARKER,
+  BOOTSTRAP_EMAIL_ENV,
+  type BootstrapAdminOptions,
+  type BootstrapRefusal,
+  type BootstrapResult,
+} from "./bootstrap.js";

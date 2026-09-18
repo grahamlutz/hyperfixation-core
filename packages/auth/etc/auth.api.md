@@ -1373,6 +1373,43 @@ export interface AuthSession {
 }
 
 // @public
+export const BOOTSTRAP_EMAIL_ENV = "HF_BOOTSTRAP_EMAIL";
+
+// @public
+export function bootstrapAdmin(pool: Pool, options: BootstrapAdminOptions): Promise<BootstrapResult>;
+
+// @public (undocumented)
+export interface BootstrapAdminOptions {
+    designatedEmail?: string | null;
+    // (undocumented)
+    email: string;
+    // (undocumented)
+    name?: string;
+}
+
+// @public
+export const BOOTSTRAPPED_MARKER = "hf-auth: bootstrapped";
+
+// @public (undocumented)
+export type BootstrapRefusal = "admin-exists" | "not-designated" | "not-first-user" | "no-designation";
+
+// @public
+export class BootstrapRefused extends Error {
+    constructor(reason: BootstrapRefusal, message: string);
+    // (undocumented)
+    readonly reason: BootstrapRefusal;
+}
+
+// @public (undocumented)
+export interface BootstrapResult {
+    created: boolean;
+    // (undocumented)
+    email: string;
+    // (undocumented)
+    userId: string;
+}
+
+// @public
 export function createAuth(options: CreateAuthOptions): Auth<    {
 database: (options: BetterAuthOptions) => DBAdapter<BetterAuthOptions>;
 baseURL: string | undefined;
