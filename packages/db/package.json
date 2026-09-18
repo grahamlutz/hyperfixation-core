@@ -21,6 +21,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src",
     "test": "vitest run --passWithNoTests",
     "db:generate": "drizzle-kit generate"
   },
@@ -32,8 +33,11 @@
     "pgsql-ast-parser": "^12.0.2"
   },
   "devDependencies": {
+    "@hyperfixation/eslint-config": "workspace:*",
+    "@microsoft/api-extractor": "^7.59.1",
     "@types/pg": "^8.23.1",
     "@types/pg-copy-streams": "^1.2.5",
-    "drizzle-kit": "^0.31.10"
+    "drizzle-kit": "^0.31.10",
+    "eslint": "^10.10.0"
   }
 }

@@ -16,6 +16,12 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src",
     "test": "vitest run --passWithNoTests"
+  },
+  "devDependencies": {
+    "@hyperfixation/eslint-config": "workspace:*",
+    "@microsoft/api-extractor": "^7.59.1",
+    "eslint": "^10.10.0"
   }
 }

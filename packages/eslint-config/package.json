@@ -1,7 +1,7 @@
 {
-  "name": "@hyperfixation/core",
+  "name": "@hyperfixation/eslint-config",
   "version": "0.0.0",
-  "description": "defineApp, registries, resolution, records, activity, tasks, labels, outcomes, and the status endpoint",
+  "description": "The shared flat ESLint config: the DBOS primitive ban, the deep-import ban, and the raw-handle hint in flows",
   "type": "module",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -20,16 +20,12 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@dbos-inc/dbos-sdk": "4.27.6",
-    "@hyperfixation/db": "workspace:*",
-    "@hyperfixation/workflows": "workspace:*",
-    "pg": "^8.23.0"
+    "typescript-eslint": "^8.46.0"
   },
   "devDependencies": {
-    "@hyperfixation/eslint-config": "workspace:*",
-    "@hyperfixation/testing": "workspace:*",
-    "@microsoft/api-extractor": "^7.59.1",
-    "@types/pg": "^8.23.1",
     "eslint": "^10.10.0"
+  },
+  "peerDependencies": {
+    "eslint": "^9.0.0 || ^10.0.0"
   }
 }

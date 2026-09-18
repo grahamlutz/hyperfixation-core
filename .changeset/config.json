@@ -11,7 +11,8 @@
       "@hyperfixation/auth",
       "@hyperfixation/admin",
       "@hyperfixation/testing",
-      "@hyperfixation/cli"
+      "@hyperfixation/cli",
+      "@hyperfixation/eslint-config"
     ]
   ],
   "linked": [],

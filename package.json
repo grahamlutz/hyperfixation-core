@@ -9,12 +9,16 @@
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
     "lint": "turbo run lint",
+    "api-extractor": "turbo run api-extractor",
     "test": "turbo run test",
     "changeset": "changeset"
   },
   "devDependencies": {
     "@changesets/cli": "^2.27.0",
+    "@hyperfixation/eslint-config": "workspace:*",
+    "@microsoft/api-extractor": "^7.59.1",
     "@types/node": "^22.0.0",
+    "eslint": "^10.10.0",
     "turbo": "^2.1.0",
     "typescript": "^5.6.0",
     "vitest": "^3.0.0"

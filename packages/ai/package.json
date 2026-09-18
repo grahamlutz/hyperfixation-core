@@ -16,6 +16,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
@@ -27,8 +28,11 @@
   "devDependencies": {
     "@dbos-inc/dbos-sdk": "4.27.6",
     "@hyperfixation/core": "workspace:*",
+    "@hyperfixation/eslint-config": "workspace:*",
     "@hyperfixation/testing": "workspace:*",
     "@hyperfixation/workflows": "workspace:*",
-    "@types/pg": "^8.23.1"
+    "@microsoft/api-extractor": "^7.59.1",
+    "@types/pg": "^8.23.1",
+    "eslint": "^10.10.0"
   }
 }
