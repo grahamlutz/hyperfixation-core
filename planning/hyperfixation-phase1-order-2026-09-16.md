@@ -44,10 +44,10 @@ serves, and running both is what caught the defect below.
 | all 12 redeploy cases, all 7 fence cases | see the gate-case map |
 | `docker compose -f docker-compose.prod.yml config` | validates in a generated app |
 
-**The one thing that is not settled** is "Still open" item 2, the pause/resume liveness race on redeploy.
-It is a choice among three shapes rather than an implementation gap, chunk 14 produced no new evidence for
-any of them, and it is **not part of the exit bar's stated wording** — so Phase 1 is complete against the bar
-the plan wrote, and carries that decision into Phase 2 rather than having answered it. Item 3
+**The one thing chunk 14 left unsettled** — "Still open" item 2, the pause/resume liveness race on redeploy
+— **was settled on 2026-09-18 (cd34053)**: the `reconcile()` hygiene step, of the three shapes chunk 13
+offered. It was never part of the exit bar's stated wording, so it does not change what the bar proved; it
+removes the qualifier the claim carried. Item 3
 (`hf_activity`), item 5 (migration-count literals), item 7 (API-report churn) and item 8 (`hf_invitation`)
 are carried forward the same way, all of them known and none of them correctness-critical.
 
@@ -532,7 +532,8 @@ Committed — 496b903 for the package, 6deac13 for case 4.
 > **Needs a decision before chunk 14**, one of: a `reconcile()` hygiene step that reconciles queue
 > concurrency against `hf_app_state.paused` every minute; a read-after-write (or compare-and-set) in
 > `startWorker()`; or a `degraded` signal for `paused = false` with a zeroed queue holding a backlog.
-> Not invented here — the fix belongs to whoever takes chunk 14.
+> Not invented here — the fix belongs to whoever takes chunk 14. **Decided and built after chunk 14
+> closed: the hygiene step, `reconcile()` step (6), cd34053 — see "Still open" item 2.**
 
 ### 14 — Phase 1 exit assembly — ✅ Done (deviated — see note)
 
@@ -1040,16 +1041,20 @@ added is below it.
 
 1. ⬜ **Unchanged, not blocking.** The plan's remaining open blocker — Hetzner bucket-scoped keys versus
    Cloudflare R2 — is Phase 3 infrastructure and touches no Phase 1 chunk.
-2. 🚧 **The pause/resume liveness race on redeploy** (chunk 13). Queues can end up pinned at 0 with the app
-   reporting unpaused and healthy; nothing self-heals it and the plan specs no fix. Needs a decision — a
-   `reconcile()` hygiene step, a read-after-write in `startWorker()`, or a `degraded` signal. See chunk 13's
-   note. **The one open item with a correctness-adjacent smell.** Still undecided after chunk 14's closing
-   pass, and **deliberately not decided by it**: it is a choice among three shapes, not an implementation
-   gap; case 7 and the exit-bar run gave it no new evidence either way; and it is a decision about the run
-   model that belongs to whoever owns that model, not to the session that happened to close the chunk. The
-   earlier note here said it had to be settled before chunk 14 closed. It was not, and chunk 14 closed
-   anyway, because it is not part of the exit bar's stated wording — see "Phase 1 status". **It is the one
-   thing that makes "Phase 1 complete" a qualified claim, and it is the first thing Phase 2 should settle.**
+2. ✅ **Closed (2026-09-18, cd34053) — the pause/resume liveness race on redeploy** (chunk 13). Of the three
+   shapes the note left open, the decision is the **`reconcile()` hygiene step**, and it is built: step (6)
+   re-derives `llm` and `actions` concurrency from `hf_app_state.paused` on every pass, restoring a queue
+   stuck at 0 under an unpaused app and zeroing one still dispatching under a paused one. Chosen because it
+   is the shape everything else `reconcile()` self-heals already has, it bounds the exposure to one
+   reconcile interval, and it needs no new synchronisation primitive — where a read-after-write in
+   `startWorker()` would fix only the boot half of the race and a `degraded` signal would diagnose the
+   stall without ending it. `startWorker()`'s boot pass runs after the window that opens the race, so in
+   practice the same boot usually closes it. The correction is narrow on purpose: a non-zero concurrency
+   that is merely not the registered one is an operator's, not the race's. Proven in
+   `packages/workflows/src/reconcile.test.ts` — the interleaving written out through the real
+   `setPausedQueueConcurrency`/`appPaused` calls, both directions corrected, an agreeing state left alone
+   across two passes either side of the flag, and a hand-tuned concurrency untouched.
+   **"Phase 1 complete" is no longer a qualified claim.**
 3. ⬜ **`hf_activity`'s insert in `decide()`** (chunk 12). The plan makes it fatal alongside `hf_audit`;
    the table is Phase 2's and does not exist. Wire it under the same rule when it lands.
 4. ✅ **Redeploy case 5 is closed** (51bc37e, track A), and with it the twelve-case suite. **Case 7 is
