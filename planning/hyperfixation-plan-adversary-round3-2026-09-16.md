@@ -2,6 +2,27 @@
 
 **Date:** 2026-09-16. Four parallel adversary passes against the plan's own named "recommended adversary targets before Phase 2" from round 2's rework — fence coverage, `enqueueInTransaction` grants/rollback, derived-budget races, and SIGTERM/process-exit timing. All grounded in `@dbos-inc/dbos-sdk@4.27.6` source, and mostly against live Postgres 17 reproductions (noted per finding).
 
+**Implementation status added 2026-09-17** against the tree at `6deac13`. Each finding carries a marker for
+whether its fix is built and where; the findings are unchanged.
+
+| Finding | Fix status |
+|---|---|
+| 1 — `UnfencedWrite` blind to out-of-context callbacks | ✅ Done — the rule is inverted and in production: the step pool refuses any non-`SELECT` on a client not currently tagged by `ctx.tx` (57a1f5e, over the classifier from eeb6d57). Gate: `fence.test.ts` case (vi) drives all six shapes, including the adversary's two, and asserts each one's `SELECT` still passes. |
+| 2 — `records.archive()` has no fence story | ✅ Done (deviated) — control-plane operations with `assertNotInWorkflow()` and a 30 s `SET LOCAL lock_timeout` (7296766); `records.archive()` itself at 496b903. Case (vii) is split: `fence.test.ts` drives stand-ins and the `55P03` bound, `packages/core/src/records.test.ts` drives the real `archive()`, because `@hyperfixation/db` cannot import `core`. |
+| 3 — workflow-body and transitive-helper writes | ✅ Done — same mechanism as 1; `fence.test.ts` case (vi) shapes (c) and (d). ⬜ The lint hint half is track A and unbuilt; `flow-restart.test.ts` is Phase 2. |
+| 4 — the migrator never grants the app role `dbos` access | ✅ Done — `dbos schema -s dbos -r hf_<app>` is step 3 of the five-step migrator, and E006 checks both privileges at boot (a08e41f). Gate: redeploy case 10, both directions. |
+| 5 — a swallowed error can report a decision that did not persist | ✅ Done — one commit helper asserting the `COMMIT` command tag, throwing `CommitLost`, rolling back and releasing the client with the error (7296766). Gate: `fence.test.ts` case (v), plus both kill-before-`COMMIT` halves of redeploy cases 1 and 8 (5b25f21). 🚧 The rule it protects is only half-populated: `decide()` writes `hf_audit` fatally, and `hf_activity` does not exist yet (see the plan's step 4). |
+| 6 — a redeploy destroying a backlog through false budget failures | ✅ Done — the reservation is scoped to rows whose `workflow_id` is their run's live attempt on a `running` run, so a dead attempt's row stops reserving in the bump's own transaction (753e923). Gate: redeploy case 12, the 50-run scenario exactly as traced (060aaef). |
+| 7 — no month-rollover mechanism | ✅ Done — `hf_budget_period`, one row per UTC calendar month, stamped on the ledger row and billed to that row's period (753e923, table at a3190e5). ⬜ The period-boundary assertions are Phase 2's `budget.test.ts` and `withClock` is deliberately out of Phase 1. |
+| 8 — lock-order inversion and unlocked re-entry | ✅ Done — one lock order `hf_run → hf_budget_period → ledger`, completion updates the budget row first, re-entry happens inside the gate transaction under the period lock, and `reconcile()`'s drift read is a plain `SELECT` with no `FOR UPDATE` (753e923, a359f06). ⬜ The 200-iteration `40P01`/`55P03` stress is Phase 2's `budget.test.ts`. |
+| 9 — no re-entry guard on `DBOS.shutdown()` | ✅ Done — module-level `shuttingDown` boolean, second delivery logs and returns (fe04650). Gate: redeploy case 11, first half. |
+| 10 — a rejecting `shutdown` swallowed by Sentry's listener | ✅ Done — non-`async` listener, explicit `.then(ok, err)` with both arms calling `process.exit`, watchdog armed synchronously before any await (fe04650). Gate: redeploy case 11, second half. |
+
+**All ten fixes are built.** What is outstanding is gate coverage, not mechanism: round-2 finding 1's own
+scenario (redeploy case 7) is unwritten, and findings 7 and 8 have Phase 2 assertions by design. One new gap
+was found during the build that round 3 did not attack — a pause/resume liveness race on redeploy; it is
+recorded in the plan's Risks and in the execution order's chunk 13.
+
 ## Finding 1 — HIGH, live-reproduced: `UnfencedWrite` detection is blind to writes from callbacks whose async context was created outside the step
 
 **Target attacked:** fence coverage (a) — the harness's step-context detection.

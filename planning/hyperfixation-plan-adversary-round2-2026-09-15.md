@@ -2,6 +2,16 @@
 
 **Date:** 2026-09-15. Three parallel adversary passes against the plan's own named "recommended adversary targets before Phase 2" — the reconciler's concurrency fence, the ledger's cross-version race, and `decide()`'s commit-to-enqueue window. All grounded in `@dbos-inc/dbos-sdk@4.27.6` source and, where noted, a live Postgres 17 reproduction.
 
+**Implementation status added 2026-09-17** against the tree at `6deac13`. Each finding now carries a marker
+saying whether its fix is built, with the commit that built it. The findings themselves are unchanged —
+this doc is a record of what was found, not a tracker.
+
+| Finding | Fix status |
+|---|---|
+| 1 — two attempts of one run executing concurrently | ✅ Done — process half fe04650 (SIGTERM shape, lock held to exit), database half 57a1f5e + 7296766 (`ctx.tx`'s fence, the one bump path). 🚧 **Its gate case, redeploy case 7, is not written** — both halves are proven by `fence.test.ts` and case 11, but the adversary's own two-worker scenario is not yet reproduced as a test. |
+| 2 — `decide()`'s workflow-id formula | ✅ Done — one bump path in `packages/workflows/src/bump.ts`, `N + 1` computed in application code with a compare-and-set (7296766, extracted out of `reconcile()` at b0b6242). Gate: redeploy case 8 (5b25f21) and `fence.test.ts`'s two-bump unit half. Step (2) is deleted in the built `reconcile()`, as disposed. |
+| 3 — the budget kill switch disabling itself | ✅ Done — `reserved_usd` never existed as a column; the reservation is derived under the period row's lock (753e923) and `reconcile()` step (4) moves non-live `started` rows to `abandoned` (a359f06). Gate: redeploy case 9 including its three-pass idempotency half (060aaef). |
+
 ## Finding 1 — CRITICAL, live-reproduced: the advisory lock does not prevent two attempts of one run from executing concurrently
 
 **Target attacked:** (a) the reconciler — whether `SIGTERM` drain + `cancelWorkflow` + the advisory lock actually fence two attempts of one run from running a non-ledger step at the same time.
@@ -51,6 +61,12 @@ Result: `reserved_usd` walks unboundedly negative, once per orphaned `started` r
 **Why the plan's own tests miss it:** the only reservation assertion in the Phase 1/2 gates is on a run that finishes clean with zero orphaned `started` rows (`reserved_usd = 0` at the end of a successful 1,000-record loop) — the defect state (a `started` row on a *failed* run) is never constructed by any named test.
 
 ## Disposition: what needs to change
+
+*Status per item added 2026-09-17: 1 ✅ built (the third option was taken — every app-table write is fenced
+on `hf_run.current_workflow_id`, plus `process.exit` on the drain's settlement, and no interruption primitive
+is relied on), though its gate case is still unwritten; 2 ✅ built (the read-increment-write bump path, one
+path for all four callers); 3 ✅ built (the `abandoned` terminal status, idempotent because the predicate is
+the status — there is no counter to release).*
 
 1. **The redeploy/concurrency model needs a real interruption mechanism**, not a documentation-level assumption that the advisory lock plus `cancelWorkflow` fence step bodies. Options worth evaluating: `timeoutMS`/`AbortController` wired into every step so a cancelled workflow's body can actually be interrupted; a hard `process.exit()` immediately after the drain deadline with no intervening `await` (closes the DB-write half of the hazard, not an in-flight HTTP call); or redesigning non-ledger steps to be safe under the interleaving directly (e.g., every app-level write also keyed and conditioned on `(run_id, attempt)` so a stale attempt's write can't beat a fresh one) rather than relying on process-level exclusivity at all.
 2. **`decide()`'s workflow-id formula must match `reconcile()`'s exactly** — likely fixed by computing the new attempt number in application code (read, increment, write) rather than in a single SQL expression that evaluates against the pre-update row, or by using `RETURNING` correctly. `reconcile()`'s step (2) backstop needs a real predicate that can actually match a genuine gap, once the id bug is fixed and the true commit-to-enqueue crash window is defined precisely.

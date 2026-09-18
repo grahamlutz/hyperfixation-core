@@ -10,6 +10,30 @@
 
 **Round 3 turned the fence rule into a mechanism and replaced the budget's two counters with a design that has nothing to roll over.** The worker process has two database handles: a *step pool*, which refuses every non-`SELECT` statement not issued on a client checked out by `ctx.tx` — in production, not only under test, and regardless of async context, so a buffered writer, an event listener, a workflow body, or a helper three imports away is refused the same way — and a *control pool*, not importable by apps, on which core's own predicate-fenced writers (`runs.start`, `decide()`, `reconcile()`, the flow wrapper) run. The budget is a row per calendar month in `hf_budget_period`; a call is reserved against, and later billed to, the month stamped on its own ledger row, so there is no counter to reset, no midnight to straddle, and no month in which a stale reservation from a redeploy can count — the reservation sum only ever sees rows whose `workflow_id` is the live attempt.
 
+## Implementation status (added 2026-09-17)
+
+This document was written before any code existed and was not revised while Phase 1 was built. It has now
+been marked against the tree at `6deac13`. **Only the sections that drifted are marked** — everything
+unmarked is either unbuilt (Phases 2–7) or built as written. The chunk-by-chunk record, with a STATUS marker
+on every chunk, gate case and track, is
+[hyperfixation-phase1-order-2026-09-16.md](hyperfixation-phase1-order-2026-09-16.md); this document carries
+only what changes the *design* as stated here. Markers were set by reading source and commit diffs, not by
+running the suite: "Done" means built with its gate case committed, not observed green today.
+
+| Phase 1 piece | Status |
+|---|---|
+| `@hyperfixation/db` — schema, migrations, migrator, roles, E001–E006, both pool factories, `ctx.tx` | ✅ Done (one correctness fix — see the delete-guard note under *The machinery tables*) |
+| `@hyperfixation/workflows` — `startWorker()`, SIGTERM, `defineFlow`, `step`, `runs.start` | ✅ Done |
+| `reconcile()` | ✅ Done (deviated — CANCELLED handling; step (5) shipped a chunk later than ordered) |
+| Minimum ledger and actions slices (`@hyperfixation/ai`, `actions.perform`) | ✅ Done |
+| Minimum approvals slice (`waitForApproval`, `decide()`) | ✅ Done (deviated — call shape, a new error, `hf_activity`) |
+| `@hyperfixation/core` — `defineApp`, registries, `/api/status`, pause/resume, `records.archive` | ✅ Done (deviated — `defineApp` holds rather than builds the control plane; one known liveness gap) |
+| `@hyperfixation/auth`, `@hyperfixation/admin`, `@hyperfixation/cli`, the ESLint config, API Extractor | ⬜ Not started |
+| `hyperfixation-template` and `compose-envs.test.ts` | ⬜ Not started |
+| `redeploy.test.ts` | 🚧 10 of 12 written and committed; cases 5 (lint) and 7 (round-2 finding 1) unwritten |
+| `fence.test.ts` | ✅ Done (deviated — case (vii)'s `records.archive()` half is in `@hyperfixation/core`'s tests, because `db` cannot import `core`) |
+| Phases 2–7 | ⬜ Not started |
+
 ## Adversary findings: disposition
 
 **Fixed by name (where in this plan):**
@@ -153,12 +177,79 @@ Core:
 - `@hyperfixation/workflows`:
   - `startWorker()` — the only place `DBOS.launch()` runs — with `name: appName`, `systemDatabaseUrl: DATABASE_URL`, `systemDatabaseSchemaName: 'dbos'`, **`applicationVersion: process.env.HF_BUILD_SHA`** (throws if unset or shorter than 7 chars; `hf dev` sets it to `dev-<timestamp>`), `executorID: 'worker'`, **`enablePatching: false`**, **`runAdminServer: false`**, `systemDatabasePoolSize: 5`, `maxConcurrentQueueDispatches: 1`, `runMigrations: false`. It runs E001–E006 first. It builds the step pool (8) and the control pool (2). Before `launch`, it takes `pg_try_advisory_lock(hashtext('hf-worker:' || appName))` on a dedicated connection and exits non-zero if another worker holds it — two workers for one app never run at once, whatever the deploy tooling does. **That connection is never closed by code; the lock is released only when the process dies.** The `SIGTERM` listener is installed before `launch` and has exactly the shape round-3 findings 9–10 verified: a **non-`async`** function; a module-level boolean `shuttingDown` — if already set, log and return (second delivery); set it; arm `setTimeout(() => process.exit(1), 75_000).unref()` synchronously; then `DBOS.shutdown({ workflowCompletionTimeoutMS: 60_000 }).then(() => process.exit(0), (err) => { log(err); process.exit(1); })` — both arms explicit, nothing awaited, no continuation that an `unhandledRejection` listener (Sentry installs one) could swallow. A step body abandoned by the drain is re-executed by the next attempt, and any of its writes are fenced by `hf_run.current_workflow_id` (run model). After `launch`, it runs `reconcile()` once, then registers it as a scheduled function every minute. Queues `llm` (4), `actions` (2), `resolve` (1), registered with `DBOS.registerQueue`; each flow names its queue at `defineFlow`, and that registry is the only source of a queue name for any enqueue. A guard throws if `DBOS.launch` is reached with `HF_PROCESS !== 'worker'`. `getClient()` returns a `DBOSClient` singleton (`systemDatabasePoolSize: 2`) for the web, after E006.
   - `defineFlow(name, fn, { queue })` wraps `fn` as the DBOS workflow whose input is `{ runId, attempt, input }`. The wrapper's first statement, on the control pool, is `UPDATE hf_run SET status = 'running', version = $sha WHERE run_id = $1 AND current_workflow_id = DBOS.workflowID`; zero rows means this attempt has been superseded — it returns without running `fn` and without touching the run (`StaleAttempt`, logged). It then runs `fn`, catches `Suspend` (thrown by `waitForApproval` and the pause gate) to end the workflow with the run in `waiting`/`paused`, and marks `done`/`failed` otherwise — every one of those status writes carries the same `AND current_workflow_id = …` fence, so a superseded attempt can never mark a run. `runs.start(flow, input, { runId? })` is the only way to start a run and is a control-plane operation: in one control-plane transaction on a checked-out `pg` client it inserts the `hf_run` row (`attempt = 1`, `current_workflow_id = run_id`) and calls `getClient().enqueueInTransaction(client, { workflowName, workflowID: run_id, queueName }, { runId, attempt: 1, input })`; the row and the workflow exist together or not at all, and the commit is tag-asserted.
-  - `reconcile()` (a control-plane operation; never locks `hf_budget_period`): (1) for every `hf_run` in `running`: its `current_workflow_id` is PENDING/ENQUEUED under another `applicationVersion` → `cancelWorkflow`, then the attempt-bump path (lock, `N + 1`, compare-and-set, collision assert, `enqueueInTransaction`, tag-asserted commit); is SUCCESS/ERROR/CANCELLED with the run still `running` → mark the run accordingly (the wrapper crashed after the workflow finished); has no DBOS row at all → an **invariant violation** (every path that writes `current_workflow_id` enqueues in the same transaction), logged at error, counted in `/api/status.anomalies`, and enqueued anyway since the id is fresh. (2) *Deleted in round 2* — there is no commit-to-enqueue window to backstop. (3) For every `hf_run` in `paused` while `hf_app_state.paused = false` → next attempt via the same bump path. (4) Ledger hygiene, one transaction: `UPDATE hf_llm_call l SET status = 'abandoned', finished_at = now() FROM hf_run r WHERE l.run_id = r.run_id AND l.status = 'started' AND (r.status IN ('done', 'failed', 'waiting', 'paused') OR l.workflow_id <> r.current_workflow_id)` — round 3 widened this to `running` runs' non-current rows and to every row on a `waiting`/`paused` run (that run's current workflow has ended, so nothing can be in flight); the same predicate for `hf_action_log` → `uncertain`, plus one task per row for Graham. Idempotent because the predicate is the status. These rows already reserve nothing (the reservation is scoped to the live attempt); this step is hygiene and audit, not budget correctness. Then compute per-period `spent_usd` drift with a **plain `SELECT`** against `SUM(cost_usd)` of that period's `ok` rows and expose it; never correct it. (5) Expire pending approvals past `expires_at` via `decide()` with `via: 'sweep'`. Every action logs with `run_id`; the status endpoint exposes counts, including `abandoned` rows and `anomalies`.
+  - `reconcile()` (a control-plane operation; never locks `hf_budget_period`): (1) for every `hf_run` in `running`: its `current_workflow_id` is PENDING/ENQUEUED under another `applicationVersion` → `cancelWorkflow`, then the attempt-bump path (lock, `N + 1`, compare-and-set, collision assert, `enqueueInTransaction`, tag-asserted commit); is SUCCESS/ERROR with the run still `running` → mark the run accordingly (the wrapper crashed after the workflow finished); has no DBOS row at all → an **invariant violation** (every path that writes `current_workflow_id` enqueues in the same transaction), logged at error, counted in `/api/status.anomalies`, and enqueued anyway since the id is fresh. (2) *Deleted in round 2* — there is no commit-to-enqueue window to backstop. (3) For every `hf_run` in `paused` while `hf_app_state.paused = false` → next attempt via the same bump path. (4) Ledger hygiene, one transaction: `UPDATE hf_llm_call l SET status = 'abandoned', finished_at = now() FROM hf_run r WHERE l.run_id = r.run_id AND l.status = 'started' AND (r.status IN ('done', 'failed', 'waiting', 'paused') OR l.workflow_id <> r.current_workflow_id)` — round 3 widened this to `running` runs' non-current rows and to every row on a `waiting`/`paused` run (that run's current workflow has ended, so nothing can be in flight); the same predicate for `hf_action_log` → `uncertain`, plus one task per row for Graham. Idempotent because the predicate is the status. These rows already reserve nothing (the reservation is scoped to the live attempt); this step is hygiene and audit, not budget correctness. Then compute per-period `spent_usd` drift with a **plain `SELECT`** against `SUM(cost_usd)` of that period's `ok` rows and expose it; never correct it. (5) Expire pending approvals past `expires_at` via `decide()` with `via: 'sweep'`. Every action logs with `run_id`; the status endpoint exposes counts, including `abandoned` rows and `anomalies`.
+
+    > **Built ✅ Done (deviated), a359f06 + 951bcf0.** Two changes to the above.
+    >
+    > **CANCELLED is re-attempted, not concluded (a359f06).** The sentence originally grouped CANCELLED with
+    > SUCCESS and ERROR under "mark the run accordingly", and there is no status to mark it with that is not
+    > destructive: `failed` is terminal, and this state is not a failure. It is *`reconcile()`'s own crash
+    > window* — `reconcile()` is the only caller of `cancelWorkflow` anywhere in the system, and step (1)
+    > cancels and then bumps, so a pass that dies between the two leaves exactly a CANCELLED current attempt
+    > on a `running` run. The attempt cannot run, which is the same condition as a dead `applicationVersion`,
+    > so it takes the same re-attempt path with `reason: 'cancelled'`. Concluding it would kill a live run
+    > because a reconcile pass was interrupted. `MAX_RECOVERY_ATTEMPTS_EXCEEDED` is concluded alongside
+    > SUCCESS and ERROR.
+    >
+    > **Step (5) shipped with the approvals slice, not with `reconcile()` (951bcf0).** It is a call to
+    > `decide()` against `hf_approval`; neither existed when `reconcile()` was built. The execution order
+    > listed it a chunk too early. It is now `EXPIRED_APPROVALS_STATEMENT` plus one `decide()` call per
+    > expiring approval, keyed `decisionKey = 'sweep:<approvalId>'` so a pass that dies mid-sweep replays
+    > rather than double-decides.
+    >
+    > Signature as built: `reconcile(pool, dbosClient, { applicationVersion, lockTimeout? })` — see the
+    > note on `decide()`'s call shape under *The approvals protocol*.
   - The `step(name, fn, { key? })` wrapper: a tiny checkpointed pre-step reads `hf_app_state.paused` and `hf_run.current_workflow_id` in one query; if paused, it sets the run `paused` (fenced, control pool) and throws `Suspend`; if the workflow id is not current, it throws `StaleAttempt`. Otherwise `DBOS.runStep(() => fn(ctx), { name, retriesAllowed: false })`, where `ctx.tx(work)` checks a client out of the step pool, **tags it as fenced for exactly the life of the transaction**, opens the transaction whose first statement is the fence `SELECT 1 FROM hf_run WHERE run_id = $1 AND current_workflow_id = $2 FOR SHARE` (zero rows → `StaleAttempt`, rollback) and then runs `work` with a Drizzle handle bound to that client; on commit or rollback the tag is removed before the client returns to the pool, so a handle captured by `work` and used later is refused like any other unfenced write. A `ctx.tx` body must not await a control-plane operation (it cannot: `assertNotInWorkflow` refuses) and must not await another `ctx.tx` of the same run on a different connection — the JS-level cycle round-3 finding 2 described; the 30 s `lock_timeout` on the control side makes any such hang loud. Every core helper that writes from inside a step (`llm.run`, `actions.perform`, `waitForApproval`, activity, tasks, labels, scores, resolution upserts) writes through `ctx.tx`, synchronously within it — no core helper buffers or batches writes; app-authored step code gets no other handle.
-  - **Minimum approvals slice** (pulled forward; the full protocol is still fixed in Phase 2): `waitForApproval({ key, type, draft, … })` — step 1 inside `ctx.tx` inserts `hf_approval (run_id, key, …) ON CONFLICT DO NOTHING` and reads back, returns the decision if decided, otherwise notifies, marks the run `waiting` and throws `Suspend`; and `approvals.decide(…)` as a control-plane operation with the run-first lock order, the one attempt-bump path, fatal `hf_audit`/`hf_activity` inserts, the tag-asserted commit, and `decisionKey` replay. Phase 2 adds batch edits with Zod validation, the assignee rule, Telegram callbacks, expiry, and the inbox UI.
+  - **Minimum approvals slice** (pulled forward; the full protocol is still fixed in Phase 2): `waitForApproval({ key, type, draft, … })` — step 1 inside `ctx.tx` inserts `hf_approval (run_id, key, …) ON CONFLICT DO NOTHING` and reads back, returns the decision if decided, otherwise notifies, marks the run `waiting` and throws `Suspend`; and `approvals.decide(…)` as a control-plane operation with the run-first lock order, the one attempt-bump path, fatal `hf_audit`/`hf_activity` inserts, the tag-asserted commit, and `decisionKey` replay. Phase 2 adds batch edits with Zod validation, the assignee rule, Telegram callbacks, expiry, and the inbox UI. **✅ Done (deviated), b0b6242** — `decide(pool, dbosClient, options)`, `hf_audit` only, and a new `ApprovalBatchRefused`; see the three notes under *The approvals protocol*.
   - **Minimum actions slice**: `actions.perform({ key, channel, … })` on `hf_action_log` with the same `started`-row pattern and `idempotency_key = \`${run_id}:${key}\``, against a stub channel. Phase 2 adds the real channels and the `ActionUncertain` path.
 - **`@hyperfixation/ai`** (pulled forward for the gate; not in the phase list before 2026-09-16): the **minimum ledger slice** — `llm.run`'s gate transaction (pause read, the `$P` period stamp, the lazy `hf_budget_period` insert and `FOR UPDATE`, the ledger insert and read-back, the five branches, the reservation `SUM` scoped to the live attempt and period, `BudgetExceeded`, `LedgerKeyCollision`, `possible_double_charge`) and its completion transaction (the budget row **before** the ledger row), against `MockLanguageModel`. Phase 2 adds the provider registry, prompt files by content hash, Langfuse wiring, real providers, and `withClock` with the period-boundary cases.
 - `@hyperfixation/core`: `defineApp`, registries with duplicate-name errors, `/api/status` (read token) and `/api/status/{pause,resume}` (write token) with `crypto.timingSafeEqual`; `pause` sets `hf_app_state.paused`, sets queue concurrency to 0 for `llm` and `actions`; `resume` clears it, restores concurrency, and calls `reconcile()`. **`records.archive()` is a control-plane operation** (control pool, `assertNotInWorkflow`, tag-asserted commit); it is callable from the web, the admin, and the CLI, and throws `ControlPlaneInWorkflow` from any run. A flow that wants a record archived creates a task.
+
+  > **Built ✅ Done (deviated), 496b903 + 6deac13.** This bullet was the vaguest in Phase 1 — it named the
+  > functions and left the shape to the code. What the code decided:
+  >
+  > **`defineApp` holds the control plane; it does not build one.** `defineApp({ name, applicationVersion?,
+  > flows?, sources?, resolvers?, scorers?, approvalTypes?, channels?, records? })` constructs no `Pool` and
+  > no `DBOSClient`. A separate `attach({ pool, client })` hands it a pair — `startWorker()`'s control pool
+  > in the worker, `getClient()`'s in the web — and every operation resolves it through an accessor that
+  > throws `AppNotAttached` naming the operation until then; `detach()` clears it. This is what lets
+  > `decide()`, `reconcile()` and `runsStart` take their handles as parameters (see *The approvals
+  > protocol*) while apps still call `app.approvals.decide(options)`. `applicationVersion` defaults to
+  > `HF_BUILD_SHA`, and `reconcile()`/`resume()` throw `NoApplicationVersion` rather than run under an
+  > undefined one.
+  >
+  > **Seven registries, and the duplicate-name error lives in the registry.** `flows`, `sources`,
+  > `resolvers`, `scorers`, `approvalTypes`, `channels`, and `records.types` (keyed by `recordType`, not
+  > `name`). Each is a `createRegistry(kind)` throwing `DuplicateRegistration(kind, key)` on a repeat and
+  > `UnknownRegistration(kind, name, known)` on a miss, so `defineApp` itself contains no duplicate check.
+  >
+  > **Pause/resume are mirrored, and leave `resolve` alone.** `pause` sets `hf_app_state.paused` with its
+  > audit row, then zeroes `llm` and `actions`; `resume` clears the flag, restores both to their registered
+  > concurrency, then calls `reconcile()`. The `resolve` queue is deliberately untouched by either half.
+  >
+  > **`records.archive()`** opens with `assertNotInWorkflow()` before any statement, cancels the record's
+  > pending approvals through `decide()` (one call per approval, `decisionKey = archive:<type>:<id>:<
+  > approvalId>`), then archives and audits in one control-plane transaction. Its
+  > `ControlPlaneInWorkflow` assertion — `fence.test.ts` case (vii)'s other half — is in
+  > `packages/core/src/records.test.ts` rather than in `fence.test.ts`, because `fence.test.ts` lives in
+  > `@hyperfixation/db` and `db` cannot import `core` without a cycle.
+  >
+  > **`/api/status`** takes either token on `GET` and the write token on `POST …/{pause,resume}`, compared
+  > with `crypto.timingSafeEqual` over sha256 digests, refusing identically with 401 + `WWW-Authenticate`.
+  > It reports `health: 'ok' | 'degraded'`, where `degraded` means anomalies or budget drift.
+  >
+  > **Known gap this plan does not spec: pause/resume has a liveness race on redeploy.** `startWorker()`'s
+  > `DBOS.registerQueue` calls re-write every queue at its registered concurrency, which would reopen the
+  > queues a `pause` had closed, so the worker reads `hf_app_state.paused` at boot and re-zeroes them. Those
+  > are two unsynchronised round trips. An admin `resume` landing between them is lost: the flag ends up
+  > `false`, the runs are bumped and enqueued, and `llm`/`actions` sit pinned at 0. Nothing self-heals it —
+  > `reconcile()` has no queue-concurrency step, the setter does not read back, and `health` is `degraded`
+  > only on anomalies or drift, so the endpoint would report `ok` while showing `paused: false` next to
+  > `globalConcurrency: 0` and a growing `enqueued`. It is a pure liveness stall, not a correctness one: the
+  > pause *flag* is what makes a paused app correct, and every dispatched step still suspends at its gate,
+  > which is all this plan requires of the queue half. **It needs a decision** — a `reconcile()` hygiene step
+  > that reconciles concurrency against the flag, a read-after-write in `startWorker()`, or a `degraded`
+  > signal for the unpaused-but-zeroed state — and none is invented here.
 - `@hyperfixation/admin`: users resource and the reset-passkey action only.
 - `@hyperfixation/testing`: per-run database from a template; DBOS pointed at it with `HF_BUILD_SHA = 'test-<uuid>'` per process; `MockLanguageModel` cassette; `runFlowSync(flow, input)` runs the flow under `HF_PROCESS = 'worker'` (so the step pool's production fence rule is in force), then **runs a second attempt of the same run** and asserts zero new provider calls, zero new `hf_action_log` rows, and identical `hf_activity`/`hf_task` counts (`{ restart: false }` opts out per test with a reason string); **any `UnfencedWrite` or `ControlPlaneInWorkflow` raised during a test fails it** — the testing package detects nothing itself (round 3 retired the `DBOS.isInStep()` wrapper), it only makes the production refusal fatal; `spawnWorker({ version, module, drainMs? })` / `killAt(stepKey, 'before-checkpoint' | 'after-checkpoint' | 'in-tx')` crash harness, where `'in-tx'` parks the process inside an open `ctx.tx` after the fence statement; `withClock(pgTimestamp)` pins Postgres's `now()` for a test database (a `SET` on the session that the budget gate's period stamp reads) for the period-boundary cases.
 - `@hyperfixation/cli`: `hf new --local`, `hf migrate`, `hf bootstrap`, `hf check`, `hf gen`, `hf dev`.
@@ -183,7 +274,7 @@ Template as listed above. `compose-envs.test.ts` asserts the `environment:` keys
 
 Other Phase 1 tests as in v1: auth negatives and passkey enrolment through a software authenticator; worker isolation (`hf migrate`, `next build`, vitest import never call `DBOS.launch`); status tokens; deep-import fixture fails `tsc`; migration allowlist rejects a `DROP COLUMN` fixture and a `CREATE FUNCTION` fixture.
 
-Exit: `hf new demo-app --local && pnpm dev` signs in by emailed code, enrols a passkey, shows 404 on `/admin` for a member; `pnpm turbo typecheck lint test` green in core; `redeploy.test.ts` green in all twelve cases and `fence.test.ts` green; the compose file validates with env blocks, memory limits, and `stop_grace_period`. **`fence.test.ts`** (single process, real step/control pools, no DBOS launch): (i) connection 1 opens `ctx.tx` for attempt 1 and holds it; connection 2 runs the bump for attempt 2 and must block until connection 1 commits; (ii) after the bump, a new `ctx.tx` for attempt 1 throws `StaleAttempt` before any write; (iii) the bump path's compare-and-set: two concurrent bumps from the same `attempt = 1` yield exactly one `attempt = 2` and one `WorkflowIdCollision`/row-count failure, never `attempt = 3`; (iv) the `dbos.workflow_status` existence assert throws `WorkflowIdCollision` when a row for the new id is pre-inserted; **(v)** a control-plane transaction in which a statement fails and the error is caught and swallowed: the commit helper throws `CommitLost` and nothing persisted; **(vi)** the step pool refuses, with `UnfencedWrite`, each of: a module-level `setInterval` flusher that writes rows pushed from inside a step (the adversary's shape), an `EventEmitter` listener registered inside a step and emitted from a timer outside it, an `INSERT` from a `defineFlow` body before its first `step()`, a helper in a sibling directory that imports `@/db` and is called from a step, a Drizzle `db.transaction()` on the step pool outside `ctx.tx`, and a handle captured inside `ctx.tx` and used after it committed — while a plain `SELECT` from each of those places succeeds and the same writes inside `ctx.tx` succeed; **(vii)** `records.archive()` and `approvals.decide()` called from inside a workflow throw `ControlPlaneInWorkflow` before issuing any statement, and a control-plane bump that waits on a held `ctx.tx` for longer than the test's shortened `lock_timeout` fails with `55P03` naming the run.
+Exit: `hf new demo-app --local && pnpm dev` signs in by emailed code, enrols a passkey, shows 404 on `/admin` for a member; `pnpm turbo typecheck lint test` green in core; `redeploy.test.ts` green in all twelve cases and `fence.test.ts` green; the compose file validates with env blocks, memory limits, and `stop_grace_period`. **`fence.test.ts`** (single process, real step/control pools, no DBOS launch): (i) connection 1 opens `ctx.tx` for attempt 1 and holds it; connection 2 runs the bump for attempt 2 and must block until connection 1 commits; (ii) after the bump, a new `ctx.tx` for attempt 1 throws `StaleAttempt` before any write; (iii) the bump path's compare-and-set: two concurrent bumps from the same `attempt = 1` yield exactly one `attempt = 2` and one `WorkflowIdCollision`/row-count failure, never `attempt = 3`; (iv) the `dbos.workflow_status` existence assert throws `WorkflowIdCollision` when a row for the new id is pre-inserted; **(v)** a control-plane transaction in which a statement fails and the error is caught and swallowed: the commit helper throws `CommitLost` and nothing persisted; **(vi)** the step pool refuses, with `UnfencedWrite`, each of: a module-level `setInterval` flusher that writes rows pushed from inside a step (the adversary's shape), an `EventEmitter` listener registered inside a step and emitted from a timer outside it, an `INSERT` from a `defineFlow` body before its first `step()`, a helper in a sibling directory that imports `@/db` and is called from a step, a Drizzle `db.transaction()` on the step pool outside `ctx.tx`, and a handle captured inside `ctx.tx` and used after it committed — while a plain `SELECT` from each of those places succeeds and the same writes inside `ctx.tx` succeed; **(vii)** `records.archive()` and `approvals.decide()` called from inside a workflow throw `ControlPlaneInWorkflow` before issuing any statement, and a control-plane bump that waits on a held `ctx.tx` for longer than the test's shortened `lock_timeout` fails with `55P03` naming the run. **✅ Done (deviated)** — `fence.test.ts` drives stand-ins for both operations (neither existed when the file was written) plus the `55P03` bound; the assertion against the real `records.archive()` is in `packages/core/src/records.test.ts`, because `fence.test.ts` lives in `@hyperfixation/db` and `db` cannot import `core` without a package cycle.
 
 ### Phase 2 — the demo loop end to end (locally)
 
@@ -225,6 +316,16 @@ Unchanged.
 
 Polymorphic linking, the `BEFORE DELETE` guard, `records.archive()`, the mixin, and E001–E005 are unchanged from v1. New and changed rows are marked.
 
+> **The `BEFORE DELETE` guard — ✅ Done (deviated), one correctness fix (b0b6242).** The generated trigger
+> tests each referencing table with `WHERE record_type = TG_ARGV[0] AND record_id = OLD.id`, and `record_id`
+> is `text` on every machinery table (a record id is *carried*, not joined on) while a record table's `id` is
+> the `bigint` identity E001 insists on — so the comparison was text against bigint. It casts now:
+> `record_id = OLD.id::text`. The bug shipped with the migrator and sat latent through four chunks, because
+> the guard is generated over *whichever referencing tables exist* and, until `hf_approval` landed, none did:
+> the db tests stood a hand-rolled table in for it, and the stand-in's `record_id` was `bigint`. The general
+> lesson is worth keeping for `hf_activity`, `hf_task` and the rest: a trigger generated over a table list is
+> untested until a real table is on the list.
+
 | Table | Key columns |
 |---|---|
 | `hf_app_state` (changed) | singleton: `paused bool`, `paused_by`, `budget_usd` (**the default copied into each new `hf_budget_period` row**), ~~`month`~~ ~~`spent_usd`~~ **removed in round 3 — both live per period**, ~~`reserved_usd`~~ **removed in round 2 — reservation is derived from `hf_llm_call` rows in `started`**, `read_token_hash`, `write_token_hash` |
@@ -265,10 +366,47 @@ Stated property: **at most one extra provider call per crash, always visible** (
 
 **`approvals.decide({ ids, decision, edits, userId, via, decisionKey })`** — the one function used by the web inbox, Telegram, the admin, `records.archive`, and the reconciler's expiry. It is a **control-plane operation**: `assertNotInWorkflow()` first (`ControlPlaneInWorkflow` from inside any run — round-3 finding 2), then:
 
+> **Call shape as built ✅ Done (deviated), b0b6242:** `decide(pool, dbosClient, options)`, not the bare
+> `decide(options)` this line implies. Nothing in `workflows` owns a control pool or a `DBOSClient` — the
+> worker's pair is built by `startWorker()` and the web's client by `getClient()` — and the thing that
+> *holds* a pair is `defineApp`, which is a later chunk and a different package. So `decide()` is handed
+> them, and so are its siblings: `reconcile(pool, dbosClient, options)` and
+> `runsStart(pool, dbosClient, flow, input, options?)`. `waitForApproval(options)` is the exception, because
+> it runs inside a workflow and reads its handles from the run context. `app.approvals.decide(options)` on a
+> `defineApp` app is the bare shape this line describes, with the app supplying the first two arguments.
+
 1. One control-plane transaction on a checked-out `pg` client from the control pool (`enqueueInTransaction` needs a `pg.ClientBase`, `client.d.ts:200`): `BEGIN; SET LOCAL lock_timeout = '30s'`. Read the approvals' `run_id`s without locking, then **lock the runs first** — `SELECT … FROM hf_run WHERE run_id = ANY(…) ORDER BY run_id FOR UPDATE` — and only then `SELECT … FROM hf_approval WHERE id = ANY($1) ORDER BY id FOR UPDATE` (round 3: `hf_run` before `hf_approval`, matching `waitForApproval`; the previous order deadlocked against a step's `INSERT … ON CONFLICT` on the same row). If an approval's `run_id` changed between the unlocked read and the locked one, roll back and retry once.
+
+   > **Built ✅ Done (deviated), b0b6242 — `ApprovalRunMoved`.** The retry is the *whole* `decide()` call in a
+   > fresh transaction, once, not a partial resumption of the one that lost the race. There is nothing
+   > partial to resume: the tag-asserting commit helper has already issued `ROLLBACK` and released the client
+   > with the error on the way out (round-3 finding 5's mechanism), so the second attempt re-does the scout
+   > read, both lock statements and everything after. A second `ApprovalRunMoved` propagates — losing that
+   > race once is ordinary, twice is not.
+
 2. Validate the whole batch before writing: every id exists; `status = 'pending'`; assignee rule; each edited draft parses against the type's Zod schema; a row whose `decision_key` already equals this `decisionKey` is a replay — return the earlier result for the batch and write nothing. Any failure rolls back with per-row reasons.
+
+   > **Built ✅ Done (deviated), b0b6242 — `ApprovalBatchRefused`, an error this plan does not name.** The
+   > replay rule above is stated per row, which leaves the mixed case undefined: some of the batch's rows
+   > carry this `decisionKey` and some do not. That batch is **refused whole**, not partially replayed. A
+   > batch is written atomically, so a mixed match cannot be this batch half-applied — it means a *different*
+   > batch already used the key, and the rows that do not carry it were never part of it; replaying the
+   > matching subset would return a result for a batch that never existed. The same error carries the
+   > validate-before-write refusals this step lists (an id with no row, a row already decided), gathering
+   > every reason at once rather than the first — which is what "rolls back with per-row reasons" asks for.
+   > A third error, `ApprovalWriteLost`, covers step 3's row count.
+   >
+   > Out of scope at this chunk, as ordered: the Zod parse of edited drafts and the assignee rule are Phase 2.
 3. Per row, `UPDATE hf_approval SET status, decided_by, decided_at, decided_via, edited_draft, decision_key WHERE id = $1 AND status = 'pending'`; a row count other than 1 rolls back the batch. Per distinct run, the one attempt-bump path: with the locked row's `attempt = N`, `UPDATE hf_run SET attempt = $1, current_workflow_id = $2, status = 'running' WHERE run_id = $3 AND attempt = $4` with `$1 = N + 1`, `$2 = run_id || ':' || (N + 1)` computed in application code, `$4 = N` (row count must be 1); `SELECT 1 FROM dbos.workflow_status WHERE workflow_uuid = $2` must return nothing (`WorkflowIdCollision` otherwise — rolls back; never a silent no-op); `getClient().enqueueInTransaction(client, { workflowName: <flow's registered DBOS name>, workflowID: $2, queueName: <flow's registered queue> }, { runId, attempt: N + 1, input })` — its returned handle is discarded (it carries no commit state; round-3 finding 5); write `$2` into each of the run's approvals' `resume_workflow_id` (informational).
 4. Insert `hf_audit` and `hf_activity` rows in the same transaction. **These are fatal**: nothing inside a control-plane transaction catches an error, because a swallowed error leaves the transaction aborted and Postgres then answers `COMMIT` with a `ROLLBACK` tag that node-pg does not raise (round-3 finding 5, live).
+
+   > **Built 🚧 In progress, b0b6242 — the `hf_audit` half only.** One `hf_audit` row per decided approval,
+   > in the same transaction, with nothing catching. **`hf_activity` does not exist**: it is a Phase 2 table
+   > (it appears in *The machinery tables* below and in no migration or Drizzle definition), so `decide()`
+   > writes no activity row at all. **Open item:** when `hf_activity` lands, its insert joins `decide()`
+   > under this same rule. The mechanism the rule depends on — the commit tag assert in step 5 — is built and
+   > is what `fence.test.ts` case (v) proves, so adding the second insert later is a one-line change, not a
+   > re-litigation.
 5. Commit through the control-plane commit helper: `const r = await client.query('COMMIT')`; `r.command !== 'COMMIT'` throws `CommitLost`; on any error the helper issues `ROLLBACK` and releases the client with the error. `decide()` returns its result only after the tag assert. The decision, the bump, and the enqueue are one transaction: a crash or a `CommitLost` anywhere leaves the approval `pending` and the run untouched; a retry with the same `decisionKey` starts over. Nothing is sent on a topic; nothing can be consumed by the wrong waiter; nothing depends on a DBOS row existing beforehand; and no committed decision can exist without its resume workflow. The web calls this through the control pool it already has under the application role — the DBOS system tables live in the app database under schema `dbos`, and the migrator's `dbos schema -s dbos -r hf_<app>` step grants the role DML on them (round-3 finding 4; E006 checks it at boot).
 
 Telegram callbacks carry the approval id and a per-message nonce as `decisionKey`. Expiry is `reconcile()` step (5). There is no separate sweep.
@@ -324,6 +462,13 @@ Manual, because automation cannot see them: a phone browser (Crystal's) enrollin
 - **Two attempts running at once** would double non-ledger side effects. Round 2 replaced the mitigation: the lock is held until process death and the process dies on the line after the drain (mechanism, live-verified), and every step write is fenced on `hf_run.current_workflow_id` — round 3 made that half a mechanism too (the step pool refuses unfenced writes in production). Residual: an app step that performs an *external* side effect other than through `actions.perform` (raw HTTP in a step) is fenced by neither half; the stated rule is that outbound side effects go through `actions.perform`, and Phase 6's fetches are reads.
 - **The fence is only as complete as the classifier.** Round 3 closed every async-context and import-path escape by moving enforcement to the connection; what remains is a write that the parser classifies as a read (a writing SQL function behind a `SELECT`). Mitigation: no core function writes; app migrations cannot create functions; adversary target (a).
 - **A control-plane write without a predicate fence** would be the new round-2-finding-1: the control pool is not fenced by the step pool's rule. Mitigation: every control-plane `UPDATE hf_run` carries `AND current_workflow_id = …` or `AND attempt = $N`; the control pool is unreachable from app code; adversary target (d).
+- **A resume can be lost to a booting worker (found in build, 2026-09-17).** `startWorker()` re-zeroes the
+  `llm`/`actions` queues when it boots into a paused app, because `registerQueue` reopens them; the read of
+  `hf_app_state.paused` and the write of the concurrency are not atomic, so an admin `resume` landing between
+  them leaves the app unpaused with both queues pinned at 0 and its backlog enqueued behind them. Liveness
+  only — the pause flag is the correctness half and every dispatched step still suspends at its gate — but
+  nothing self-heals it and `/api/status` reports `health: 'ok'` while showing the evidence in two separate
+  fields. Undecided; see the note on `@hyperfixation/core` in Phase 1 for the three candidate fixes.
 - **`lock_timeout` on the control side is a bound, not a diagnosis.** A control-plane transaction that legitimately waits 30 s on `hf_run` (it should not: fenced writes are short) fails and is retried by its caller; the failure names the run. Residual: the JS-level cycle from round-3 finding 2 is prevented at its only known entry (`assertNotInWorkflow`), and the timeout is the backstop for entries not yet known.
 - **Period accounting attributes by gate time, not completion time.** A call that reserves on the 30th and completes on the 1st bills the old month; that is the definition, stated once, and drift per period is exact. Residual: a month whose last hours carry many in-flight calls can close slightly over budget by their real cost minus their estimate; estimates are the bound, as before.
 - **`BudgetExceeded` is still terminal.** Round 3 removed the phantom reservations that made it fire falsely; it can still fire truly, and the run dies. Mitigation: `/api/status` shows the current period against budget, and the admin can raise a period's `budget_usd` before resuming work by new runs.
