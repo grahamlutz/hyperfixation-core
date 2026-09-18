@@ -1,12 +1,33 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { readMigrationFiles } from "drizzle-orm/migrator";
 import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { BootCheckFailure } from "./boot-checks.js";
 import { GRANT_RO_EXCLUDED_TABLES } from "./grant-ro.js";
-import { migrate } from "./migrate.js";
+import { CORE_MIGRATIONS_DIR, migrate } from "./migrate.js";
 import { createTestDatabase, type TestDatabase } from "./test-support/database.js";
+
+/**
+ * What drizzle would insert into `drizzle.hf_core_migrations` for the committed
+ * core migrations: one row per journal entry, `created_at` its `when` and `hash`
+ * the sha256 of the .sql file. Comparing rows against this instead of a count
+ * literal keeps the test honest when a migration is added, and still fails when
+ * the migrator applies a different set of files than the journal lists.
+ */
+const expectedCoreMigrations = readMigrationFiles({
+  migrationsFolder: CORE_MIGRATIONS_DIR,
+}).map((m) => ({ hash: m.hash, created_at: String(m.folderMillis) }));
+
+const coreMigrationCount = String(expectedCoreMigrations.length);
+
+const countCoreMigrations = async (client: Client): Promise<string | undefined> => {
+  const { rows } = await client.query<{ count: string }>(
+    "SELECT count(*)::text AS count FROM drizzle.hf_core_migrations",
+  );
+  return rows[0]?.count;
+};
 
 async function writeMigrationSet(dir: string, tag: string, sql: string): Promise<void> {
   await mkdir(path.join(dir, "meta"), { recursive: true });
@@ -48,10 +69,10 @@ describe("the five-step migrator", () => {
         expect.arrayContaining(["hf_run", "hf_llm_call", "hf_budget_period", "hf_user"]),
       );
 
-      const { rows: applied } = await migrator.query<{ count: string }>(
-        "SELECT count(*)::text AS count FROM drizzle.hf_core_migrations",
+      const { rows: applied } = await migrator.query<{ hash: string; created_at: string }>(
+        "SELECT hash, created_at::text AS created_at FROM drizzle.hf_core_migrations ORDER BY created_at",
       );
-      expect(applied[0]?.count).toBe("4");
+      expect(applied).toEqual(expectedCoreMigrations);
 
       const { rows: index } = await migrator.query<{ indexdef: string }>(
         "SELECT indexdef FROM pg_indexes WHERE indexname = 'hf_llm_call_reservation_idx'",
@@ -61,10 +82,7 @@ describe("the five-step migrator", () => {
 
     it("is idempotent — a second deploy applies nothing new", async () => {
       await migrate(db.migratorUrl, { appName: db.appName });
-      const { rows } = await migrator.query<{ count: string }>(
-        "SELECT count(*)::text AS count FROM drizzle.hf_core_migrations",
-      );
-      expect(rows[0]?.count).toBe("4");
+      expect(await countCoreMigrations(migrator)).toBe(coreMigrationCount);
     });
   });
 
@@ -88,10 +106,7 @@ describe("the five-step migrator", () => {
       );
       expect(rows[0]?.count).toBe("1");
 
-      const { rows: core } = await migrator.query<{ count: string }>(
-        "SELECT count(*)::text AS count FROM drizzle.hf_core_migrations",
-      );
-      expect(core[0]?.count).toBe("4");
+      expect(await countCoreMigrations(migrator)).toBe(coreMigrationCount);
     });
 
     it("refuses an app migration that touches an hf_* table, before applying it", async () => {
