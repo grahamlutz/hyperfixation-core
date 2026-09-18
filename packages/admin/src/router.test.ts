@@ -57,6 +57,16 @@ describe("what the admin router resolves for an admin", () => {
     await expect(router.route("/admin")).resolves.toEqual({ kind: "index" });
   });
 
+  it("takes a catch-all's segments as-is, so a resource could be called admin", async () => {
+    // Only a whole pathname carries the mount on the front; stripping it from the segments too
+    // would make one resource name unreachable for no reason.
+    await expect(router.route(["admin"])).resolves.toBeUndefined();
+    await expect(router.route("/admin/users")).resolves.toEqual({
+      kind: "list",
+      resource: usersResource,
+    });
+  });
+
   it("resolves a registered resource to its list", async () => {
     await expect(router.route(["users"])).resolves.toEqual({
       kind: "list",

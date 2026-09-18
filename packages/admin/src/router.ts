@@ -42,10 +42,10 @@ export interface AdminRouter {
 }
 
 function segmentsOf(path: string | readonly string[] | undefined): string[] {
-  const parts = typeof path === "string" ? path.split("/") : (path ?? []);
-  // A catch-all hands back the segments below the mount, but a caller passing the whole
-  // pathname would otherwise resolve `admin` as a resource name.
-  const segments = parts.filter((segment) => segment.length > 0);
+  // A catch-all already hands back the segments below the mount, so an array is taken as-is —
+  // a resource named `admin` stays reachable. Only a whole pathname has the mount on the front.
+  if (typeof path !== "string") return (path ?? []).filter((segment) => segment.length > 0);
+  const segments = path.split("/").filter((segment) => segment.length > 0);
   return segments[0] === ADMIN_BASE_PATH.slice(1) ? segments.slice(1) : segments;
 }
 
