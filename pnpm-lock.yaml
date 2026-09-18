@@ -310,6 +310,9 @@ importers:
       '@hyperfixation/auth':
         specifier: workspace:*
         version: link:../auth
+      '@hyperfixation/core':
+        specifier: workspace:*
+        version: link:../core
       '@hyperfixation/db':
         specifier: workspace:*
         version: link:../db

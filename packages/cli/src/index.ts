@@ -31,6 +31,13 @@ export {
   type MigrateAppResult,
 } from "./migrate.js";
 export { bootstrapApp, type BootstrapAppOptions, type BootstrapAppResult } from "./bootstrap.js";
+export {
+  statusTokenApp,
+  StatusTokenAlreadySet,
+  type StatusTokenAppOptions,
+  type StatusTokenAppResult,
+  type StatusTokenKind,
+} from "./status-token.js";
 export { checkApp, type CheckAppResult, type CheckFinding } from "./check.js";
 export { probeApp, type AppRegistry } from "./probe.js";
 export {

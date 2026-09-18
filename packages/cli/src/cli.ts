@@ -5,9 +5,10 @@ import { dev, devBuildSha } from "./dev.js";
 import { generate } from "./gen.js";
 import { migrateApp } from "./migrate.js";
 import { newApp } from "./new.js";
+import { statusTokenApp, type StatusTokenKind } from "./status-token.js";
 import { requireTemplateSource } from "./template-source.js";
 
-export const COMMANDS = ["new", "migrate", "bootstrap", "check", "gen", "dev"] as const;
+export const COMMANDS = ["new", "migrate", "bootstrap", "status-token", "check", "gen", "dev"] as const;
 
 export type Command = (typeof COMMANDS)[number];
 
@@ -22,6 +23,11 @@ export const USAGE = `hf — the hyperfixation CLI
 
   hf bootstrap              grant the app its one bootstrap admin
       --email <address>       the address to promote; otherwise HF_BOOTSTRAP_EMAIL
+
+  hf status-token           provision /api/status's read and write tokens
+      --read                   only the read token; otherwise both
+      --write                  only the write token; otherwise both
+      --rotate                 replace a token that is already set
 
   hf check                  declared env, pending migrations, and E001-E006
 
@@ -80,6 +86,8 @@ async function dispatch(command: Command, argv: readonly string[], io: Io): Prom
       return await commandMigrate(argv, io);
     case "bootstrap":
       return await commandBootstrap(argv, io);
+    case "status-token":
+      return await commandStatusToken(argv, io);
     case "check":
       return await commandCheck(argv, io);
     case "gen":
@@ -150,6 +158,29 @@ async function commandBootstrap(argv: readonly string[], io: Io): Promise<number
   io.out(
     `${result.created ? "created" : "promoted"} ${result.email} as ${result.app.appName}'s admin`,
   );
+  return 0;
+}
+
+async function commandStatusToken(argv: readonly string[], io: Io): Promise<number> {
+  const { values } = parseArgs({
+    args: [...argv],
+    options: {
+      dir: { type: "string" },
+      read: { type: "boolean", default: false },
+      write: { type: "boolean", default: false },
+      rotate: { type: "boolean", default: false },
+    },
+  });
+
+  const kinds: StatusTokenKind[] =
+    values.read || values.write
+      ? [...(values.read ? (["read"] as const) : []), ...(values.write ? (["write"] as const) : [])]
+      : ["read", "write"];
+
+  const result = await statusTokenApp({ dir: values.dir, kinds, rotate: values.rotate });
+
+  io.out(`${result.app.appName}: status token(s) provisioned — shown once, not stored:`);
+  for (const kind of kinds) io.out(`  ${kind}: ${result.tokens[kind]}`);
   return 0;
 }
 

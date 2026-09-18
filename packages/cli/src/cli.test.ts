@@ -51,7 +51,15 @@ describe("the hf binary's argument handling", () => {
   });
 
   it("documents every command it dispatches", () => {
-    expect(COMMANDS).toEqual(["new", "migrate", "bootstrap", "check", "gen", "dev"]);
+    expect(COMMANDS).toEqual([
+      "new",
+      "migrate",
+      "bootstrap",
+      "status-token",
+      "check",
+      "gen",
+      "dev",
+    ]);
     for (const command of COMMANDS) expect(USAGE).toContain(`hf ${command}`);
   });
 });
