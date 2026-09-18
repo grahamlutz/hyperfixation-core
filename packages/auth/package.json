@@ -23,7 +23,18 @@
   },
   "devDependencies": {
     "@hyperfixation/eslint-config": "workspace:*",
+    "@hyperfixation/testing": "workspace:*",
     "@microsoft/api-extractor": "^7.59.1",
+    "@types/pg": "^8.23.1",
     "eslint": "^10.10.0"
+  },
+  "dependencies": {
+    "@better-auth/passkey": "1.7.5",
+    "@hyperfixation/db": "workspace:*",
+    "@simplewebauthn/server": "13.3.3",
+    "better-auth": "1.7.5",
+    "drizzle-orm": "^0.45.2",
+    "pg": "^8.23.0",
+    "zod": "4.6.5"
   }
 }

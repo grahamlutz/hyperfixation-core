@@ -4,6 +4,135 @@
 
 ```ts
 
+import { SessionFactor } from '@hyperfixation/db';
+import { sessionFactors } from '@hyperfixation/db';
+
+// @public (undocumented)
+export type AccessDecision = {
+    outcome: "allow";
+    session: AuthSession;
+} | {
+    outcome: "redirect";
+    to: string;
+    refusal: AccessRefusal;
+} | {
+    outcome: "not-found";
+    refusal: AccessRefusal;
+};
+
+// @public (undocumented)
+export interface AccessPaths {
+    // (undocumented)
+    signInPath?: string;
+    // (undocumented)
+    stepUpPath?: string;
+}
+
+// @public (undocumented)
+export type AccessRefusal = "no-session" | "banned" | "code-factor" | "missing-role";
+
+// @public
+export class AccessRefused extends Error {
+    constructor(decision: AccessDecision);
+    // (undocumented)
+    readonly decision: AccessDecision;
+}
+
+// @public (undocumented)
+export interface AccessRequest extends AccessPaths {
+    factor?: SessionFactor;
+    pathname?: string;
+    // (undocumented)
+    role?: string;
+    // (undocumented)
+    session: AuthSession | null | undefined;
+}
+
+// @public
+export const ADMIN_AREA = "admin";
+
+// @public
+export const ADMIN_ROLE = "admin";
+
+// @public
+export const AUTH_AREA = "auth";
+
+// @public
+export interface AuthSession {
+    // (undocumented)
+    factor: SessionFactor;
+    // (undocumented)
+    user: SessionUser;
+}
+
+// @public
+export function createSessionGuard(options: SessionGuardOptions): RequireSession;
+
+// @public (undocumented)
+export const DEFAULT_SIGN_IN_PATH = "/auth/sign-in";
+
+// @public (undocumented)
+export const DEFAULT_STEP_UP_PATH = "/auth/passkey";
+
+// @public
+export const EMAIL_OTP_SIGN_IN_PATH = "/sign-in/email-otp";
+
+// @public
+export function evaluateAccess(request: AccessRequest): AccessDecision;
+
+// @public
+export function hasRole(user: SessionUser | null | undefined, role: string): boolean;
+
+// @public
+export const PASSKEY_AUTHENTICATION_PATH = "/passkey/verify-authentication";
+
+// @public
+export const PASSKEY_REGISTRATION_PATH = "/passkey/verify-registration";
+
+// @public (undocumented)
+export type RequireSession = (options?: RequireSessionOptions) => Promise<AuthSession>;
+
+// @public (undocumented)
+export interface RequireSessionOptions {
+    // (undocumented)
+    factor?: AccessRequest["factor"];
+    pathname?: string;
+    // (undocumented)
+    role?: AccessRequest["role"];
+}
+
+// @public (undocumented)
+export type RouteArea = "auth" | "admin" | "app";
+
+// @public
+export function routeAreaOf(pathname: string): RouteArea;
+
+export { SessionFactor }
+
+// @public
+export function sessionFactorForPath(path: string | null | undefined): SessionFactor;
+
+export { sessionFactors }
+
+// @public (undocumented)
+export interface SessionGuardOptions extends AccessPaths {
+    getSession: () => Promise<AuthSession | null | undefined>;
+    onNotFound?: (decision: AccessDecision) => void | Promise<void>;
+    onRedirect?: (to: string, decision: AccessDecision) => void | Promise<void>;
+}
+
+// @public
+export interface SessionUser {
+    // (undocumented)
+    banned?: boolean | null;
+    // (undocumented)
+    email?: string;
+    // (undocumented)
+    id: string;
+    // (undocumented)
+    role?: string | null;
+}
+
 // (No @packageDocumentation comment for this package)
 
 ```
