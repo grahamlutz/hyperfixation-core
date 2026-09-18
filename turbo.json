@@ -23,6 +23,9 @@
       "dependsOn": [
         "^build",
         "^test"
+      ],
+      "env": [
+        "HF_TEST_DATABASE_URL"
       ]
     },
     "api-extractor": {
