@@ -3490,6 +3490,9 @@ export interface CreateAuthOptions {
 }
 
 // @public
+export function createResetSecondFactorAction(options: ResetSecondFactorActionOptions): ResetSecondFactorAction;
+
+// @public
 export function createSessionGuard(options: SessionGuardOptions): RequireSession;
 
 // @public (undocumented)
@@ -3528,11 +3531,47 @@ export interface RequireSessionOptions {
     role?: AccessRequest["role"];
 }
 
+// @public
+export function resetSecondFactor(pool: Pool, options: ResetSecondFactorOptions): Promise<ResetSecondFactorResult>;
+
+// @public (undocumented)
+export type ResetSecondFactorAction = (options: ResetSecondFactorOptions) => Promise<ResetSecondFactorResult>;
+
+// @public (undocumented)
+export interface ResetSecondFactorActionOptions {
+    // (undocumented)
+    pool: Pool;
+    // (undocumented)
+    requireSession: RequireSession;
+}
+
+// @public (undocumented)
+export interface ResetSecondFactorOptions {
+    actorId?: string | null;
+    // (undocumented)
+    reason?: string;
+    // (undocumented)
+    userId: string;
+}
+
+// @public (undocumented)
+export interface ResetSecondFactorResult {
+    // (undocumented)
+    passkeysRemoved: number;
+    // (undocumented)
+    sessionsRevoked: number;
+    // (undocumented)
+    userId: string;
+}
+
 // @public (undocumented)
 export type RouteArea = "auth" | "admin" | "app";
 
 // @public
 export function routeAreaOf(pathname: string): RouteArea;
+
+// @public
+export const SECOND_FACTOR_RESET_MARKER = "hf-auth: second factor reset";
 
 export { SessionFactor }
 

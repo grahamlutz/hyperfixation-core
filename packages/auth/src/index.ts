@@ -46,3 +46,12 @@ export {
   type BootstrapRefusal,
   type BootstrapResult,
 } from "./bootstrap.js";
+export {
+  createResetSecondFactorAction,
+  resetSecondFactor,
+  SECOND_FACTOR_RESET_MARKER,
+  type ResetSecondFactorAction,
+  type ResetSecondFactorActionOptions,
+  type ResetSecondFactorOptions,
+  type ResetSecondFactorResult,
+} from "./reset-second-factor.js";
