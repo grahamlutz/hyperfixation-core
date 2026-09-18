@@ -23,6 +23,11 @@
       "dependsOn": [
         "^build",
         "^test"
+      ],
+      "env": [
+        "DATABASE_URL",
+        "HF_TEST_DATABASE_URL",
+        "MIGRATOR_DATABASE_URL"
       ]
     },
     "api-extractor": {
