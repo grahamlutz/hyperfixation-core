@@ -7,6 +7,7 @@ export {
   LAUNCHING_MARKER,
   MIN_BUILD_SHA_LENGTH,
   QUEUES,
+  RECONCILER_POOL_SIZE,
   SHUTDOWN_FAILED_MARKER,
   SHUTDOWN_IGNORED_MARKER,
   SHUTDOWN_MARKER,
@@ -44,6 +45,29 @@ export {
 export { Suspend, SUSPEND_STATUSES, type SuspendStatus } from "./suspend.js";
 export { currentRun, OutsideRun, type RunContext } from "./run-context.js";
 export { runsStart, START_RUN_STATEMENT, type RunsStartOptions, type StartedRun } from "./runs.js";
+export {
+  reconcile,
+  startReconciler,
+  UnknownFlow,
+  ABANDON_LLM_CALLS_STATEMENT,
+  DRIFT_STATEMENT,
+  PAUSED_RUNS_STATEMENT,
+  RECONCILE_ACTION_MARKER,
+  RECONCILE_ANOMALY_MARKER,
+  RECONCILE_FAILED_MARKER,
+  RECONCILE_INTERVAL_MS,
+  RECONCILE_PASS_MARKER,
+  RUNNING_RUNS_STATEMENT,
+  UNCERTAIN_ACTIONS_STATEMENT,
+  type Concluded,
+  type PeriodDrift,
+  type Reattempted,
+  type ReconcileAnomaly,
+  type ReconcileFailure,
+  type ReconcileOptions,
+  type ReconcileReport,
+  type Reconciler,
+} from "./reconcile.js";
 /**
  * The types travel with `Worker`, the factory does not: `startWorker()` is the only way to
  * get a control pool, which is what keeps "no export resolves to the control pool" true of

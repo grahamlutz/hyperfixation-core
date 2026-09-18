@@ -1,6 +1,7 @@
-import { DBOS, type WorkflowQueue } from "@dbos-inc/dbos-sdk";
+import { DBOS, DBOSClient, type WorkflowQueue } from "@dbos-inc/dbos-sdk";
 import { createStepPool, runBootChecks, type RecordTable, type StepPool } from "@hyperfixation/db";
 import { createControlPool, type ControlPool } from "./control-pool.js";
+import { reconcile, startReconciler, type Reconciler } from "./reconcile.js";
 import { acquireWorkerLock, type WorkerLock } from "./worker-lock.js";
 import { setWorkerRuntime } from "./worker-runtime.js";
 
@@ -12,6 +13,12 @@ export const MIN_BUILD_SHA_LENGTH = 7;
 
 export const SYSTEM_DATABASE_SCHEMA = "dbos";
 export const SYSTEM_DATABASE_POOL_SIZE = 5;
+
+/**
+ * The reconciler's own client. Deliberately not `getClient()`: that singleton is the web's, and
+ * calling it here would run the boot checks a second time and import this module back.
+ */
+export const RECONCILER_POOL_SIZE = 2;
 
 /**
  * The three queues, by name and concurrency. There is no flow registry yet; when there is,
@@ -85,6 +92,9 @@ export interface Worker {
   control: ControlPool;
   lock: WorkerLock;
   queues: Record<QueueName, WorkflowQueue>;
+  /** What `reconcile()` enqueues through; the worker's only `DBOSClient`. */
+  client: DBOSClient;
+  reconciler: Reconciler;
 }
 
 /**
@@ -114,6 +124,7 @@ export async function startWorker(options: StartWorkerOptions): Promise<Worker> 
   // and a recovered flow reaches `workerRuntime()` the same as a freshly dispatched one.
   setWorkerRuntime({ appName: options.appName, applicationVersion, steps, control });
 
+  let client: DBOSClient | undefined;
   try {
     const lock = await acquireWorkerLock(options.databaseUrl, options.appName);
 
@@ -146,10 +157,34 @@ export async function startWorker(options: StartWorkerOptions): Promise<Worker> 
       });
     }
 
-    return { appName: options.appName, applicationVersion, steps, control, lock, queues };
+    client = await DBOSClient.create({
+      systemDatabaseUrl: options.databaseUrl,
+      systemDatabaseSchemaName: SYSTEM_DATABASE_SCHEMA,
+      systemDatabasePoolSize: RECONCILER_POOL_SIZE,
+      applicationName: options.appName,
+    });
+
+    // Once before the worker is ready, so a redeploy's backlog is moved onto this version
+    // before anything else is dispatched, and every minute after. A failure here fails the
+    // boot: a worker that cannot reconcile is a worker the previous version's runs are
+    // stranded behind.
+    await reconcile(control.pool, client, { applicationVersion });
+    const reconciler = startReconciler(control.pool, client, { applicationVersion });
+
+    return {
+      appName: options.appName,
+      applicationVersion,
+      steps,
+      control,
+      lock,
+      queues,
+      client,
+      reconciler,
+    };
   } catch (error) {
     // The lock connection is not closed here either: if it was taken, the lock belongs to
     // this process until it dies, whatever went wrong afterwards.
+    await client?.destroy().catch(() => undefined);
     await steps.end().catch(() => undefined);
     await control.end().catch(() => undefined);
     throw error;
