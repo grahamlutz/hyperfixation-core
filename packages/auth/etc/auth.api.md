@@ -1439,7 +1439,7 @@ ipAddress?: string | null | undefined;
 userAgent?: string | null | undefined;
 } & Record<string, unknown>, ctx: GenericEndpointContext | null) => Promise<{
 data: {
-factor: "passkey" | "code";
+factor: "code" | "passkey";
 id: string;
 createdAt: Date;
 updatedAt: Date;
@@ -2680,7 +2680,7 @@ $ref: string;
 $Infer: {
 body: {
 userId: string;
-role: "user" | "admin" | ("user" | "admin")[];
+role: "admin" | "user" | ("admin" | "user")[];
 };
 };
 };
@@ -2769,7 +2769,7 @@ body: {
 email: string;
 password?: string | undefined;
 name: string;
-role?: "user" | "admin" | ("user" | "admin")[] | undefined;
+role?: "admin" | "user" | ("admin" | "user")[] | undefined;
 data?: Record<string, any> | undefined;
 };
 };
@@ -3393,7 +3393,7 @@ readonly session?: ("delete" | "list" | "revoke")[] | undefined;
 };
 } & {
 userId?: string | undefined;
-role?: "user" | "admin" | undefined;
+role?: "admin" | "user" | undefined;
 };
 };
 };
