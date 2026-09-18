@@ -525,8 +525,12 @@ to E, `docker compose config` to B. **Track A closed its three (2026-09-18)** �
 `tsc`, and `pnpm turbo typecheck lint test` and `pnpm turbo api-extractor` are green across core — and the
 gate is now 12 of 12. **Track C closed the auth negatives (2026-09-18)**; the passkey-enrolment half of that
 same bullet — *enrolment through a software authenticator* — is **not** closed, because nothing in this repo
-drives WebAuthn yet and the template that would is track B's. **B, D and E are still ⬜**, so chunk 14 still
-cannot close; and the pause/resume liveness race in "Still open" has to be settled whatever the tracks do.
+drives WebAuthn yet and the template that would is track B's. **B, D and E have since closed too**
+(2026-09-18), so every bullet above except the passkey half is struck: `hf new demo-app --local` builds an
+app that migrates, bootstraps its admin, passes E001–E006 and serves `/w`, and its worker launches under
+`HF_BUILD_SHA=dev-<timestamp>` — with one caveat on `pnpm dev` recorded in the track E note. What chunk 14
+still cannot close on is **passkey enrolment through a software authenticator**, which no track owns, and
+the pause/resume liveness race in "Still open".
 
 > **Deviation 1 — worker A writes slower than the plan's 250 ms, and only worker A.** The plan's process
 > half has A writing 60 rows 250 ms apart and taking `SIGTERM` at 6 s. Measured: `DBOS.shutdown()` waits
@@ -562,12 +566,13 @@ cannot close; and the pause/resume liveness race in "Still open" has to be settl
 | **B — template and compose** | `Dockerfile` (`ARG SOURCE_COMMIT` → `ENV HF_BUILD_SHA`, `git rev-parse HEAD` fallback), both compose files with full `environment:` blocks, `mem_limit`, `stop_grace_period: 90s` on `worker`, `REQUIRED_ENV` + `compose-envs.test.ts`, CI workflows, dependabot, turbo generators, `components.json`, the two catch-all routes, `worker.ts`, `instrumentation.ts` | chunk 0 | 14 | ✅ Done (deviated) — built in the sibling `hyperfixation-template` repo, 9c900e5..a1c7b30. See the track B note below |
 | **C — auth** | better-auth factory with `emailOTP` (`disableSignUp: true`), passkey, admin, organization; session-factor policy (`factor: 'code' \| 'passkey'`, code sessions confined to `/auth/*`, `/admin/*` needs `admin` and 404s otherwise); `requireSession({ factor, role })` in both layouts and every server action and route handler; bootstrap user; reset-second-factor action | chunk 2 | 14 | ✅ Done (deviated) — 8004d96, a86660f, 08cc4c3, 2c6a3df, 6b3657c. See the track C note below |
 | **D — admin** | Users resource generated from Drizzle metadata, reset-passkey action, guards | track C | 14 | ✅ Done (deviated) — fa14205, 66cfe45. See the track D note below |
-| **E — CLI** | `hf new --local` (giget copy, `__APP_NAME__`/`__DB_NAME__` substitution, `^[a-z][a-z0-9_]{0,62}$` validation), `hf migrate`, `hf bootstrap`, `hf check`, `hf gen`, `hf dev` (sets `HF_BUILD_SHA=dev-<timestamp>`) | track B for `new`; chunk 3 for `migrate` | 14 | ⬜ Not started — `packages/cli/src/index.ts` is a placeholder |
+| **E — CLI** | `hf new --local` (giget copy, `__APP_NAME__`/`__DB_NAME__` substitution, `^[a-z][a-z0-9_]{0,62}$` validation), `hf migrate`, `hf bootstrap`, `hf check`, `hf gen`, `hf dev` (sets `HF_BUILD_SHA=dev-<timestamp>`) | track B for `new`; chunk 3 for `migrate` | 14 | ✅ Done (deviated) — 5e58814, 1268d13, plus d1822f8 in the template repo. See the track E note below |
 
-**Tracks A, B, C and D are done; E is not, and the spine is at 13 of 14.** The execution model below
-assumed the tracks would run alongside the spine from chunk 0; in practice the spine was built solo and the
-tracks were farmed out after chunk 14 had already opened. Chunk 14 asserts on all five, so **chunk 14 still
-cannot close until track E does** — that, not the spine, is Phase 1's critical path.
+**All five tracks are done and the spine is at 13 of 14.** The execution model below assumed the tracks
+would run alongside the spine from chunk 0; in practice the spine was built solo and the tracks were farmed
+out after chunk 14 had already opened. What chunk 14 still waits on is no longer a track's code — it is
+**passkey enrolment through a software authenticator**, which no track owns, and the pause/resume liveness
+race. See "Still open" item 6.
 
 **Track A's done-check is redeploy case 5** (a fixture calling `DBOS.patch`, `DBOS.recv` or
 `dbosClient.sendInTransaction` fails `eslint`) — the only gate case with no database dependency at all.
@@ -773,6 +778,79 @@ and a declared list field the table does not have throws at construction rather 
 > (the machinery-table resources are core's, Phase 2's). The template's admin page still renders its own
 > placeholder: wiring it is track B's file and track E's session to touch, not this one's.
 
+**Track E's done-check is `pnpm --filter @hyperfixation/cli test`.** ✅ Done — 45 tests in nine files,
+four of them against a real database. What they prove: `hf new demo-app` leaves **no** placeholder anywhere
+in a copy of the real template checkout and writes `.env` from the substituted `.env.example`; a source with
+no marker, a target that exists, a name that is not an identifier and a missing `--local` are each refused
+before anything is written; `provisionLocalRoles` creates a role that can read the tables the migrator
+already made and is idempotent on a second pass; `hf bootstrap` grants the first admin as the application
+role and the second run is refused; and `hf check` names a declared-but-absent var, a pending app migration,
+and the fact that it could not read the registry — rather than passing E001–E003 over an empty list.
+
+> **Track E, what landed and where it differs.** Two commits here — 5e58814 `hf new` and the app resolution
+> the other five commands share, 1268d13 the five commands and the `hf` binary — plus d1822f8 in
+> `hyperfixation-template`.
+>
+> **Deviation 1 — both placeholders are the underscored name, and the template's marker now says so**
+> (d1822f8). The plan validates `db_name` against `^[a-z][a-z0-9_]{0,62}$` and spells its own exit bar
+> `hf new demo-app --local`; those cannot both be true of one string. Track B's marker resolved half of it
+> — the name may carry a hyphen, `__DB_NAME__` underscores it — and left `__APP_NAME__` unstated, which
+> would have written `name: "demo-app"` into `src/hyperfixation.ts`, straight into `roleNames()`, which
+> refuses a hyphen: the app would not have migrated at all. So the **directory** is what was typed and
+> **both placeholders** are the underscored form. `hf_<app>` is then both the database name and the
+> application role, which is the identity `provisionRoles` already assumes.
+>
+> **Deviation 2 — giget's semantics, not giget.** Phase 1's source is a local sibling checkout; giget
+> resolves `gh:`/`gitlab:`/tarball URLs and addresses no local directory. What is kept is the part that
+> matters — assert the `.hyperfixation-template` marker on the source, refuse a target that exists, delete
+> the marker from the copy. The remote fetch is Phase 3's, beside the provisioning that is the rest of a
+> cloud `hf new`.
+>
+> **Deviation 3 — `hf migrate` shells out to the app's own `migrate.ts` rather than calling `migrate()`.**
+> The record tables and the app migrations directory come from the app's registry and `migrate.ts` is what
+> reads them; it is also the file the deployed one-shot `migrate` service runs, so a laptop and a deploy
+> cannot drift. The CLI's own half is the application role — which `provisionRoles()` cannot create here,
+> because it records default privileges `FOR ROLE hf_<app>_migrator` while a local migrator is the compose
+> superuser, so the application role would end up unable to read what the migrator made.
+> `provisionLocalRoles` records them for whoever is connected and also grants on already-existing objects.
+> It therefore needs a connection that can create a role; `--skip-roles` is the cloud path.
+>
+> **Deviation 4 — `hf check`'s env contract is `.env.example`, and "missing" means absent, not empty.**
+> Track B's `compose-envs.test.ts` already pins that file, both compose blocks and `REQUIRED_ENV` to each
+> other, so reading it means an app that adds a var of its own is checked for it too — and duplicating
+> `REQUIRED_ENV` here would be a second list to keep in step. The template ships six vars empty on purpose,
+> so an empty value is a declared local state and only an absent name is a gap.
+>
+> **Deviation 5 — E001–E003 need the registry, so `hf check` imports it in a child under the app's `tsx`.**
+> There is no static way to learn the record tables. A probe that fails is reported as a finding naming the
+> checks it left empty, rather than letting `hf check` report green over an empty list.
+>
+> **Deviation 6 — `hf gen` runs `@turbo/gen`'s installed bin, not `turbo gen`.** `turbo gen` re-fetches
+> `@turbo/gen` through `pnpm dlx` even when the app already depends on it, and that second copy installs
+> outside the app's `pnpm-workspace.yaml` — so pnpm 12 refuses `esbuild`'s build script that the app's own
+> `allowBuilds` had permitted. Verified: the template's own `pnpm gen` fails this way in a freshly created
+> app, and `pnpm exec gen run record --args note` succeeds, writing the schema file, the export and the
+> registration.
+>
+> **How far the exit-bar proof got, exactly.** `hf new demo-app --local` against the real template, then
+> `pnpm install`, `hf dev --compose-only`, `hf migrate`, `hf bootstrap`, `hf check`, `hf gen` — all green
+> against a real pg17 in the app's own dev compose. `hf migrate` reported
+> `dbosSchemaGranted: true`, the app migration applied and a delete guard on `demo_note`; `hf check` printed
+> "env, migrations and E001-E006 all clear" with the registry probe succeeding; a worker started with
+> `HF_BUILD_SHA=dev-<timestamp>` passed E001–E006, launched DBOS, registered all three queues and ran a
+> `reconcile()` pass. **`pnpm dev` itself does not compile**, for track B's already-recorded reason:
+> Turbopack cannot resolve a `link:`-ed package outside the project root, and Next 16's `dev` is Turbopack
+> by default. `next dev --webpack` in the same app serves `/w` 200 and `/api/status` 401 (no token), which
+> is the app working. The one-word fix — `"dev": "next dev --webpack"` — was **not** made, because track B
+> deliberately keeps the published-correct spelling in `package.json` and this is the same publishing
+> artifact as CI's build step; deleting `pnpm-workspace.yaml` at the first publish closes both.
+>
+> **Not in scope, deliberately.** No cloud `hf new`: `--local` is refused into an error rather than
+> ignored, because a half-provisioned app is worse than none. No `hf doctor`, no `hf restore-check` — both
+> Phase 3's. `hf dev` starts the web and not a worker, matching `pnpm dev`; note that the template's
+> `worker.ts` does not load `.env` on its own, so `pnpm worker` needs the environment supplied, which is
+> track B's file to decide about.
+
 ### Execution model (decided 2026-09-16): spine solo, tracks farmed out
 
 **One session owns the serial spine start to finish. The five standing tracks go to background sessions.**
@@ -842,7 +920,10 @@ maintenance note.
 **All twelve redeploy cases and all seven fence cases are written, committed and observed green together**
 (`npx turbo run test --force`, 2026-09-18: 41 files, 243 tests, 3m12s — the 2026-09-17 run's 38 files and 222
 tests plus track A's three files). `pnpm -w typecheck`, `pnpm -w lint` and `pnpm -w api-extractor` are green
-in the same tree.
+in the same tree. **With tracks D and E in, the same run is 60 files and 356 tests in 3m14s**, all nine
+packages green (track E, 2026-09-18). One caution for whoever reads a red run: `redeploy-case-1` failed both
+of its cases once under full-suite load and passed alone and on the next full run, so that file is
+load-sensitive rather than flaky-by-construction — re-run it on its own before chasing it.
 
 ## Decisions taken 2026-09-16
 
@@ -886,15 +967,19 @@ added is below it.
    migration count in three places; every future migration bumps them. Maintenance, not a defect — and it
    **was** hit by the first track-C migration, exactly as predicted: `0003_auth_invitation` took all three
    from `"3"` to `"4"` (8004d96). Phase 2's first migration will take them to `"5"`.
-6. 🚧 **Chunk 14 cannot close until track E does.** Tracks A, B, C and D are done, so five of its bullets
-   are struck: the deep-import fixture fails `tsc`, `lint` is green across core, `api-extractor` is green
-   against committed reports, the auth negatives are proven, and `docker compose -f docker-compose.prod.yml
-   config` validates (track B ran both compose files' `config`, green). What remains is **passkey enrolment
-   through a software authenticator** — track C's subject but not its code, since nothing in either repo
-   drives WebAuthn yet; the template (B) has the routes but not the sign-in/enrolment pages themselves, and
-   track D has now landed without touching them, so this is a gap no track owns and it needs an explicit
-   home before chunk 14 closes — plus `hf new demo-app --local && pnpm dev` (E). The spine still has nothing
-   left to build. **This, not the spine, is what Phase 1 is waiting on.**
+6. 🚧 **Every track is done; chunk 14 waits on one bullet no track owned.** A, B, C, D and E have all
+   landed, so six of its bullets are struck: the deep-import fixture fails `tsc`, `lint` is green across
+   core, `api-extractor` is green against committed reports, the auth negatives are proven,
+   `docker compose -f docker-compose.prod.yml config` validates, and `hf new demo-app --local` now produces
+   an app that installs, migrates, bootstraps its admin, passes E001–E006, launches a worker under
+   `HF_BUILD_SHA=dev-<timestamp>` and serves `/w` (E, 5e58814 and 1268d13). What remains is **passkey
+   enrolment through a software authenticator** — track C's subject but not its code, since nothing in
+   either repo drives WebAuthn; the template (B) has the routes but not the sign-in/enrolment pages, and
+   neither D nor E touched them. It needs an explicit home before chunk 14 closes, and it is now the *only*
+   piece of Phase 1 nobody is building. Two smaller things travel with it, both track B's file: `pnpm dev`
+   runs Turbopack, which cannot resolve the `link:`-ed packages (`next dev --webpack` works, and publishing
+   closes it), and `worker.ts` does not load `.env`, so a local `pnpm worker` needs the environment
+   supplied. The spine still has nothing left to build.
 7. 🔁 **The API reports are now a file every API-changing PR touches.** `etc/*.api.md` is committed and CI
    fails on drift, which is the point. Track C hit it first and hard: `etc/auth.api.md` went from an empty
    placeholder to ~3,600 lines, because `createAuth`'s return type has to be inferred out of better-auth's
