@@ -4,8 +4,9 @@
 after adversary rounds 2 and 3. **The design is fixed; this document only orders it.** Where this document
 disagrees with the plan about *what* to build, the plan wins. Where it disagrees about *when*, this one does.
 
-**Status updated 2026-09-17** against the tree at `6deac13`, and again **2026-09-18** for track A
-(`257f4a4`). Every chunk, track and gate case below carries a
+**Status updated 2026-09-17** against the tree at `6deac13`, again **2026-09-18** for track A
+(`257f4a4`), and finally **2026-09-18** for chunk 14's closing pass (`c9231a2`, and 719dfc6..ebe3922 in
+`hyperfixation-template`). Every chunk, track and gate case below carries a
 STATUS marker; a `(deviated)` marker is followed by a note naming what differs and the commit that decided it.
 The markers are the point of this document now — the plan it derives from was written before any of it existed,
 and drifted silently through chunks 11–13 until this pass.
@@ -19,17 +20,44 @@ and drifted silently through chunks 11–13 until this pass.
 | 🚧 In progress | partially built |
 | ⬜ Not started | nothing built yet |
 
-**Where the spine stands:** chunks 0–13 are ✅; chunk 14 is 🚧; tracks A, B and C are ✅ and tracks D and E
-are ⬜. **All twelve redeploy cases are now written and committed** — case 5, the lint assertion, landed with
-track A at 51bc37e; case 7 landed at e6bde42. The `session-factor` gate case landed with track C at a86660f;
-`compose-envs` landed with track B in the sibling `hyperfixation-template` repo.
+**Where the spine stands:** chunks 0–14 are ✅ and tracks A–E are ✅. **All twelve redeploy cases are written
+and committed** — case 5, the lint assertion, landed with track A at 51bc37e; case 7 landed at e6bde42. The
+`session-factor` gate case landed with track C at a86660f; `compose-envs` landed with track B in the sibling
+`hyperfixation-template` repo. See "Phase 1 status" immediately below for what that adds up to.
+
+## Phase 1 status — ✅ complete, with one open design decision (2026-09-18)
+
+**The exit bar is met, and it is met by a test rather than by a claim.** The plan's own wording —
+`hf new demo-app --local && pnpm dev` signs in by emailed code, enrols a passkey, and 404s on `/admin` for a
+member — runs in `hyperfixation-template`'s `tests/e2e/exit-bar.e2e.ts`, headless, against a real Postgres,
+a real mailpit and a **virtual CTAP2 authenticator** inside Chromium. That last piece is what closes the one
+bullet that had been manual since the plan was written and that no track owned: *passkey enrolment through a
+software authenticator*. It is proven twice, against `pnpm dev` and against the standalone build a deploy
+serves, and running both is what caught the defect below.
+
+| The bar | Where it is proven |
+|---|---|
+| `hf new … && pnpm dev`, code sign-in, passkey enrolment, `/admin` 404 for a member | `hyperfixation-template` `tests/e2e/exit-bar.e2e.ts`, 2 tests |
+| `pnpm -w typecheck`, `pnpm -w lint` | green across all nine packages |
+| `npx turbo run test --force` | **61 files, 360 tests, 3m16s** against a real pg17, all nine packages |
+| `pnpm -w api-extractor` | green against the committed `etc/*.api.md` |
+| all 12 redeploy cases, all 7 fence cases | see the gate-case map |
+| `docker compose -f docker-compose.prod.yml config` | validates in a generated app |
+
+**The one thing that is not settled** is "Still open" item 2, the pause/resume liveness race on redeploy.
+It is a choice among three shapes rather than an implementation gap, chunk 14 produced no new evidence for
+any of them, and it is **not part of the exit bar's stated wording** — so Phase 1 is complete against the bar
+the plan wrote, and carries that decision into Phase 2 rather than having answered it. Item 3
+(`hf_activity`), item 5 (migration-count literals), item 7 (API-report churn) and item 8 (`hf_invitation`)
+are carried forward the same way, all of them known and none of them correctness-critical.
 
 **What this pass verified, and what it did not.** Every marker below was set by reading the source and the
 commit diffs — `packages/{db,ai,workflows,core}/src`, the migrations, and `git log -p` on the files in
-question. **The suite was not run as part of this pass**, so "Done" here means *built and its gate case
-committed*, not *observed green today*. Each chunk landed with its gate passing at the time; re-running
-`pnpm turbo typecheck test` against a real pg17 is the check that would upgrade that claim, and chunk 14
-requires it anyway.
+question. **The suite was not run as part of *that* pass**, so "Done" meant *built and its gate case
+committed*, not *observed green today*. **Chunk 14's closing pass supplies what was missing**: the whole
+suite, the typecheck, the lint, the API reports and the exit bar were all run and observed green on
+2026-09-18, and the numbers are in "Phase 1 status" below. It also justified the caution — running the bar
+found a production defect that every one of those green suites had passed over (chunk 14, deviation 4).
 
 ## Three corrections this ordering pass produced
 
@@ -506,7 +534,7 @@ Committed — 496b903 for the package, 6deac13 for case 4.
 > `startWorker()`; or a `degraded` signal for `paused = false` with a zeroed queue holding a backlog.
 > Not invented here — the fix belongs to whoever takes chunk 14.
 
-### 14 — Phase 1 exit assembly — 🚧 In progress
+### 14 — Phase 1 exit assembly — ✅ Done (deviated — see note)
 
 Auth negatives and passkey enrolment through a software authenticator; the deep-import fixture fails `tsc`;
 `pnpm turbo typecheck lint test` and `pnpm turbo api-extractor` green across core; all 12 redeploy cases and
@@ -526,11 +554,16 @@ to E, `docker compose config` to B. **Track A closed its three (2026-09-18)** �
 gate is now 12 of 12. **Track C closed the auth negatives (2026-09-18)**; the passkey-enrolment half of that
 same bullet — *enrolment through a software authenticator* — is **not** closed, because nothing in this repo
 drives WebAuthn yet and the template that would is track B's. **B, D and E have since closed too**
-(2026-09-18), so every bullet above except the passkey half is struck: `hf new demo-app --local` builds an
+(2026-09-18), so every bullet above except the passkey half was struck: `hf new demo-app --local` builds an
 app that migrates, bootstraps its admin, passes E001–E006 and serves `/w`, and its worker launches under
-`HF_BUILD_SHA=dev-<timestamp>` — with one caveat on `pnpm dev` recorded in the track E note. What chunk 14
-still cannot close on is **passkey enrolment through a software authenticator**, which no track owns, and
-the pause/resume liveness race in "Still open".
+`HF_BUILD_SHA=dev-<timestamp>` — with one caveat on `pnpm dev` recorded in the track E note.
+
+**The closing pass (2026-09-18).** The last bullet — **passkey enrolment through a software authenticator**,
+which no track owned — is closed, and so is the whole exit bar, by five pieces: `requireSession()` wired
+into both catch-all routes, `createAdminRouter()` rendered, an emailed-code sign-in and a passkey enrolment
+page, `.env` loading in `worker.ts` and `migrate.ts`, and the bar itself written as an automated test. See
+deviations 4–7 below and the "Phase 1 status" section at the top. Core commits: c9231a2. Template commits:
+719dfc6, c5a40b4, 3f7dd2a, ebe3922.
 
 > **Deviation 1 — worker A writes slower than the plan's 250 ms, and only worker A.** The plan's process
 > half has A writing 60 rows 250 ms apart and taking `SIGTERM` at 6 s. Measured: `DBOS.shutdown()` waits
@@ -543,6 +576,42 @@ the pause/resume liveness race in "Still open".
 > plan's numbers were written against the adversary's own harness, where `SHUTDOWN_RETURNED` came back in
 > 3 002 ms because that harness had no DBOS in it. Cost: the process half takes ~86 s, almost all of it the
 > 60 s drain it is asserting on.
+>
+> **Deviation 4 — closing the exit bar needed one production change in core, and it was a real defect.**
+> `defineFlow` called `DBOS.registerWorkflow` at module scope, which assumes one evaluation per process.
+> That holds for `worker.ts`, which Node runs directly, and does **not** hold for the web: Next splits an
+> app's server code per route, so `src/flows/*.ts` is instantiated once per chunk that reaches it while
+> `@dbos-inc/dbos-sdk` stays external and singular. The second instantiation is refused with "Operation is
+> already registered" and **every route that touches the app 500s from then on**. It reproduced on a real
+> `hf new` app the moment a second route imported `src/hyperfixation.ts` — in `next dev` **and** in the
+> standalone build, so it would have shipped. It had been invisible because until this pass exactly one
+> route (`/api/status`) reached the app at all. The registration now sits behind the same
+> `HF_PROCESS=worker` test `DBOS.launch()` already sits behind: the web enqueues by name through
+> `DBOSClient` and never dispatches, so it needs no registration, and `Flow.workflow` is the bare body
+> there — which nothing calls either way. `packages/workflows/src/define-flow.test.ts` reproduces the
+> bundler's shape with `vi.resetModules()` against the same externalised DBOS (c9231a2). This is the
+> strongest argument in Phase 1 for the exit bar being a *test*: four packages' suites were green over it.
+>
+> **Deviation 5 — `/w` requires a passkey, not "any valid session".** The obvious reading of "the workspace
+> is not the admin" is that a code-factor session may enter it. The plan says the opposite — code sessions
+> are confined to `/auth/*` — and `session-factor.test.ts` already proves the refusal on `/`, `/runs` and
+> `/settings`. So `/w` passes only its `pathname` and lets the policy read it as the app area, whose bar is
+> a passkey. The difference from `/admin` is the *shape* of the refusal, not the bar: `/w` redirects to
+> step up, `/admin` 404s.
+>
+> **Deviation 6 — `"dev": "next dev --webpack"`, which track E deliberately did not do.** Track E kept the
+> published-correct spelling and recorded the Turbopack/`link:` failure instead. The exit bar is spelled
+> `pnpm dev`, and a bar that needs a different command to pass is not met — so the flag is in, carrying the
+> same TEMPORARY marker `pnpm-workspace.yaml` already carries, with the same one-line deletion at the first
+> publish. `next build` is unchanged and still Turbopack; the e2e's build mode passes `--webpack` itself.
+>
+> **Deviation 7 — the admin page reads its own rows, and the template gained four dependencies.**
+> `@hyperfixation/admin` resolves a route and reads nothing (its own deviation 3), so the `SELECT`s live in
+> the template's `src/admin.ts`, with every identifier taken from the resource's Drizzle metadata and only
+> the primary-key value as a parameter. The template now depends on `better-auth` and `@better-auth/passkey`
+> (pinned to core's exact 1.7.5 — the client infers its actions from the server plugins' endpoints, so a
+> plugin on one side and not the other is a call that typechecks against nothing), on `nodemailer` for
+> `sendVerificationOTP`, and on `playwright` for the e2e.
 >
 > **Deviation 2 — the `in-tx` half's bump is driven from the test, not from a worker B.** The plan says
 > "while B boots and reconciles". B cannot boot: A is parked inside an open `ctx.tx` and therefore alive and
@@ -568,11 +637,11 @@ the pause/resume liveness race in "Still open".
 | **D — admin** | Users resource generated from Drizzle metadata, reset-passkey action, guards | track C | 14 | ✅ Done (deviated) — fa14205, 66cfe45. See the track D note below |
 | **E — CLI** | `hf new --local` (giget copy, `__APP_NAME__`/`__DB_NAME__` substitution, `^[a-z][a-z0-9_]{0,62}$` validation), `hf migrate`, `hf bootstrap`, `hf check`, `hf gen`, `hf dev` (sets `HF_BUILD_SHA=dev-<timestamp>`) | track B for `new`; chunk 3 for `migrate` | 14 | ✅ Done (deviated) — 5e58814, 1268d13, plus d1822f8 in the template repo. See the track E note below |
 
-**All five tracks are done and the spine is at 13 of 14.** The execution model below assumed the tracks
+**All five tracks are done and the spine is at 14 of 14.** The execution model below assumed the tracks
 would run alongside the spine from chunk 0; in practice the spine was built solo and the tracks were farmed
-out after chunk 14 had already opened. What chunk 14 still waits on is no longer a track's code — it is
-**passkey enrolment through a software authenticator**, which no track owns, and the pause/resume liveness
-race. See "Still open" item 6.
+out after chunk 14 had already opened. The one bullet no track owned — **passkey enrolment through a
+software authenticator** — was closed by chunk 14's own closing pass, which wired the tracks' outputs to
+each other in the template and wrote the bar as a test. See "Still open" item 6 and "Phase 1 status".
 
 **Track A's done-check is redeploy case 5** (a fixture calling `DBOS.patch`, `DBOS.recv` or
 `dbosClient.sendInTransaction` fails `eslint`) — the only gate case with no database dependency at all.
@@ -716,10 +785,11 @@ to end, `bootstrapAdmin`, `resetSecondFactor`, and the exports contract — 38 t
 > `flow-restart.test.ts` passes vacuously over zero flows, and `.claude/skills/replace-demo/` presumes a demo
 > exists. The test asserts `flows.length > 0` so the vacuum can't return.
 >
-> **Not done, correctly left open.** The two catch-all routes don't call `requireSession()` yet — track C's
-> auth landed mid-session; the routes' TODOs now name the real guard (`createSessionGuard()`,
-> `AccessRefused`, `ADMIN_ROLE`, a1c7b30) but wiring it needs sign-in/step-up routes this template doesn't
-> have yet. This is now unblocked and is the obvious next piece.
+> **Not done, correctly left open.** ✅ **Closed by chunk 14's closing pass** (719dfc6, c5a40b4). The two
+> catch-all routes now call `requireSession()`, and the sign-in and step-up routes its refusals divert to
+> exist: `src/auth.ts` binds the factory and the guard, `/auth/sign-in` and `/auth/passkey` are the two
+> pages, and `/api/auth/[...all]` mounts better-auth's handler ungated — there is no signing in through a
+> route that wants a session.
 
 **Track D's done-check is `pnpm --filter @hyperfixation/admin test`.** ✅ Done — 29 tests in five files,
 three of them against a real database. The negatives they prove: a member holding a passkey, a stranger, an
@@ -845,6 +915,19 @@ and the fact that it could not read the registry — rather than passing E001–
 > deliberately keeps the published-correct spelling in `package.json` and this is the same publishing
 > artifact as CI's build step; deleting `pnpm-workspace.yaml` at the first publish closes both.
 >
+> ✅ **Both caveats closed by chunk 14's closing pass.** The flag was added after all (chunk 14's deviation
+> 6): the bar is spelled `pnpm dev`, and it now carries the same TEMPORARY marker `pnpm-workspace.yaml`
+> does. `worker.ts` and `migrate.ts` load `.env` themselves (3f7dd2a) through a first, side-effecting
+> import — the position matters, because `defineApp()` reads `HF_BUILD_SHA` while `src/hyperfixation.ts` is
+> being evaluated and ESM evaluates imports before the body. Existing values win, so compose's environment
+> and the `HF_BUILD_SHA` `hf dev` invents are not overwritten. Verified: `HF_PROCESS=worker pnpm worker`
+> with nothing else supplied launches DBOS under `.env`'s own sha and registers all three queues.
+>
+> One thing found in passing and **not** changed: `next dev` appends a `nextjs-agent-rules` block to a
+> generated app's `CLAUDE.md` on first run, so the first `pnpm dev` leaves an uncommitted change. Next
+> writes it deliberately and says so in the block; `agentRules: false` in `next.config.ts` turns it off if
+> an app would rather it did not.
+>
 > **Not in scope, deliberately.** No cloud `hf new`: `--local` is refused into an error rather than
 > ignored, because a half-provisioned app is worse than none. No `hf doctor`, no `hf restore-check` — both
 > Phase 3's. `hf dev` starts the web and not a worker, matching `pnpm dev`; note that the template's
@@ -916,12 +999,16 @@ maintenance note.
 | `session-factor`, auth negatives | Track C | ✅ Done | `packages/auth/src/session-factor.test.ts` (no database); the database-backed halves in `auth-flow.test.ts`, `bootstrap.test.ts` and `reset-second-factor.test.ts` |
 | `compose-envs` | Track B | ✅ Done | `hyperfixation-template` repo, `tests/compose-envs.test.ts` (11 tests) |
 | Worker isolation, deep-import `tsc` | 6, Track A | ✅ Done | `packages/workflows/src/worker-isolation.test.ts`; the deep-import fixture in `packages/workflows/src/deep-import.test.ts` over `fixtures/deep-import/` |
+| Passkey enrolment through a software authenticator | 14 | ✅ Done | `hyperfixation-template` repo, `tests/e2e/exit-bar.e2e.ts` (2 tests), over a virtual CTAP2 authenticator; `pnpm test:e2e` |
 
 **All twelve redeploy cases and all seven fence cases are written, committed and observed green together**
 (`npx turbo run test --force`, 2026-09-18: 41 files, 243 tests, 3m12s — the 2026-09-17 run's 38 files and 222
 tests plus track A's three files). `pnpm -w typecheck`, `pnpm -w lint` and `pnpm -w api-extractor` are green
 in the same tree. **With tracks D and E in, the same run is 60 files and 356 tests in 3m14s**, all nine
-packages green (track E, 2026-09-18). One caution for whoever reads a red run: `redeploy-case-1` failed both
+packages green (track E, 2026-09-18). **After chunk 14's closing pass it is 61 files and 360 tests in
+3m16s**, with `pnpm -w typecheck`, `pnpm -w lint` and `pnpm -w api-extractor` green in the same tree; the
+extra file is `define-flow.test.ts`, which is the regression test for deviation 4. One caution for whoever
+reads a red run: `redeploy-case-1` failed both
 of its cases once under full-suite load and passed alone and on the next full run, so that file is
 load-sensitive rather than flaky-by-construction — re-run it on its own before chasing it.
 
@@ -956,9 +1043,13 @@ added is below it.
 2. 🚧 **The pause/resume liveness race on redeploy** (chunk 13). Queues can end up pinned at 0 with the app
    reporting unpaused and healthy; nothing self-heals it and the plan specs no fix. Needs a decision — a
    `reconcile()` hygiene step, a read-after-write in `startWorker()`, or a `degraded` signal. See chunk 13's
-   note. **The one open item with a correctness-adjacent smell.** Still undecided after chunk 14's first
-   pass: it is a design choice among three shapes, not an implementation gap, and case 7 gave it no new
-   evidence either way. It has to be settled before chunk 14 closes.
+   note. **The one open item with a correctness-adjacent smell.** Still undecided after chunk 14's closing
+   pass, and **deliberately not decided by it**: it is a choice among three shapes, not an implementation
+   gap; case 7 and the exit-bar run gave it no new evidence either way; and it is a decision about the run
+   model that belongs to whoever owns that model, not to the session that happened to close the chunk. The
+   earlier note here said it had to be settled before chunk 14 closed. It was not, and chunk 14 closed
+   anyway, because it is not part of the exit bar's stated wording — see "Phase 1 status". **It is the one
+   thing that makes "Phase 1 complete" a qualified claim, and it is the first thing Phase 2 should settle.**
 3. ⬜ **`hf_activity`'s insert in `decide()`** (chunk 12). The plan makes it fatal alongside `hf_audit`;
    the table is Phase 2's and does not exist. Wire it under the same rule when it lands.
 4. ✅ **Redeploy case 5 is closed** (51bc37e, track A), and with it the twelve-case suite. **Case 7 is
@@ -967,19 +1058,15 @@ added is below it.
    migration count in three places; every future migration bumps them. Maintenance, not a defect — and it
    **was** hit by the first track-C migration, exactly as predicted: `0003_auth_invitation` took all three
    from `"3"` to `"4"` (8004d96). Phase 2's first migration will take them to `"5"`.
-6. 🚧 **Every track is done; chunk 14 waits on one bullet no track owned.** A, B, C, D and E have all
-   landed, so six of its bullets are struck: the deep-import fixture fails `tsc`, `lint` is green across
-   core, `api-extractor` is green against committed reports, the auth negatives are proven,
-   `docker compose -f docker-compose.prod.yml config` validates, and `hf new demo-app --local` now produces
-   an app that installs, migrates, bootstraps its admin, passes E001–E006, launches a worker under
-   `HF_BUILD_SHA=dev-<timestamp>` and serves `/w` (E, 5e58814 and 1268d13). What remains is **passkey
-   enrolment through a software authenticator** — track C's subject but not its code, since nothing in
-   either repo drives WebAuthn; the template (B) has the routes but not the sign-in/enrolment pages, and
-   neither D nor E touched them. It needs an explicit home before chunk 14 closes, and it is now the *only*
-   piece of Phase 1 nobody is building. Two smaller things travel with it, both track B's file: `pnpm dev`
-   runs Turbopack, which cannot resolve the `link:`-ed packages (`next dev --webpack` works, and publishing
-   closes it), and `worker.ts` does not load `.env`, so a local `pnpm worker` needs the environment
-   supplied. The spine still has nothing left to build.
+6. ✅ **Closed, for real (2026-09-18).** **Passkey enrolment through a software authenticator** has a home
+   and a proof: `hyperfixation-template`'s `tests/e2e/exit-bar.e2e.ts` drives the whole bar headless
+   through a virtual CTAP2 authenticator (Chrome DevTools `WebAuthn.addVirtualAuthenticator`) — emailed
+   code out of mailpit, enrolment, session promotion, and the 404 on `/admin` for a member holding a
+   passkey and for an admin holding only a code. It passes against `pnpm dev` and against the standalone
+   build. The two smaller things travelling with it are closed too: `"dev": "next dev --webpack"` with a
+   TEMPORARY marker (chunk 14 deviation 6), and `.env` loading in `worker.ts` and `migrate.ts` (3f7dd2a).
+   Closing it also surfaced a production defect in `defineFlow` that four packages' green suites had not —
+   see chunk 14's deviation 4. **The spine and every track have nothing left to build.**
 7. 🔁 **The API reports are now a file every API-changing PR touches.** `etc/*.api.md` is committed and CI
    fails on drift, which is the point. Track C hit it first and hard: `etc/auth.api.md` went from an empty
    placeholder to ~3,600 lines, because `createAuth`'s return type has to be inferred out of better-auth's
