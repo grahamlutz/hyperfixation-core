@@ -6,7 +6,15 @@ import { Client } from "pg";
  * and the key is namespaced by app name on top of that.
  */
 export const WORKER_LOCK_STATEMENT =
-  "SELECT pg_try_advisory_lock(hashtext('hf-worker:' || $1::text)) AS acquired";
+  "SELECT pg_try_advisory_lock(hashtext('hf-worker:' || $1::text)) AS acquired, now() AS acquired_at";
+
+/**
+ * `<marker> <appName> <iso>`, where the timestamp is the *database's*, read in the same
+ * statement as the lock. Redeploy case 7 orders it against the previous worker's last
+ * committed write, which is a database timestamp too — two process clocks could not be
+ * compared at all.
+ */
+export const LOCK_ACQUIRED_MARKER = "hf-worker: advisory lock acquired";
 
 export class WorkerLockUnavailable extends Error {
   readonly appName: string;
@@ -33,6 +41,8 @@ export type HeldLockConnection = Omit<Client, "end">;
 export interface WorkerLock {
   readonly appName: string;
   readonly connection: HeldLockConnection;
+  /** The database clock at acquisition, not this process's. */
+  readonly acquiredAt: Date;
 }
 
 /**
@@ -46,21 +56,25 @@ export async function acquireWorkerLock(
   const connection = new Client({ connectionString: databaseUrl });
   await connection.connect();
 
-  let acquired: boolean;
+  let row: { acquired: boolean; acquired_at: Date } | undefined;
   try {
-    const result = await connection.query<{ acquired: boolean }>(WORKER_LOCK_STATEMENT, [appName]);
-    acquired = result.rows[0]?.acquired === true;
+    const result = await connection.query<{ acquired: boolean; acquired_at: Date }>(
+      WORKER_LOCK_STATEMENT,
+      [appName],
+    );
+    row = result.rows[0];
   } catch (error) {
     await connection.end().catch(() => undefined);
     throw error;
   }
 
-  if (!acquired) {
+  if (row?.acquired !== true) {
     // Nothing is held on this connection, so it is not a lock connection and closing it here
     // costs nothing — the holder is some other process.
     await connection.end().catch(() => undefined);
     throw new WorkerLockUnavailable(appName);
   }
 
-  return { appName, connection };
+  console.info(LOCK_ACQUIRED_MARKER, appName, row.acquired_at.toISOString());
+  return { appName, connection, acquiredAt: row.acquired_at };
 }

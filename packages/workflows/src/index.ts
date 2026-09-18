@@ -26,7 +26,7 @@ export {
   PAUSED_QUEUES,
   type QueueConcurrency,
 } from "./queue-concurrency.js";
-export { WorkerLockUnavailable, type WorkerLock } from "./worker-lock.js";
+export { WorkerLockUnavailable, LOCK_ACQUIRED_MARKER, type WorkerLock } from "./worker-lock.js";
 export {
   defineFlow,
   definedFlows,
