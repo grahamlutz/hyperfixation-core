@@ -4,7 +4,8 @@
 after adversary rounds 2 and 3. **The design is fixed; this document only orders it.** Where this document
 disagrees with the plan about *what* to build, the plan wins. Where it disagrees about *when*, this one does.
 
-**Status updated 2026-09-17** against the tree at `6deac13`. Every chunk, track and gate case below carries a
+**Status updated 2026-09-17** against the tree at `6deac13`, and again **2026-09-18** for track A
+(`257f4a4`). Every chunk, track and gate case below carries a
 STATUS marker; a `(deviated)` marker is followed by a note naming what differs and the commit that decided it.
 The markers are the point of this document now — the plan it derives from was written before any of it existed,
 and drifted silently through chunks 11–13 until this pass.
@@ -18,9 +19,9 @@ and drifted silently through chunks 11–13 until this pass.
 | 🚧 In progress | partially built |
 | ⬜ Not started | nothing built yet |
 
-**Where the spine stands:** chunks 0–13 are ✅; chunk 14 is 🚧; tracks A–E are all ⬜. Eleven of the twelve
-redeploy cases are written and committed; only case 5 — track A's done-check, which is a lint assertion and
-has no database dependency at all — is unwritten. Case 7 landed at e6bde42.
+**Where the spine stands:** chunks 0–13 are ✅; chunk 14 is 🚧; track A is ✅ and tracks B–E are ⬜. **All
+twelve redeploy cases are now written and committed** — case 5, the lint assertion, landed with track A at
+51bc37e; case 7 landed at e6bde42.
 
 **What this pass verified, and what it did not.** Every marker below was set by reading the source and the
 commit diffs — `packages/{db,ai,workflows,core}/src`, the migrations, and `git log -p` on the files in
@@ -64,8 +65,12 @@ tests want a provisioned database while `@hyperfixation/testing` owns provisioni
 the migrator and role provisioning live in `db` (where the plan already puts them) and `testing`'s
 "per-run database from a template" is a thin wrapper that calls it. No package cycle.
 
-✅ Done — the 8-package layout was scaffolded at 168315f and has not needed a ninth package since; `testing`'s
-per-run database is the thin wrapper over `db`'s migrator this section predicted, and there is no cycle.
+✅ Done (deviated) — the 8-package layout was scaffolded at 168315f; `testing`'s per-run database is the thin
+wrapper over `db`'s migrator this section predicted, and there is no cycle. **Track A added a ninth package
+(95c166c): `@hyperfixation/eslint-config`.** The eight *runtime* packages are still eight, and the reason for
+the ninth is the plan's own wording — the config is "shared by core and template", so it has to be something
+an app's `package.json` can depend on rather than a file at this repo's root. It joins the fixed version
+group.
 
 Two carve-outs, both settled:
 
@@ -515,8 +520,10 @@ what the 2026-09-17 pass said it could not claim.
 
 **What is left, and why none of it is the spine's.** Every other bullet above belongs to a track: the auth
 negatives and passkey enrolment to C, the deep-import fixture and `api-extractor` and `lint` to A, `hf new`
-to E, `docker compose config` to B. **All five are still ⬜**, so chunk 14 cannot close. The gate itself is
-11 of 12 — case 5 is a lint assertion and lands with track A, not here.
+to E, `docker compose config` to B. **Track A closed its three (2026-09-18)** — the deep-import fixture fails
+`tsc`, and `pnpm turbo typecheck lint test` and `pnpm turbo api-extractor` are green across core — and the
+gate is now 12 of 12. **B, C and E are still ⬜**, so chunk 14 still cannot close; and the pause/resume
+liveness race in "Still open" has to be settled whatever the tracks do.
 
 > **Deviation 1 — worker A writes slower than the plan's 250 ms, and only worker A.** The plan's process
 > half has A writing 60 rows 250 ms apart and taking `SIGTERM` at 6 s. Measured: `DBOS.shutdown()` waits
@@ -548,21 +555,56 @@ to E, `docker compose config` to B. **All five are still ⬜**, so chunk 14 cann
 
 | Track | Contents | Can start | Must land by | Status |
 |---|---|---|---|---|
-| **A — lint and contract mechanics** | Shared ESLint config (the `DBOS` property ban, `no-restricted-imports` on `@hyperfixation/*/src/*` and `dist/*`, the `src/flows/**` raw-handle hint), ban fixtures, API Extractor in all 8 packages with committed `etc/*.api.md`, deep-import `tsc` fixture | chunk 0 | 14 | ⬜ Not started — no ESLint config in the tree, no `etc/` in any package, CI runs `typecheck test` only |
+| **A — lint and contract mechanics** | Shared ESLint config (the `DBOS` property ban, `no-restricted-imports` on `@hyperfixation/*/src/*` and `dist/*`, the `src/flows/**` raw-handle hint), ban fixtures, API Extractor in all 8 packages with committed `etc/*.api.md`, deep-import `tsc` fixture | chunk 0 | 14 | ✅ Done (deviated) — 95c166c, 51bc37e, 2bb9040, 257f4a4. See the track A note below |
 | **B — template and compose** | `Dockerfile` (`ARG SOURCE_COMMIT` → `ENV HF_BUILD_SHA`, `git rev-parse HEAD` fallback), both compose files with full `environment:` blocks, `mem_limit`, `stop_grace_period: 90s` on `worker`, `REQUIRED_ENV` + `compose-envs.test.ts`, CI workflows, dependabot, turbo generators, `components.json`, the two catch-all routes, `worker.ts`, `instrumentation.ts` | chunk 0 | 14 | ⬜ Not started — `hyperfixation-template` does not exist; `.github/workflows/ci.yml` is chunk 0's skeleton, not this track's |
 | **C — auth** | better-auth factory with `emailOTP` (`disableSignUp: true`), passkey, admin, organization; session-factor policy (`factor: 'code' \| 'passkey'`, code sessions confined to `/auth/*`, `/admin/*` needs `admin` and 404s otherwise); `requireSession({ factor, role })` in both layouts and every server action and route handler; bootstrap user; reset-second-factor action | chunk 2 | 14 | ⬜ Not started — `packages/auth/src/index.ts` is chunk 0's one-line placeholder. The seven `hf_user`/`hf_session`/… tables do exist: chunk 2 put them in `schema/auth.ts` and `0000_core_schema.sql`, so this track writes no migration of its own |
 | **D — admin** | Users resource generated from Drizzle metadata, reset-passkey action, guards | track C | 14 | ⬜ Not started — `packages/admin/src/index.ts` is a placeholder |
 | **E — CLI** | `hf new --local` (giget copy, `__APP_NAME__`/`__DB_NAME__` substitution, `^[a-z][a-z0-9_]{0,62}$` validation), `hf migrate`, `hf bootstrap`, `hf check`, `hf gen`, `hf dev` (sets `HF_BUILD_SHA=dev-<timestamp>`) | track B for `new`; chunk 3 for `migrate` | 14 | ⬜ Not started — `packages/cli/src/index.ts` is a placeholder |
 
-**All five tracks are unstarted, and the spine is at 13 of 14.** The execution model below assumed they would
-run alongside the spine from chunk 0; in practice the spine was built solo and the tracks were not farmed out
-at all. Chunk 14 asserts on all five (the deep-import fixture, `api-extractor`, `hf new demo-app --local`,
-the auth negatives, `docker compose config`), so **chunk 14 cannot start until they do** — that, not the
-spine, is now Phase 1's critical path.
+**Track A is done; B, C, D and E are not, and the spine is at 13 of 14.** The execution model below assumed
+the tracks would run alongside the spine from chunk 0; in practice the spine was built solo and track A was
+the first to be farmed out, after chunk 14 had already opened. Chunk 14 asserts on all five, so **chunk 14
+still cannot close until the other four do** — that, not the spine, is Phase 1's critical path.
 
 **Track A's done-check is redeploy case 5** (a fixture calling `DBOS.patch`, `DBOS.recv` or
 `dbosClient.sendInTransaction` fails `eslint`) — the only gate case with no database dependency at all.
-⬜ Not started.
+✅ Done — `packages/workflows/src/redeploy-case-5.test.ts` (51bc37e).
+
+> **Track A, what landed and where it differs.** Four commits: 95c166c the config, 51bc37e case 5,
+> 2bb9040 the deep-import fixture, 257f4a4 API Extractor.
+>
+> **Deviation 1 — a ninth package, `@hyperfixation/eslint-config` (95c166c).** See the scaffolding section
+> above. `turbo run lint` depends on `build` rather than `^build`, so a package can reach the config through
+> its own `exports` map by self-reference; that is what lets all nine `eslint.config.js` files be the same
+> two lines, and it is the shape the template will copy.
+>
+> **Deviation 2 — `sendInTransaction` is a `no-restricted-syntax` selector, not a `no-restricted-properties`
+> entry.** The plan groups it with the `DBOS` property ban, but `no-restricted-properties` keys on the object
+> *identifier*, and the gate case spells the call `dbosClient.sendInTransaction` — an instance. Keying on the
+> member name catches both spellings. The six `DBOS` properties stay `no-restricted-properties`.
+>
+> **Deviation 3 — the deep-import patterns are `**`, and the flows override re-states them.** The plan writes
+> `@hyperfixation/*/src/*` and `dist/*`; `src/**`/`dist/**` is what a nested path cannot slip through.
+> `no-restricted-imports` is last-wins per file, so the `flows` override would otherwise *drop* the
+> deep-import ban inside exactly the directory that most needs it — the config's own test asserts it does not.
+>
+> **Deviation 4 — the raw-handle hint is scoped to `**/flows/**`, not `src/flows/**`.** The same set for an
+> app, and it also covers a fixture that lives outside a `src/`. It remains a hint: the config's test asserts
+> round-3 finding 3's hole directly — a helper in `src/lib/` importing `@/db` is lint-legal — so nobody reads
+> the rule as a backstop. The step pool is the enforcement.
+>
+> **Deviation 5 — two packages get a second API report.** API Extractor takes one entry point per run, and
+> `db` and `testing` each publish two. `etc/db-migrator.api.md` and `etc/testing-worker.api.md` sit beside the
+> main reports; leaving them out would mean half of `db`'s contract surface drifts unwatched.
+>
+> **Deviation 6 — CI runs `api-extractor` as its own step,** after `typecheck lint test`, so a red build says
+> which it is: broken code, or a changed public API. Drift failure was verified by adding an export to `core`
+> and watching `api-extractor run` exit non-zero.
+>
+> **Not in scope, deliberately.** The config carries the plan's three rules and nothing else — no
+> `recommended` set, no formatting rules, no ban on long durable sleeps in flows (the plan names that ban in
+> the run model but track A's contents do not list it). `@hyperfixation/eslint-config` has no API report of
+> its own; it is a config, not a contract surface.
 
 **Track C's done-check is `pnpm --filter @hyperfixation/auth test session-factor`** plus the auth negatives.
 ⬜ Not started.
@@ -609,7 +651,7 @@ maintenance note.
 | `redeploy` 2 — 1,000-record loop, killed before checkpoint | 10 | ✅ Done | `packages/ai/src/redeploy-case-2.test.ts` |
 | `redeploy` 3 — same-version crash recovery uses DBOS checkpoints | 10 | ✅ Done | `packages/ai/src/redeploy-case-3.test.ts` |
 | `redeploy` 4 — pause and resume across a redeploy | 13 | ✅ Done | `packages/ai/src/redeploy-case-4.test.ts` |
-| `redeploy` 5 — bans fail `eslint` | **Track A** | ⬜ Not started | — |
+| `redeploy` 5 — bans fail `eslint` | **Track A** | ✅ Done | `packages/workflows/src/redeploy-case-5.test.ts`, over `fixtures/banned-primitives.ts` and `fixtures/flows/raw-handle.ts` |
 | `redeploy` 6 — advisory-lock isolation | 6 | ✅ Done | `packages/workflows/src/redeploy-case-6.test.ts` |
 | `redeploy` 7 — round-2 finding 1, process half and `in-tx` half | 8b (needs 4, 5, 7, 9); written at 14 | ✅ Done (deviated) | `packages/workflows/src/redeploy-case-7.test.ts`, over `test-support/writer-flow.ts`. See chunk 14's deviations 1–3 |
 | `redeploy` 8 — reconcile bump then approval | 12 | ✅ Done | `packages/ai/src/redeploy-case-8.test.ts`; the bump unit half in `fence.test.ts` |
@@ -628,11 +670,12 @@ maintenance note.
 | `boot-checks` (E006 both ways) | 3 | ✅ Done | `packages/db/src/boot-checks.test.ts` |
 | `session-factor`, auth negatives | Track C | ⬜ Not started | — |
 | `compose-envs` | Track B | ⬜ Not started | — |
-| Worker isolation, deep-import `tsc` | 6, Track A | 🚧 In progress — worker isolation ✅ (`packages/workflows/src/worker-isolation.test.ts`), the deep-import `tsc` fixture ⬜ | — |
+| Worker isolation, deep-import `tsc` | 6, Track A | ✅ Done | `packages/workflows/src/worker-isolation.test.ts`; the deep-import fixture in `packages/workflows/src/deep-import.test.ts` over `fixtures/deep-import/` |
 
-**Eleven of twelve redeploy cases and all seven fence cases are written, committed and observed green
-together** (`pnpm turbo test --force`, 2026-09-17: 38 files, 222 tests, ~3 min). The one that is not is
-case 5, which is track A's done-check and needs an ESLint config that does not exist yet.
+**All twelve redeploy cases and all seven fence cases are written, committed and observed green together**
+(`npx turbo run test --force`, 2026-09-18: 41 files, 243 tests, 3m12s — the 2026-09-17 run's 38 files and 222
+tests plus track A's three files). `pnpm -w typecheck`, `pnpm -w lint` and `pnpm -w api-extractor` are green
+in the same tree.
 
 ## Decisions taken 2026-09-16
 
@@ -644,8 +687,10 @@ case 5, which is track A's done-check and needs an ESLint config that does not e
    either way.
 3. **Spine solo, tracks farmed out** — no fork at chunk 3. See the execution-model section.
    ✅ Done (deviated) — the spine half held exactly: chunks 0–13 were built serially by one head, in the
-   stated order, with no fork at chunk 3. The tracks half did not happen at all; none of A–E was farmed out,
-   so they are all ⬜ and chunk 14 now waits on them.
+   stated order, with no fork at chunk 3. The tracks half happened late rather than alongside: track A was
+   farmed out on 2026-09-18, after chunk 14 had already opened, and B–E have not been. Farming A out after
+   the spine cost nothing — it touched no file the spine owns except each package's `scripts` block — which
+   is evidence for the "nearly free" claim, just not for the timing.
 4. **`fence.test.ts` case (vii) mocks `DBOS.isWithinWorkflow()` at chunk 5**, keeping the file's
    "no DBOS launch" contract. What's under test is `assertNotInWorkflow()`'s refusal, not DBOS's context
    machinery, so mocking the predicate tests exactly the guard and nothing else.
@@ -668,12 +713,18 @@ added is below it.
    evidence either way. It has to be settled before chunk 14 closes.
 3. ⬜ **`hf_activity`'s insert in `decide()`** (chunk 12). The plan makes it fatal alongside `hf_audit`;
    the table is Phase 2's and does not exist. Wire it under the same rule when it lands.
-4. ⬜ **Redeploy case 5**, the last unwritten gate case. It is a lint assertion with no database dependency
-   and lands with track A, not with the spine. **Case 7 is closed** (e6bde42, chunk 14).
+4. ✅ **Redeploy case 5 is closed** (51bc37e, track A), and with it the twelve-case suite. **Case 7 is
+   closed** too (e6bde42, chunk 14).
 5. 🔁 **Migration-count literals** (chunk 12). `packages/db/src/migrate.test.ts` hard-codes the core
    migration count in three places; every future migration bumps them. Maintenance, not a defect — but it
    will be hit again by the first track-C or Phase 2 migration.
-6. ⬜ **Chunk 14 cannot close until tracks A–E do.** Every remaining bullet of its exit bar is a track's:
-   the auth negatives (C), the deep-import fixture and `api-extractor` and `lint` (A), `hf new demo-app
-   --local` (E), `docker compose config` (B). The spine has nothing left to build. **This, not the spine, is
-   what Phase 1 is now waiting on.**
+6. 🚧 **Chunk 14 cannot close until tracks B, C, D and E do.** Track A is done, so three of its bullets are
+   struck: the deep-import fixture fails `tsc`, `lint` is green across core, and `api-extractor` is green
+   against committed reports. What remains is the auth negatives and passkey enrolment (C), `hf new demo-app
+   --local && pnpm dev` (E), and `docker compose -f docker-compose.prod.yml config` (B). The spine still has
+   nothing left to build. **This, not the spine, is what Phase 1 is waiting on.**
+7. 🔁 **The API reports are now a file every API-changing PR touches.** `etc/*.api.md` is committed and CI
+   fails on drift, which is the point — but it means tracks C and D, which will add real surface to
+   `@hyperfixation/auth` and `@hyperfixation/admin` (both reports are currently empty placeholders), have to
+   run `pnpm api-extractor:update` and commit the result. Same class of maintenance as the migration-count
+   literals above, and unlike the journal it is not compared as a prefix.
