@@ -561,13 +561,13 @@ cannot close; and the pause/resume liveness race in "Still open" has to be settl
 | **A — lint and contract mechanics** | Shared ESLint config (the `DBOS` property ban, `no-restricted-imports` on `@hyperfixation/*/src/*` and `dist/*`, the `src/flows/**` raw-handle hint), ban fixtures, API Extractor in all 8 packages with committed `etc/*.api.md`, deep-import `tsc` fixture | chunk 0 | 14 | ✅ Done (deviated) — 95c166c, 51bc37e, 2bb9040, 257f4a4. See the track A note below |
 | **B — template and compose** | `Dockerfile` (`ARG SOURCE_COMMIT` → `ENV HF_BUILD_SHA`, `git rev-parse HEAD` fallback), both compose files with full `environment:` blocks, `mem_limit`, `stop_grace_period: 90s` on `worker`, `REQUIRED_ENV` + `compose-envs.test.ts`, CI workflows, dependabot, turbo generators, `components.json`, the two catch-all routes, `worker.ts`, `instrumentation.ts` | chunk 0 | 14 | ✅ Done (deviated) — built in the sibling `hyperfixation-template` repo, 9c900e5..a1c7b30. See the track B note below |
 | **C — auth** | better-auth factory with `emailOTP` (`disableSignUp: true`), passkey, admin, organization; session-factor policy (`factor: 'code' \| 'passkey'`, code sessions confined to `/auth/*`, `/admin/*` needs `admin` and 404s otherwise); `requireSession({ factor, role })` in both layouts and every server action and route handler; bootstrap user; reset-second-factor action | chunk 2 | 14 | ✅ Done (deviated) — 8004d96, a86660f, 08cc4c3, 2c6a3df, 6b3657c. See the track C note below |
-| **D — admin** | Users resource generated from Drizzle metadata, reset-passkey action, guards | track C | 14 | ⬜ Not started — `packages/admin/src/index.ts` is a placeholder. Track C has landed, so it is unblocked, and `createResetSecondFactorAction` is the reset-passkey action already guarded |
+| **D — admin** | Users resource generated from Drizzle metadata, reset-passkey action, guards | track C | 14 | ✅ Done (deviated) — fa14205, 66cfe45. See the track D note below |
 | **E — CLI** | `hf new --local` (giget copy, `__APP_NAME__`/`__DB_NAME__` substitution, `^[a-z][a-z0-9_]{0,62}$` validation), `hf migrate`, `hf bootstrap`, `hf check`, `hf gen`, `hf dev` (sets `HF_BUILD_SHA=dev-<timestamp>`) | track B for `new`; chunk 3 for `migrate` | 14 | ⬜ Not started — `packages/cli/src/index.ts` is a placeholder |
 
-**Tracks A and C are done; B, D and E are not, and the spine is at 13 of 14.** The execution model below
-assumed the tracks would run alongside the spine from chunk 0; in practice the spine was built solo and
-tracks A and C were farmed out after chunk 14 had already opened. Chunk 14 asserts on all five, so **chunk 14
-still cannot close until the other three do** — that, not the spine, is Phase 1's critical path.
+**Tracks A, B, C and D are done; E is not, and the spine is at 13 of 14.** The execution model below
+assumed the tracks would run alongside the spine from chunk 0; in practice the spine was built solo and the
+tracks were farmed out after chunk 14 had already opened. Chunk 14 asserts on all five, so **chunk 14 still
+cannot close until track E does** — that, not the spine, is Phase 1's critical path.
 
 **Track A's done-check is redeploy case 5** (a fixture calling `DBOS.patch`, `DBOS.recv` or
 `dbosClient.sendInTransaction` fails `eslint`) — the only gate case with no database dependency at all.
@@ -716,6 +716,63 @@ to end, `bootstrapAdmin`, `resetSecondFactor`, and the exports contract — 38 t
 > `AccessRefused`, `ADMIN_ROLE`, a1c7b30) but wiring it needs sign-in/step-up routes this template doesn't
 > have yet. This is now unblocked and is the obvious next piece.
 
+**Track D's done-check is `pnpm --filter @hyperfixation/admin test`.** ✅ Done — 29 tests in five files,
+three of them against a real database. The negatives they prove: a member holding a passkey, a stranger, an
+admin holding only an emailed code and a banned admin all get the same `not-found` from
+`AdminRouter.route()`, on `/admin` and on `/admin/users` alike; the guard runs before the path is resolved,
+so `/admin/widgets` refuses identically; `actions.resetSecondFactor` refuses a member and deletes nothing;
+and a declared list field the table does not have throws at construction rather than at render.
+
+> **Track D, what landed and where it differs.** Two commits: fa14205 the resource generator and the users
+> resource, 66cfe45 the router, the guard and the reset action's exposure.
+>
+> **Deviation 1 — "generated from Drizzle metadata" is two thirds generated and one third declared, checked.**
+> `resourceFromTable` reads every field, its SQL column, nullability, default, primary key and uniqueness out
+> of `getTableColumns`/`getTableName`, and derives each label from the field name, so a column added to
+> `hf_user` reaches the admin with no edit here. What the metadata cannot know stays declared: the resource's
+> name, which fields the list shows and in what order, and which actions it offers. That declaration is the
+> one part a rename can rot, so it is validated against the metadata at construction (`UnknownAdminField`).
+> Calling the whole thing "generated" would overstate it.
+>
+> **Deviation 2 — the guard runs before the path is resolved, and an unserved path answers like a refused
+> one.** Resolving first would let `/admin/widgets` and `/admin/users` answer a stranger differently, and the
+> difference between those two answers is a map of the admin area. `route()` therefore calls
+> `requireSession({ factor: 'passkey', role: 'admin' })` on every route including the index, and states the
+> bar itself rather than leaning on the route's `pathname` — an app that mounts the admin elsewhere still
+> gets the admin bar. An unserved path returns `undefined` for the host to answer with its own not-found.
+>
+> **Deviation 3 — the admin router renders nothing and returns a route descriptor.** The plan calls it a
+> "router"; this package cannot depend on `next` for the same reason auth cannot, so `route()` answers with
+> `{ kind: 'index' | 'list' | 'detail' }` and the template's `(admin)/admin/[[...path]]` page renders it.
+> Same division core already makes between `statusRouteOf` and the page that serves it. Reading rows is
+> deliberately not here either: Phase 1's contents are the resource, the action and the guards.
+>
+> **Deviation 4 — admin resources are a registry, which the plan does not say they are.** Core's registry
+> list names sources, records, resolvers, scorers, flows, approval types, actions, pages and schedules, not
+> admin resources. `createAdminRouter` uses `createRegistry` from `@hyperfixation/core` anyway: a resource
+> name is what a stored row and a bookmarked URL point at, which is the same argument every other registry
+> is built on, and Phase 2's resources for the machinery tables need a shape to register in. The cost is a
+> `@hyperfixation/core` dependency on `admin`, which the web container already loads for `defineApp`.
+>
+> **Deviation 5 — `etc/admin.api.md` is 135 lines, and that is on purpose.** Still open item 7 predicted this
+> package would add auth's kind of surface. It did not: every export is named explicitly in `index.ts`,
+> nothing is re-exported wholesale, and `usersResource` is annotated `AdminResource` rather than left to
+> inference, so a `hf_user` column change moves no line of the report. Nothing here has an option-generic
+> return type to infer, which is the whole of why auth's is ~3,600 lines and this one is reviewable.
+>
+> **Deviation 6 — adding this package churned `db.api.md` and `auth.api.md` anyway, for a reason item 7 did
+> not predict** (270fc6b). `admin` depends on `@hyperfixation/auth` and on `drizzle-orm` directly; better-auth
+> carries `kysely`, which drizzle-orm declares as an optional peer, so drizzle-orm now resolves to a different
+> identity workspace-wide and `tsc` emits some inferred unions in a different member order. Six lines across
+> the two reports, all reordering, no semantic change, and the new order is the source order. Worth knowing
+> because it is the failure mode item 7 is really about: the report is a file a *dependency graph* change can
+> touch, not only an API change, and `pnpm -w api-extractor` goes red until someone regenerates it.
+>
+> **Not in scope, deliberately.** No reads — the router resolves a route, it does not query. No UI, no
+> `next` dependency, no label override for a generated label an app dislikes, no resource beyond `users`
+> (the machinery-table resources are core's, Phase 2's). The template's admin page still renders its own
+> placeholder: wiring it is track B's file and track E's session to touch, not this one's.
+
 ### Execution model (decided 2026-09-16): spine solo, tracks farmed out
 
 **One session owns the serial spine start to finish. The five standing tracks go to background sessions.**
@@ -829,23 +886,28 @@ added is below it.
    migration count in three places; every future migration bumps them. Maintenance, not a defect — and it
    **was** hit by the first track-C migration, exactly as predicted: `0003_auth_invitation` took all three
    from `"3"` to `"4"` (8004d96). Phase 2's first migration will take them to `"5"`.
-6. 🚧 **Chunk 14 cannot close until tracks D and E do.** Tracks A, B and C are done, so five of its bullets
+6. 🚧 **Chunk 14 cannot close until track E does.** Tracks A, B, C and D are done, so five of its bullets
    are struck: the deep-import fixture fails `tsc`, `lint` is green across core, `api-extractor` is green
    against committed reports, the auth negatives are proven, and `docker compose -f docker-compose.prod.yml
    config` validates (track B ran both compose files' `config`, green). What remains is **passkey enrolment
    through a software authenticator** — track C's subject but not its code, since nothing in either repo
-   drives WebAuthn yet; the template (B) has the routes but not the sign-in/enrolment pages themselves, so
-   this is a gap neither B, C, nor D squarely owns and needs an explicit home before chunk 14 closes — plus
-   `hf new demo-app --local && pnpm dev` (E). The spine still has nothing left to build. **This, not the
-   spine, is what Phase 1 is waiting on.**
+   drives WebAuthn yet; the template (B) has the routes but not the sign-in/enrolment pages themselves, and
+   track D has now landed without touching them, so this is a gap no track owns and it needs an explicit
+   home before chunk 14 closes — plus `hf new demo-app --local && pnpm dev` (E). The spine still has nothing
+   left to build. **This, not the spine, is what Phase 1 is waiting on.**
 7. 🔁 **The API reports are now a file every API-changing PR touches.** `etc/*.api.md` is committed and CI
    fails on drift, which is the point. Track C hit it first and hard: `etc/auth.api.md` went from an empty
    placeholder to ~3,600 lines, because `createAuth`'s return type has to be inferred out of better-auth's
    option-generic `Auth` and the report names every plugin endpoint it carries. A better-auth version bump
    will produce a large, unreviewable diff in that one file. **Worth a decision before the template ships**:
    either accept the churn, or narrow the published surface to the handful of `auth.api` endpoints the
-   template actually calls. Track D will add the same kind of surface to `@hyperfixation/admin`, which is
-   still an empty placeholder.
+   template actually calls. **Track D did not repeat it**: `etc/admin.api.md` is 135 lines (66cfe45), because
+   every export is named explicitly, nothing is re-exported wholesale, `usersResource` is annotated rather
+   than inferred, and nothing in `admin` has an option-generic return type to infer. So the *size* problem is
+   narrower than it looked — it is `auth`'s alone, and specifically `createAuth`'s. But track D found a second
+   shape of the same cost: adding `admin` moved six lines of `db.api.md` and `auth.api.md` by changing
+   drizzle-orm's peer resolution (270fc6b), so a report can churn on a dependency-graph change with no API
+   change at all, and `pnpm -w api-extractor` is red until someone regenerates it.
 8. ⬜ **`hf_invitation` is a table with no code path** (track C). `invitationLimit: 0` because an invitation
    ends in a sign-up and `disableSignUp: true` means there is none. When invitations become a feature, the
    plan has to say what an invited user signs up *into* — the table is the only part already there.
