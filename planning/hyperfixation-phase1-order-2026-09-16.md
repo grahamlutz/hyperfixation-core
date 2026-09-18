@@ -19,9 +19,9 @@ and drifted silently through chunks 11–13 until this pass.
 | 🚧 In progress | partially built |
 | ⬜ Not started | nothing built yet |
 
-**Where the spine stands:** chunks 0–13 are ✅; chunk 14 is 🚧; track A is ✅ and tracks B–E are ⬜. **All
-twelve redeploy cases are now written and committed** — case 5, the lint assertion, landed with track A at
-51bc37e; case 7 landed at e6bde42.
+**Where the spine stands:** chunks 0–13 are ✅; chunk 14 is 🚧; tracks A and C are ✅ and tracks B, D and E
+are ⬜. **All twelve redeploy cases are now written and committed** — case 5, the lint assertion, landed with
+track A at 51bc37e; case 7 landed at e6bde42. The `session-factor` gate case landed with track C at a86660f.
 
 **What this pass verified, and what it did not.** Every marker below was set by reading the source and the
 commit diffs — `packages/{db,ai,workflows,core}/src`, the migrations, and `git log -p` on the files in
@@ -522,8 +522,10 @@ what the 2026-09-17 pass said it could not claim.
 negatives and passkey enrolment to C, the deep-import fixture and `api-extractor` and `lint` to A, `hf new`
 to E, `docker compose config` to B. **Track A closed its three (2026-09-18)** — the deep-import fixture fails
 `tsc`, and `pnpm turbo typecheck lint test` and `pnpm turbo api-extractor` are green across core — and the
-gate is now 12 of 12. **B, C and E are still ⬜**, so chunk 14 still cannot close; and the pause/resume
-liveness race in "Still open" has to be settled whatever the tracks do.
+gate is now 12 of 12. **Track C closed the auth negatives (2026-09-18)**; the passkey-enrolment half of that
+same bullet — *enrolment through a software authenticator* — is **not** closed, because nothing in this repo
+drives WebAuthn yet and the template that would is track B's. **B, D and E are still ⬜**, so chunk 14 still
+cannot close; and the pause/resume liveness race in "Still open" has to be settled whatever the tracks do.
 
 > **Deviation 1 — worker A writes slower than the plan's 250 ms, and only worker A.** The plan's process
 > half has A writing 60 rows 250 ms apart and taking `SIGTERM` at 6 s. Measured: `DBOS.shutdown()` waits
@@ -557,14 +559,14 @@ liveness race in "Still open" has to be settled whatever the tracks do.
 |---|---|---|---|---|
 | **A — lint and contract mechanics** | Shared ESLint config (the `DBOS` property ban, `no-restricted-imports` on `@hyperfixation/*/src/*` and `dist/*`, the `src/flows/**` raw-handle hint), ban fixtures, API Extractor in all 8 packages with committed `etc/*.api.md`, deep-import `tsc` fixture | chunk 0 | 14 | ✅ Done (deviated) — 95c166c, 51bc37e, 2bb9040, 257f4a4. See the track A note below |
 | **B — template and compose** | `Dockerfile` (`ARG SOURCE_COMMIT` → `ENV HF_BUILD_SHA`, `git rev-parse HEAD` fallback), both compose files with full `environment:` blocks, `mem_limit`, `stop_grace_period: 90s` on `worker`, `REQUIRED_ENV` + `compose-envs.test.ts`, CI workflows, dependabot, turbo generators, `components.json`, the two catch-all routes, `worker.ts`, `instrumentation.ts` | chunk 0 | 14 | ⬜ Not started — `hyperfixation-template` does not exist; `.github/workflows/ci.yml` is chunk 0's skeleton, not this track's |
-| **C — auth** | better-auth factory with `emailOTP` (`disableSignUp: true`), passkey, admin, organization; session-factor policy (`factor: 'code' \| 'passkey'`, code sessions confined to `/auth/*`, `/admin/*` needs `admin` and 404s otherwise); `requireSession({ factor, role })` in both layouts and every server action and route handler; bootstrap user; reset-second-factor action | chunk 2 | 14 | ⬜ Not started — `packages/auth/src/index.ts` is chunk 0's one-line placeholder. The seven `hf_user`/`hf_session`/… tables do exist: chunk 2 put them in `schema/auth.ts` and `0000_core_schema.sql`, so this track writes no migration of its own |
-| **D — admin** | Users resource generated from Drizzle metadata, reset-passkey action, guards | track C | 14 | ⬜ Not started — `packages/admin/src/index.ts` is a placeholder |
+| **C — auth** | better-auth factory with `emailOTP` (`disableSignUp: true`), passkey, admin, organization; session-factor policy (`factor: 'code' \| 'passkey'`, code sessions confined to `/auth/*`, `/admin/*` needs `admin` and 404s otherwise); `requireSession({ factor, role })` in both layouts and every server action and route handler; bootstrap user; reset-second-factor action | chunk 2 | 14 | ✅ Done (deviated) — 8004d96, a86660f, 08cc4c3, 2c6a3df, 6b3657c. See the track C note below |
+| **D — admin** | Users resource generated from Drizzle metadata, reset-passkey action, guards | track C | 14 | ⬜ Not started — `packages/admin/src/index.ts` is a placeholder. Track C has landed, so it is unblocked, and `createResetSecondFactorAction` is the reset-passkey action already guarded |
 | **E — CLI** | `hf new --local` (giget copy, `__APP_NAME__`/`__DB_NAME__` substitution, `^[a-z][a-z0-9_]{0,62}$` validation), `hf migrate`, `hf bootstrap`, `hf check`, `hf gen`, `hf dev` (sets `HF_BUILD_SHA=dev-<timestamp>`) | track B for `new`; chunk 3 for `migrate` | 14 | ⬜ Not started — `packages/cli/src/index.ts` is a placeholder |
 
-**Track A is done; B, C, D and E are not, and the spine is at 13 of 14.** The execution model below assumed
-the tracks would run alongside the spine from chunk 0; in practice the spine was built solo and track A was
-the first to be farmed out, after chunk 14 had already opened. Chunk 14 asserts on all five, so **chunk 14
-still cannot close until the other four do** — that, not the spine, is Phase 1's critical path.
+**Tracks A and C are done; B, D and E are not, and the spine is at 13 of 14.** The execution model below
+assumed the tracks would run alongside the spine from chunk 0; in practice the spine was built solo and
+tracks A and C were farmed out after chunk 14 had already opened. Chunk 14 asserts on all five, so **chunk 14
+still cannot close until the other three do** — that, not the spine, is Phase 1's critical path.
 
 **Track A's done-check is redeploy case 5** (a fixture calling `DBOS.patch`, `DBOS.recv` or
 `dbosClient.sendInTransaction` fails `eslint`) — the only gate case with no database dependency at all.
@@ -607,7 +609,66 @@ still cannot close until the other four do** — that, not the spine, is Phase 1
 > its own; it is a config, not a contract surface.
 
 **Track C's done-check is `pnpm --filter @hyperfixation/auth test session-factor`** plus the auth negatives.
-⬜ Not started.
+✅ Done — `packages/auth/src/session-factor.test.ts`, 18 tests, no database (a86660f). The negatives it
+proves: a code-factor session is refused on `/`, `/runs`, `/api/runs` and `/settings` and sent to step up; a
+server action that did not opt down to `factor: 'code'` refuses one too; a member with a passkey **404s** on
+`/admin` and `/api/admin/users`; a stranger **404s** on `/admin/users` while the same stranger is redirected
+to sign in on `/runs`, which is what shows the 404 is the admin area's doing and not a blanket refusal; an
+*admin* holding only a code-factor session 404s rather than being offered a step-up; a banned user with a
+live passkey session is refused both ways; and `requireSession` throws rather than return a session whose
+refusal a host declined to divert. Four more files carry the rest against a real database — the factory end
+to end, `bootstrapAdmin`, `resetSecondFactor`, and the exports contract — 38 tests in all.
+
+> **Track C, what landed and where it differs.** Five commits: 8004d96 `hf_invitation`, a86660f the policy
+> and `requireSession`, 08cc4c3 the factory, 2c6a3df the bootstrap user, 6b3657c the reset action.
+>
+> **Deviation 1 — track C *did* write a migration, and the entry above saying it would not was wrong.**
+> Chunk 2 put seven better-auth tables in `0000_core_schema.sql`. better-auth's `organization` plugin writes
+> an **eighth** model, `invitation`, and the drizzle adapter's schema check refuses to initialise the whole
+> instance when a model it writes has no table — at `createAuth`, not at the first invitation. So
+> `0003_auth_invitation.sql` adds `hf_invitation` with better-auth's own columns (read off `getAuthTables()`,
+> not guessed). Nothing in Phase 1 sends an invitation — an invitation ends in a sign-up and there is no
+> sign-up — so the factory sets `invitationLimit: 0`; the table exists so that turning them on later is a
+> config change. The three hard-coded counts in `migrate.test.ts` went 3 → 4, exactly as Still open item 5
+> predicted the first track-C migration would force.
+>
+> **Deviation 2 — the role test runs before the factor test, and a role check 404s on *every* refusal.**
+> The plan says `/admin/*` needs `admin` and 404s otherwise. The order matters and it does not say which:
+> putting the factor test first would step-up-redirect an admin who holds only an emailed code, and that
+> redirect confirms the admin area exists to anyone who can read an inbox. So any check that names a role
+> answers `not-found` for no-session, banned, missing-role *and* code-factor alike.
+>
+> **Deviation 3 — `requireSession` is bound by a factory, `createSessionGuard`.** The plan writes it as a
+> bare `requireSession({ factor, role })`. This package cannot depend on `next`, and the guard needs three
+> things an app owns: how to read the current session, `redirect()`, and `notFound()`. So the app binds them
+> once and every call site sees the plan's signature. `pathname` joins the options and is **optional**, which
+> is the strict case: a server action states its own bar and defaults to passkey.
+>
+> **Deviation 4 — `upgradeSessionFactor`, a promotion path the plan does not name.** The factor is stamped
+> from the endpoint that minted the session, and only `/passkey/verify-authentication` mints `passkey`. That
+> leaves the user who signs in by code and enrols a passkey holding a code-factor session on the page they
+> enrolled from. `upgradeSessionFactor(pool, token)` promotes that one session in place, called by the
+> enrolment action after registration succeeds. It grants nothing an immediate passkey sign-in would not.
+>
+> **Deviation 5 — `resetSecondFactor` revokes *all* of the user's sessions, not just the passkey ones.**
+> A code-factor session is confined to `/auth/*`, and `/auth/*` is where enrolment lives: leaving one alive
+> lets whoever holds the lost device's session enrol a fresh authenticator and promote straight back.
+>
+> **Deviation 6 — the bootstrap user refuses more than it grants.** `bootstrapAdmin(pool, …)` is a function
+> `hf bootstrap` calls, never an endpoint. It refuses the moment any user holds `admin`; with
+> `HF_BOOTSTRAP_EMAIL` set only that address may be bootstrapped; with it unset only the first user of an
+> empty `hf_user` may be. Unset *and* a populated table is refused rather than guessed at. The whole
+> check-then-write is under `pg_advisory_xact_lock`, because the counts it reads are otherwise unlocked.
+>
+> **Deviation 7 — `etc/auth.api.md` is ~3,600 lines.** `createAuth`'s return type has to be inferred:
+> better-auth's `Auth` is generic in the exact option object, so `ReturnType<typeof betterAuth>` is not
+> assignable to itself and every plugin endpoint disappears from `auth.api`. `zod` and
+> `@simplewebauthn/server` are direct dependencies for the same reason (TS2742). The report is honest about
+> the surface this package publishes; it will churn on a better-auth upgrade. See Still open item 7.
+>
+> **Not in scope, deliberately.** No passkey enrolment through a software authenticator — nothing here
+> drives WebAuthn, and the app that would is track B's template. No `next` dependency, no UI, no
+> `packages/admin` (track D). `emailAndPassword` is left off entirely rather than configured off.
 
 ### Execution model (decided 2026-09-16): spine solo, tracks farmed out
 
@@ -633,10 +694,13 @@ Tracks C and D add migrations while the spine adds migrations. The journal snaps
 tracks appending concurrently will conflict on it every time. Either serialize migration-adding PRs or
 budget for journal rebases.
 
-**Did not materialise, for two reasons.** The tracks never ran, so nothing raced the spine; and chunk 2 put
-all seven better-auth tables into `0000_core_schema.sql` up front, so track C has no migration of its own to
-append. The spine added two migrations of its own (`0001_llm_call_reservation_index`,
-`0002_approvals`) with no conflict. The journal baseline is compared as a **prefix**
+**Did not materialise, but not for the reason given.** Nothing raced the spine, because the spine was
+finished before any track ran. The second reason — chunk 2 put all seven better-auth tables into
+`0000_core_schema.sql`, so track C has no migration of its own — was **wrong**: the `organization` plugin
+needs an eighth table and track C added `0003_auth_invitation`. It appended to a journal nobody else was
+touching, so the friction this section predicted still did not happen. The spine added two migrations of its
+own (`0001_llm_call_reservation_index`, `0002_approvals`) with no conflict. The journal baseline is compared
+as a **prefix**
 (`migrations-journal.baseline.json`), which is what makes "may only grow" cheap to satisfy; the thing that
 actually costs a touch per migration is the hard-coded count in `migrate.test.ts` — see chunk 12's
 maintenance note.
@@ -668,7 +732,7 @@ maintenance note.
 | `fence` (vii) — `ControlPlaneInWorkflow` and `55P03` | 5 (stand-ins), 13 (`records.archive` half) | ✅ Done (deviated) | `packages/db/src/fence.test.ts` for the stand-ins and the `55P03` bound; **`packages/core/src/records.test.ts`** for the real `records.archive()` half — `db` cannot import `core` without a cycle. See chunk 13's note |
 | `migration-policy` | 2 | ✅ Done | `packages/db/src/migration-policy.test.ts` |
 | `boot-checks` (E006 both ways) | 3 | ✅ Done | `packages/db/src/boot-checks.test.ts` |
-| `session-factor`, auth negatives | Track C | ⬜ Not started | — |
+| `session-factor`, auth negatives | Track C | ✅ Done | `packages/auth/src/session-factor.test.ts` (no database); the database-backed halves in `auth-flow.test.ts`, `bootstrap.test.ts` and `reset-second-factor.test.ts` |
 | `compose-envs` | Track B | ⬜ Not started | — |
 | Worker isolation, deep-import `tsc` | 6, Track A | ✅ Done | `packages/workflows/src/worker-isolation.test.ts`; the deep-import fixture in `packages/workflows/src/deep-import.test.ts` over `fixtures/deep-import/` |
 
@@ -716,15 +780,24 @@ added is below it.
 4. ✅ **Redeploy case 5 is closed** (51bc37e, track A), and with it the twelve-case suite. **Case 7 is
    closed** too (e6bde42, chunk 14).
 5. 🔁 **Migration-count literals** (chunk 12). `packages/db/src/migrate.test.ts` hard-codes the core
-   migration count in three places; every future migration bumps them. Maintenance, not a defect — but it
-   will be hit again by the first track-C or Phase 2 migration.
-6. 🚧 **Chunk 14 cannot close until tracks B, C, D and E do.** Track A is done, so three of its bullets are
-   struck: the deep-import fixture fails `tsc`, `lint` is green across core, and `api-extractor` is green
-   against committed reports. What remains is the auth negatives and passkey enrolment (C), `hf new demo-app
-   --local && pnpm dev` (E), and `docker compose -f docker-compose.prod.yml config` (B). The spine still has
-   nothing left to build. **This, not the spine, is what Phase 1 is waiting on.**
+   migration count in three places; every future migration bumps them. Maintenance, not a defect — and it
+   **was** hit by the first track-C migration, exactly as predicted: `0003_auth_invitation` took all three
+   from `"3"` to `"4"` (8004d96). Phase 2's first migration will take them to `"5"`.
+6. 🚧 **Chunk 14 cannot close until tracks B, D and E do.** Tracks A and C are done, so four of its bullets
+   are struck: the deep-import fixture fails `tsc`, `lint` is green across core, `api-extractor` is green
+   against committed reports, and the auth negatives are proven. What remains is **passkey enrolment through
+   a software authenticator** — which is track C's subject but not its code, since nothing in this repo
+   drives WebAuthn and the app that would is the template — plus `hf new demo-app --local && pnpm dev` (E)
+   and `docker compose -f docker-compose.prod.yml config` (B). The spine still has nothing left to build.
+   **This, not the spine, is what Phase 1 is waiting on.**
 7. 🔁 **The API reports are now a file every API-changing PR touches.** `etc/*.api.md` is committed and CI
-   fails on drift, which is the point — but it means tracks C and D, which will add real surface to
-   `@hyperfixation/auth` and `@hyperfixation/admin` (both reports are currently empty placeholders), have to
-   run `pnpm api-extractor:update` and commit the result. Same class of maintenance as the migration-count
-   literals above, and unlike the journal it is not compared as a prefix.
+   fails on drift, which is the point. Track C hit it first and hard: `etc/auth.api.md` went from an empty
+   placeholder to ~3,600 lines, because `createAuth`'s return type has to be inferred out of better-auth's
+   option-generic `Auth` and the report names every plugin endpoint it carries. A better-auth version bump
+   will produce a large, unreviewable diff in that one file. **Worth a decision before the template ships**:
+   either accept the churn, or narrow the published surface to the handful of `auth.api` endpoints the
+   template actually calls. Track D will add the same kind of surface to `@hyperfixation/admin`, which is
+   still an empty placeholder.
+8. ⬜ **`hf_invitation` is a table with no code path** (track C). `invitationLimit: 0` because an invitation
+   ends in a sign-up and `disableSignUp: true` means there is none. When invitations become a feature, the
+   plan has to say what an invited user signs up *into* — the table is the only part already there.
