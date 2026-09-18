@@ -1313,6 +1313,151 @@ generated: undefined;
 dialect: "pg";
 }>;
 
+// @public
+export const hfInvitation: PgTableWithColumns<    {
+name: "hf_invitation";
+schema: undefined;
+columns: {
+id: PgColumn<    {
+name: "id";
+tableName: "hf_invitation";
+dataType: "string";
+columnType: "PgText";
+data: string;
+driverParam: string;
+notNull: true;
+hasDefault: false;
+isPrimaryKey: true;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: [string, ...string[]];
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+organizationId: PgColumn<    {
+name: "organization_id";
+tableName: "hf_invitation";
+dataType: "string";
+columnType: "PgText";
+data: string;
+driverParam: string;
+notNull: true;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: [string, ...string[]];
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+email: PgColumn<    {
+name: "email";
+tableName: "hf_invitation";
+dataType: "string";
+columnType: "PgText";
+data: string;
+driverParam: string;
+notNull: true;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: [string, ...string[]];
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+role: PgColumn<    {
+name: "role";
+tableName: "hf_invitation";
+dataType: "string";
+columnType: "PgText";
+data: string;
+driverParam: string;
+notNull: false;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: [string, ...string[]];
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+status: PgColumn<    {
+name: "status";
+tableName: "hf_invitation";
+dataType: "string";
+columnType: "PgText";
+data: string;
+driverParam: string;
+notNull: true;
+hasDefault: true;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: [string, ...string[]];
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+expiresAt: PgColumn<    {
+name: "expires_at";
+tableName: "hf_invitation";
+dataType: "date";
+columnType: "PgTimestamp";
+data: Date;
+driverParam: string;
+notNull: true;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: undefined;
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+inviterId: PgColumn<    {
+name: "inviter_id";
+tableName: "hf_invitation";
+dataType: "string";
+columnType: "PgText";
+data: string;
+driverParam: string;
+notNull: true;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: [string, ...string[]];
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+createdAt: PgColumn<    {
+name: "created_at";
+tableName: "hf_invitation";
+dataType: "date";
+columnType: "PgTimestamp";
+data: Date;
+driverParam: string;
+notNull: true;
+hasDefault: true;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: undefined;
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+};
+dialect: "pg";
+}>;
+
 // @public (undocumented)
 export const hfLlmCall: PgTableWithColumns<    {
 name: "hf_llm_call";

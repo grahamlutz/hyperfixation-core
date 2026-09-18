@@ -98,6 +98,28 @@ export const hfOrganization = pgTable("hf_organization", {
   metadata: text("metadata"),
 });
 
+/**
+ * Added by track C, not by chunk 2: better-auth's `organization` plugin refuses to initialise
+ * at all when a model it writes has no table, so the seven this file started with were one
+ * short of a plugin the plan requires. Nothing in Phase 1 sends an invitation — `disableSignUp`
+ * leaves an invited stranger nowhere to land — but the table has to exist for the rest of the
+ * plugin to work.
+ */
+export const hfInvitation = pgTable("hf_invitation", {
+  id: text("id").primaryKey(),
+  organizationId: text("organization_id")
+    .notNull()
+    .references(() => hfOrganization.id, { onDelete: "cascade" }),
+  email: text("email").notNull(),
+  role: text("role"),
+  status: text("status").notNull().default("pending"),
+  expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }).notNull(),
+  inviterId: text("inviter_id")
+    .notNull()
+    .references(() => hfUser.id, { onDelete: "cascade" }),
+  createdAt: createdAt(),
+});
+
 export const hfMember = pgTable("hf_member", {
   id: text("id").primaryKey(),
   organizationId: text("organization_id")

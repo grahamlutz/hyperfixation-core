@@ -51,7 +51,7 @@ describe("the five-step migrator", () => {
       const { rows: applied } = await migrator.query<{ count: string }>(
         "SELECT count(*)::text AS count FROM drizzle.hf_core_migrations",
       );
-      expect(applied[0]?.count).toBe("3");
+      expect(applied[0]?.count).toBe("4");
 
       const { rows: index } = await migrator.query<{ indexdef: string }>(
         "SELECT indexdef FROM pg_indexes WHERE indexname = 'hf_llm_call_reservation_idx'",
@@ -64,7 +64,7 @@ describe("the five-step migrator", () => {
       const { rows } = await migrator.query<{ count: string }>(
         "SELECT count(*)::text AS count FROM drizzle.hf_core_migrations",
       );
-      expect(rows[0]?.count).toBe("3");
+      expect(rows[0]?.count).toBe("4");
     });
   });
 
@@ -91,7 +91,7 @@ describe("the five-step migrator", () => {
       const { rows: core } = await migrator.query<{ count: string }>(
         "SELECT count(*)::text AS count FROM drizzle.hf_core_migrations",
       );
-      expect(core[0]?.count).toBe("3");
+      expect(core[0]?.count).toBe("4");
     });
 
     it("refuses an app migration that touches an hf_* table, before applying it", async () => {
