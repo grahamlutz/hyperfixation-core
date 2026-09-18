@@ -1,4 +1,11 @@
 export {
+  createAuth,
+  upgradeSessionFactor,
+  AUTH_SCHEMA,
+  type CreateAuthOptions,
+  type HyperfixationAuth,
+} from "./factory.js";
+export {
   hasRole,
   sessionFactorForPath,
   sessionFactors,

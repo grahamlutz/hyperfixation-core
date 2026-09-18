@@ -4,8 +4,48 @@
 
 ```ts
 
+import { $strip } from 'zod/v4/core';
+import { Auth } from 'better-auth';
+import { AuthContext } from 'better-auth';
+import { AuthenticationResponseJSON } from '@simplewebauthn/server';
+import { BetterAuthOptions } from 'better-auth';
+import { DBAdapter } from 'better-auth';
+import { DefaultOrganizationPlugin } from 'better-auth/plugins';
+import { emailOTP } from 'better-auth/plugins';
+import { EmailOTPOptions } from 'better-auth/plugins';
+import { GenericEndpointContext } from 'better-auth';
+import { HookEndpointContext } from 'better-auth';
+import { Middleware } from 'better-auth';
+import { MiddlewareInputContext } from 'better-auth';
+import { MiddlewareOptions } from 'better-auth';
+import { OpenAPIParameter } from 'better-auth';
+import { Passkey } from '@better-auth/passkey';
+import { PasskeyOptions } from '@better-auth/passkey';
+import { PgColumn } from 'drizzle-orm/pg-core';
+import { PgTableWithColumns } from 'drizzle-orm/pg-core';
+import type { Pool } from 'pg';
+import { PublicKeyCredentialCreationOptionsJSON } from '@simplewebauthn/server';
+import { PublicKeyCredentialRequestOptionsJSON } from '@simplewebauthn/server';
+import { RawError } from 'better-auth';
 import { SessionFactor } from '@hyperfixation/db';
 import { sessionFactors } from '@hyperfixation/db';
+import { SessionWithImpersonatedBy } from 'better-auth/plugins';
+import { StrictEndpoint } from 'better-auth';
+import { User } from 'better-auth';
+import { UserWithRole } from 'better-auth/plugins';
+import { ZodAny } from 'better-auth';
+import { ZodArray } from 'better-auth';
+import { ZodBoolean } from 'better-auth';
+import { ZodCoercedString } from 'better-auth';
+import { ZodEnum } from 'better-auth';
+import { ZodIntersection } from 'better-auth';
+import { ZodNumber } from 'better-auth';
+import { ZodObject } from 'better-auth';
+import { ZodOptional } from 'better-auth';
+import { ZodRecord } from 'better-auth';
+import { ZodString } from 'better-auth';
+import { ZodUnion } from 'better-auth';
+import { ZodXor } from 'better-auth';
 
 // @public (undocumented)
 export type AccessDecision = {
@@ -58,11 +98,3358 @@ export const ADMIN_ROLE = "admin";
 export const AUTH_AREA = "auth";
 
 // @public
+export const AUTH_SCHEMA: {
+    readonly user: PgTableWithColumns<    {
+    name: "hf_user";
+    schema: undefined;
+    columns: {
+    id: PgColumn<    {
+    name: "id";
+    tableName: "hf_user";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: true;
+    hasDefault: false;
+    isPrimaryKey: true;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    name: PgColumn<    {
+    name: "name";
+    tableName: "hf_user";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: true;
+    hasDefault: false;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    email: PgColumn<    {
+    name: "email";
+    tableName: "hf_user";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: true;
+    hasDefault: false;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    emailVerified: PgColumn<    {
+    name: "email_verified";
+    tableName: "hf_user";
+    dataType: "boolean";
+    columnType: "PgBoolean";
+    data: boolean;
+    driverParam: boolean;
+    notNull: true;
+    hasDefault: true;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: undefined;
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    image: PgColumn<    {
+    name: "image";
+    tableName: "hf_user";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: false;
+    hasDefault: false;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    createdAt: PgColumn<    {
+    name: "created_at";
+    tableName: "hf_user";
+    dataType: "date";
+    columnType: "PgTimestamp";
+    data: Date;
+    driverParam: string;
+    notNull: true;
+    hasDefault: true;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: undefined;
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    updatedAt: PgColumn<    {
+    name: "updated_at";
+    tableName: "hf_user";
+    dataType: "date";
+    columnType: "PgTimestamp";
+    data: Date;
+    driverParam: string;
+    notNull: true;
+    hasDefault: true;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: undefined;
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    role: PgColumn<    {
+    name: "role";
+    tableName: "hf_user";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: false;
+    hasDefault: false;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    banned: PgColumn<    {
+    name: "banned";
+    tableName: "hf_user";
+    dataType: "boolean";
+    columnType: "PgBoolean";
+    data: boolean;
+    driverParam: boolean;
+    notNull: false;
+    hasDefault: true;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: undefined;
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    banReason: PgColumn<    {
+    name: "ban_reason";
+    tableName: "hf_user";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: false;
+    hasDefault: false;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    banExpires: PgColumn<    {
+    name: "ban_expires";
+    tableName: "hf_user";
+    dataType: "date";
+    columnType: "PgTimestamp";
+    data: Date;
+    driverParam: string;
+    notNull: false;
+    hasDefault: false;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: undefined;
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    };
+    dialect: "pg";
+    }>;
+    readonly session: PgTableWithColumns<    {
+    name: "hf_session";
+    schema: undefined;
+    columns: {
+    id: PgColumn<    {
+    name: "id";
+    tableName: "hf_session";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: true;
+    hasDefault: false;
+    isPrimaryKey: true;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    expiresAt: PgColumn<    {
+    name: "expires_at";
+    tableName: "hf_session";
+    dataType: "date";
+    columnType: "PgTimestamp";
+    data: Date;
+    driverParam: string;
+    notNull: true;
+    hasDefault: false;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: undefined;
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    token: PgColumn<    {
+    name: "token";
+    tableName: "hf_session";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: true;
+    hasDefault: false;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    createdAt: PgColumn<    {
+    name: "created_at";
+    tableName: "hf_session";
+    dataType: "date";
+    columnType: "PgTimestamp";
+    data: Date;
+    driverParam: string;
+    notNull: true;
+    hasDefault: true;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: undefined;
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    updatedAt: PgColumn<    {
+    name: "updated_at";
+    tableName: "hf_session";
+    dataType: "date";
+    columnType: "PgTimestamp";
+    data: Date;
+    driverParam: string;
+    notNull: true;
+    hasDefault: true;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: undefined;
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    ipAddress: PgColumn<    {
+    name: "ip_address";
+    tableName: "hf_session";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: false;
+    hasDefault: false;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    userAgent: PgColumn<    {
+    name: "user_agent";
+    tableName: "hf_session";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: false;
+    hasDefault: false;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    userId: PgColumn<    {
+    name: "user_id";
+    tableName: "hf_session";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: true;
+    hasDefault: false;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    activeOrganizationId: PgColumn<    {
+    name: "active_organization_id";
+    tableName: "hf_session";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: false;
+    hasDefault: false;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    impersonatedBy: PgColumn<    {
+    name: "impersonated_by";
+    tableName: "hf_session";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: false;
+    hasDefault: false;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    factor: PgColumn<    {
+    name: "factor";
+    tableName: "hf_session";
+    dataType: "string";
+    columnType: "PgText";
+    data: "code" | "passkey";
+    driverParam: string;
+    notNull: true;
+    hasDefault: true;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: ["code", "passkey"];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    };
+    dialect: "pg";
+    }>;
+    readonly account: PgTableWithColumns<    {
+    name: "hf_account";
+    schema: undefined;
+    columns: {
+    id: PgColumn<    {
+    name: "id";
+    tableName: "hf_account";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: true;
+    hasDefault: false;
+    isPrimaryKey: true;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    accountId: PgColumn<    {
+    name: "account_id";
+    tableName: "hf_account";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: true;
+    hasDefault: false;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    providerId: PgColumn<    {
+    name: "provider_id";
+    tableName: "hf_account";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: true;
+    hasDefault: false;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    userId: PgColumn<    {
+    name: "user_id";
+    tableName: "hf_account";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: true;
+    hasDefault: false;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    accessToken: PgColumn<    {
+    name: "access_token";
+    tableName: "hf_account";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: false;
+    hasDefault: false;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    refreshToken: PgColumn<    {
+    name: "refresh_token";
+    tableName: "hf_account";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: false;
+    hasDefault: false;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    idToken: PgColumn<    {
+    name: "id_token";
+    tableName: "hf_account";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: false;
+    hasDefault: false;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    accessTokenExpiresAt: PgColumn<    {
+    name: "access_token_expires_at";
+    tableName: "hf_account";
+    dataType: "date";
+    columnType: "PgTimestamp";
+    data: Date;
+    driverParam: string;
+    notNull: false;
+    hasDefault: false;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: undefined;
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    refreshTokenExpiresAt: PgColumn<    {
+    name: "refresh_token_expires_at";
+    tableName: "hf_account";
+    dataType: "date";
+    columnType: "PgTimestamp";
+    data: Date;
+    driverParam: string;
+    notNull: false;
+    hasDefault: false;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: undefined;
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    scope: PgColumn<    {
+    name: "scope";
+    tableName: "hf_account";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: false;
+    hasDefault: false;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    password: PgColumn<    {
+    name: "password";
+    tableName: "hf_account";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: false;
+    hasDefault: false;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    createdAt: PgColumn<    {
+    name: "created_at";
+    tableName: "hf_account";
+    dataType: "date";
+    columnType: "PgTimestamp";
+    data: Date;
+    driverParam: string;
+    notNull: true;
+    hasDefault: true;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: undefined;
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    updatedAt: PgColumn<    {
+    name: "updated_at";
+    tableName: "hf_account";
+    dataType: "date";
+    columnType: "PgTimestamp";
+    data: Date;
+    driverParam: string;
+    notNull: true;
+    hasDefault: true;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: undefined;
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    };
+    dialect: "pg";
+    }>;
+    readonly verification: PgTableWithColumns<    {
+    name: "hf_verification";
+    schema: undefined;
+    columns: {
+    id: PgColumn<    {
+    name: "id";
+    tableName: "hf_verification";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: true;
+    hasDefault: false;
+    isPrimaryKey: true;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    identifier: PgColumn<    {
+    name: "identifier";
+    tableName: "hf_verification";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: true;
+    hasDefault: false;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    value: PgColumn<    {
+    name: "value";
+    tableName: "hf_verification";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: true;
+    hasDefault: false;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    expiresAt: PgColumn<    {
+    name: "expires_at";
+    tableName: "hf_verification";
+    dataType: "date";
+    columnType: "PgTimestamp";
+    data: Date;
+    driverParam: string;
+    notNull: true;
+    hasDefault: false;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: undefined;
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    createdAt: PgColumn<    {
+    name: "created_at";
+    tableName: "hf_verification";
+    dataType: "date";
+    columnType: "PgTimestamp";
+    data: Date;
+    driverParam: string;
+    notNull: true;
+    hasDefault: true;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: undefined;
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    updatedAt: PgColumn<    {
+    name: "updated_at";
+    tableName: "hf_verification";
+    dataType: "date";
+    columnType: "PgTimestamp";
+    data: Date;
+    driverParam: string;
+    notNull: true;
+    hasDefault: true;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: undefined;
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    };
+    dialect: "pg";
+    }>;
+    readonly passkey: PgTableWithColumns<    {
+    name: "hf_passkey";
+    schema: undefined;
+    columns: {
+    id: PgColumn<    {
+    name: "id";
+    tableName: "hf_passkey";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: true;
+    hasDefault: false;
+    isPrimaryKey: true;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    name: PgColumn<    {
+    name: "name";
+    tableName: "hf_passkey";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: false;
+    hasDefault: false;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    publicKey: PgColumn<    {
+    name: "public_key";
+    tableName: "hf_passkey";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: true;
+    hasDefault: false;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    userId: PgColumn<    {
+    name: "user_id";
+    tableName: "hf_passkey";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: true;
+    hasDefault: false;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    credentialID: PgColumn<    {
+    name: "credential_id";
+    tableName: "hf_passkey";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: true;
+    hasDefault: false;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    counter: PgColumn<    {
+    name: "counter";
+    tableName: "hf_passkey";
+    dataType: "number";
+    columnType: "PgInteger";
+    data: number;
+    driverParam: string | number;
+    notNull: true;
+    hasDefault: false;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: undefined;
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    deviceType: PgColumn<    {
+    name: "device_type";
+    tableName: "hf_passkey";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: true;
+    hasDefault: false;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    backedUp: PgColumn<    {
+    name: "backed_up";
+    tableName: "hf_passkey";
+    dataType: "boolean";
+    columnType: "PgBoolean";
+    data: boolean;
+    driverParam: boolean;
+    notNull: true;
+    hasDefault: false;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: undefined;
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    transports: PgColumn<    {
+    name: "transports";
+    tableName: "hf_passkey";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: false;
+    hasDefault: false;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    createdAt: PgColumn<    {
+    name: "created_at";
+    tableName: "hf_passkey";
+    dataType: "date";
+    columnType: "PgTimestamp";
+    data: Date;
+    driverParam: string;
+    notNull: false;
+    hasDefault: true;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: undefined;
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    aaguid: PgColumn<    {
+    name: "aaguid";
+    tableName: "hf_passkey";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: false;
+    hasDefault: false;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    };
+    dialect: "pg";
+    }>;
+    readonly organization: PgTableWithColumns<    {
+    name: "hf_organization";
+    schema: undefined;
+    columns: {
+    id: PgColumn<    {
+    name: "id";
+    tableName: "hf_organization";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: true;
+    hasDefault: false;
+    isPrimaryKey: true;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    name: PgColumn<    {
+    name: "name";
+    tableName: "hf_organization";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: true;
+    hasDefault: false;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    slug: PgColumn<    {
+    name: "slug";
+    tableName: "hf_organization";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: true;
+    hasDefault: false;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    logo: PgColumn<    {
+    name: "logo";
+    tableName: "hf_organization";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: false;
+    hasDefault: false;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    createdAt: PgColumn<    {
+    name: "created_at";
+    tableName: "hf_organization";
+    dataType: "date";
+    columnType: "PgTimestamp";
+    data: Date;
+    driverParam: string;
+    notNull: true;
+    hasDefault: true;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: undefined;
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    metadata: PgColumn<    {
+    name: "metadata";
+    tableName: "hf_organization";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: false;
+    hasDefault: false;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    };
+    dialect: "pg";
+    }>;
+    readonly member: PgTableWithColumns<    {
+    name: "hf_member";
+    schema: undefined;
+    columns: {
+    id: PgColumn<    {
+    name: "id";
+    tableName: "hf_member";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: true;
+    hasDefault: false;
+    isPrimaryKey: true;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    organizationId: PgColumn<    {
+    name: "organization_id";
+    tableName: "hf_member";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: true;
+    hasDefault: false;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    userId: PgColumn<    {
+    name: "user_id";
+    tableName: "hf_member";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: true;
+    hasDefault: false;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    role: PgColumn<    {
+    name: "role";
+    tableName: "hf_member";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: true;
+    hasDefault: true;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    createdAt: PgColumn<    {
+    name: "created_at";
+    tableName: "hf_member";
+    dataType: "date";
+    columnType: "PgTimestamp";
+    data: Date;
+    driverParam: string;
+    notNull: true;
+    hasDefault: true;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: undefined;
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    };
+    dialect: "pg";
+    }>;
+    readonly invitation: PgTableWithColumns<    {
+    name: "hf_invitation";
+    schema: undefined;
+    columns: {
+    id: PgColumn<    {
+    name: "id";
+    tableName: "hf_invitation";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: true;
+    hasDefault: false;
+    isPrimaryKey: true;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    organizationId: PgColumn<    {
+    name: "organization_id";
+    tableName: "hf_invitation";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: true;
+    hasDefault: false;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    email: PgColumn<    {
+    name: "email";
+    tableName: "hf_invitation";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: true;
+    hasDefault: false;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    role: PgColumn<    {
+    name: "role";
+    tableName: "hf_invitation";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: false;
+    hasDefault: false;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    status: PgColumn<    {
+    name: "status";
+    tableName: "hf_invitation";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: true;
+    hasDefault: true;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    expiresAt: PgColumn<    {
+    name: "expires_at";
+    tableName: "hf_invitation";
+    dataType: "date";
+    columnType: "PgTimestamp";
+    data: Date;
+    driverParam: string;
+    notNull: true;
+    hasDefault: false;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: undefined;
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    inviterId: PgColumn<    {
+    name: "inviter_id";
+    tableName: "hf_invitation";
+    dataType: "string";
+    columnType: "PgText";
+    data: string;
+    driverParam: string;
+    notNull: true;
+    hasDefault: false;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: [string, ...string[]];
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    createdAt: PgColumn<    {
+    name: "created_at";
+    tableName: "hf_invitation";
+    dataType: "date";
+    columnType: "PgTimestamp";
+    data: Date;
+    driverParam: string;
+    notNull: true;
+    hasDefault: true;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: undefined;
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
+    };
+    dialect: "pg";
+    }>;
+};
+
+// @public
 export interface AuthSession {
     // (undocumented)
     factor: SessionFactor;
     // (undocumented)
     user: SessionUser;
+}
+
+// @public
+export function createAuth(options: CreateAuthOptions): Auth<    {
+database: (options: BetterAuthOptions) => DBAdapter<BetterAuthOptions>;
+baseURL: string | undefined;
+secret: string | undefined;
+trustedOrigins: string[] | undefined;
+session: {
+additionalFields: {
+factor: {
+type: "string";
+required: false;
+input: false;
+defaultValue: string;
+};
+};
+};
+databaseHooks: {
+session: {
+create: {
+before: (session: {
+id: string;
+createdAt: Date;
+updatedAt: Date;
+userId: string;
+expiresAt: Date;
+token: string;
+ipAddress?: string | null | undefined;
+userAgent?: string | null | undefined;
+} & Record<string, unknown>, ctx: GenericEndpointContext | null) => Promise<{
+data: {
+factor: "code" | "passkey";
+id: string;
+createdAt: Date;
+updatedAt: Date;
+userId: string;
+expiresAt: Date;
+token: string;
+ipAddress?: string | null | undefined;
+userAgent?: string | null | undefined;
+};
+}>;
+};
+};
+};
+plugins: [{
+id: "email-otp";
+version: string;
+init(ctx: AuthContext): {
+options: {
+emailVerification: {
+sendVerificationEmail(data: {
+user: User;
+url: string;
+token: string;
+}, request: Request | undefined): Promise<void>;
+};
+};
+} | undefined;
+endpoints: {
+sendVerificationOTP: StrictEndpoint<"/email-otp/send-verification-otp", {
+method: "POST";
+use: Middleware<MiddlewareOptions, (inputContext: MiddlewareInputContext<MiddlewareOptions>) => Promise<void>>[];
+body: ZodObject<    {
+email: ZodString;
+type: ZodEnum<    {
+"sign-in": "sign-in";
+"change-email": "change-email";
+"email-verification": "email-verification";
+"forget-password": "forget-password";
+}>;
+}, $strip>;
+metadata: {
+openapi: {
+operationId: string;
+description: string;
+responses: {
+200: {
+description: string;
+content: {
+"application/json": {
+schema: {
+type: "object";
+properties: {
+success: {
+type: string;
+};
+};
+};
+};
+};
+};
+};
+};
+};
+}, {
+success: boolean;
+}>;
+createVerificationOTP: StrictEndpoint<string, {
+method: "POST";
+body: ZodObject<    {
+email: ZodString;
+type: ZodEnum<    {
+"sign-in": "sign-in";
+"change-email": "change-email";
+"email-verification": "email-verification";
+"forget-password": "forget-password";
+}>;
+}, $strip>;
+metadata: {
+openapi: {
+operationId: string;
+description: string;
+responses: {
+200: {
+description: string;
+content: {
+"application/json": {
+schema: {
+type: "string";
+};
+};
+};
+};
+};
+};
+};
+}, string>;
+getVerificationOTP: StrictEndpoint<string, {
+method: "GET";
+query: ZodObject<    {
+email: ZodString;
+type: ZodEnum<    {
+"sign-in": "sign-in";
+"change-email": "change-email";
+"email-verification": "email-verification";
+"forget-password": "forget-password";
+}>;
+}, $strip>;
+metadata: {
+openapi: {
+operationId: string;
+description: string;
+responses: {
+"200": {
+description: string;
+content: {
+"application/json": {
+schema: {
+type: "object";
+properties: {
+otp: {
+type: string;
+nullable: boolean;
+description: string;
+};
+};
+required: string[];
+};
+};
+};
+};
+};
+};
+};
+}, {
+otp: null;
+} | {
+otp: string;
+}>;
+checkVerificationOTP: StrictEndpoint<"/email-otp/check-verification-otp", {
+method: "POST";
+body: ZodObject<    {
+email: ZodString;
+type: ZodEnum<    {
+"sign-in": "sign-in";
+"change-email": "change-email";
+"email-verification": "email-verification";
+"forget-password": "forget-password";
+}>;
+otp: ZodString;
+}, $strip>;
+metadata: {
+openapi: {
+operationId: string;
+description: string;
+responses: {
+200: {
+description: string;
+content: {
+"application/json": {
+schema: {
+type: "object";
+properties: {
+success: {
+type: string;
+};
+};
+};
+};
+};
+};
+};
+};
+};
+}, {
+success: boolean;
+}>;
+verifyEmailOTP: StrictEndpoint<"/email-otp/verify-email", {
+method: "POST";
+body: ZodObject<    {
+email: ZodString;
+otp: ZodString;
+}, $strip>;
+metadata: {
+openapi: {
+description: string;
+responses: {
+200: {
+description: string;
+content: {
+"application/json": {
+schema: {
+type: "object";
+properties: {
+status: {
+type: string;
+description: string;
+enum: boolean[];
+};
+token: {
+type: string;
+nullable: boolean;
+description: string;
+};
+user: {
+$ref: string;
+};
+};
+required: string[];
+};
+};
+};
+};
+};
+};
+};
+}, {
+status: boolean;
+token: string;
+user: {
+id: string;
+createdAt: Date;
+updatedAt: Date;
+email: string;
+emailVerified: boolean;
+name: string;
+image?: string | null | undefined;
+} & Record<string, any>;
+} | {
+status: boolean;
+token: null;
+user: {
+id: string;
+createdAt: Date;
+updatedAt: Date;
+email: string;
+emailVerified: boolean;
+name: string;
+image?: string | null | undefined;
+} & Record<string, any>;
+}>;
+signInEmailOTP: StrictEndpoint<"/sign-in/email-otp", {
+method: "POST";
+body: ZodIntersection<ZodObject<    {
+email: ZodString;
+otp: ZodString;
+name: ZodOptional<ZodString>;
+image: ZodOptional<ZodString>;
+}, $strip>, ZodRecord<ZodString, ZodAny>>;
+metadata: {
+openapi: {
+operationId: string;
+description: string;
+responses: {
+200: {
+description: string;
+content: {
+"application/json": {
+schema: {
+type: "object";
+properties: {
+token: {
+type: string;
+description: string;
+};
+user: {
+$ref: string;
+};
+};
+required: string[];
+};
+};
+};
+};
+};
+};
+};
+}, {
+token: string;
+user: {
+id: string;
+createdAt: Date;
+updatedAt: Date;
+email: string;
+emailVerified: boolean;
+name: string;
+image?: string | null | undefined;
+};
+}>;
+requestPasswordResetEmailOTP: StrictEndpoint<"/email-otp/request-password-reset", {
+method: "POST";
+body: ZodObject<    {
+email: ZodString;
+}, $strip>;
+metadata: {
+openapi: {
+operationId: string;
+description: string;
+responses: {
+200: {
+description: string;
+content: {
+"application/json": {
+schema: {
+type: "object";
+properties: {
+success: {
+type: string;
+description: string;
+};
+};
+};
+};
+};
+};
+};
+};
+};
+}, {
+success: boolean;
+}>;
+forgetPasswordEmailOTP: StrictEndpoint<"/forget-password/email-otp", {
+method: "POST";
+body: ZodObject<    {
+email: ZodString;
+}, $strip>;
+metadata: {
+openapi: {
+operationId: string;
+description: string;
+responses: {
+200: {
+description: string;
+content: {
+"application/json": {
+schema: {
+type: "object";
+properties: {
+success: {
+type: string;
+description: string;
+};
+};
+};
+};
+};
+};
+};
+};
+};
+}, {
+success: boolean;
+}>;
+resetPasswordEmailOTP: StrictEndpoint<"/email-otp/reset-password", {
+method: "POST";
+body: ZodObject<    {
+email: ZodString;
+otp: ZodString;
+password: ZodString;
+}, $strip>;
+metadata: {
+openapi: {
+operationId: string;
+description: string;
+responses: {
+200: {
+description: string;
+content: {
+"application/json": {
+schema: {
+type: "object";
+properties: {
+success: {
+type: string;
+};
+};
+};
+};
+};
+};
+};
+};
+};
+}, {
+success: boolean;
+}>;
+requestEmailChangeEmailOTP: StrictEndpoint<"/email-otp/request-email-change", {
+method: "POST";
+body: ZodObject<    {
+newEmail: ZodString;
+otp: ZodOptional<ZodString>;
+}, $strip>;
+use: Middleware<MiddlewareOptions, (inputContext: MiddlewareInputContext<MiddlewareOptions>) => Promise<{
+session: {
+session: Record<string, any> & {
+id: string;
+createdAt: Date;
+updatedAt: Date;
+userId: string;
+expiresAt: Date;
+token: string;
+ipAddress?: string | null | undefined;
+userAgent?: string | null | undefined;
+};
+user: Record<string, any> & {
+id: string;
+createdAt: Date;
+updatedAt: Date;
+email: string;
+emailVerified: boolean;
+name: string;
+image?: string | null | undefined;
+};
+};
+}>>[];
+metadata: {
+openapi: {
+operationId: string;
+description: string;
+responses: {
+200: {
+description: string;
+content: {
+"application/json": {
+schema: {
+type: "object";
+properties: {
+success: {
+type: string;
+};
+};
+};
+};
+};
+};
+};
+};
+};
+}, {
+success: boolean;
+}>;
+changeEmailEmailOTP: StrictEndpoint<"/email-otp/change-email", {
+method: "POST";
+body: ZodObject<    {
+newEmail: ZodString;
+otp: ZodString;
+}, $strip>;
+use: Middleware<MiddlewareOptions, (inputContext: MiddlewareInputContext<MiddlewareOptions>) => Promise<{
+session: {
+session: Record<string, any> & {
+id: string;
+createdAt: Date;
+updatedAt: Date;
+userId: string;
+expiresAt: Date;
+token: string;
+ipAddress?: string | null | undefined;
+userAgent?: string | null | undefined;
+};
+user: Record<string, any> & {
+id: string;
+createdAt: Date;
+updatedAt: Date;
+email: string;
+emailVerified: boolean;
+name: string;
+image?: string | null | undefined;
+};
+};
+}>>[];
+metadata: {
+openapi: {
+operationId: string;
+description: string;
+responses: {
+200: {
+description: string;
+content: {
+"application/json": {
+schema: {
+type: "object";
+properties: {
+success: {
+type: string;
+};
+};
+};
+};
+};
+};
+};
+};
+};
+}, {
+success: boolean;
+}>;
+};
+hooks: {
+after: {
+matcher(context: HookEndpointContext): boolean;
+handler: Middleware<MiddlewareOptions, (inputContext: MiddlewareInputContext<MiddlewareOptions>) => Promise<void>>;
+}[];
+};
+rateLimit: ({
+pathMatcher(path: string): path is "/email-otp/send-verification-otp";
+window: number;
+max: number;
+} | {
+pathMatcher(path: string): path is "/email-otp/check-verification-otp";
+window: number;
+max: number;
+} | {
+pathMatcher(path: string): path is "/email-otp/verify-email";
+window: number;
+max: number;
+} | {
+pathMatcher(path: string): path is "/sign-in/email-otp";
+window: number;
+max: number;
+} | {
+pathMatcher(path: string): path is "/email-otp/request-password-reset";
+window: number;
+max: number;
+} | {
+pathMatcher(path: string): path is "/email-otp/reset-password";
+window: number;
+max: number;
+} | {
+pathMatcher(path: string): path is "/forget-password/email-otp";
+window: number;
+max: number;
+} | {
+pathMatcher(path: string): path is "/email-otp/request-email-change";
+window: number;
+max: number;
+} | {
+pathMatcher(path: string): path is "/email-otp/change-email";
+window: number;
+max: number;
+})[];
+options: EmailOTPOptions;
+$ERROR_CODES: {
+OTP_EXPIRED: RawError<"OTP_EXPIRED">;
+INVALID_OTP: RawError<"INVALID_OTP">;
+TOO_MANY_ATTEMPTS: RawError<"TOO_MANY_ATTEMPTS">;
+};
+}, {
+id: "passkey";
+version: string;
+endpoints: {
+generatePasskeyRegistrationOptions: StrictEndpoint<"/passkey/generate-register-options", {
+method: "GET";
+use: Middleware<MiddlewareOptions, (inputContext: MiddlewareInputContext<MiddlewareOptions>) => Promise<{
+session: {
+session: Record<string, any> & {
+id: string;
+createdAt: Date;
+updatedAt: Date;
+userId: string;
+expiresAt: Date;
+token: string;
+ipAddress?: string | null | undefined;
+userAgent?: string | null | undefined;
+};
+user: Record<string, any> & {
+id: string;
+createdAt: Date;
+updatedAt: Date;
+email: string;
+emailVerified: boolean;
+name: string;
+image?: string | null | undefined;
+};
+};
+}>>[];
+query: ZodOptional<ZodObject<    {
+authenticatorAttachment: ZodOptional<ZodEnum<    {
+platform: "platform";
+"cross-platform": "cross-platform";
+}>>;
+name: ZodOptional<ZodString>;
+context: ZodOptional<ZodString>;
+}, $strip>>;
+metadata: {
+openapi: {
+operationId: string;
+description: string;
+parameters: OpenAPIParameter[];
+responses: {
+200: {
+description: string;
+content: {
+"application/json": {
+schema: {
+type: "object";
+properties: {
+challenge: {
+type: string;
+};
+rp: {
+type: string;
+properties: {
+name: {
+type: string;
+};
+id: {
+type: string;
+};
+};
+};
+user: {
+type: string;
+properties: {
+id: {
+type: string;
+};
+name: {
+type: string;
+};
+displayName: {
+type: string;
+};
+};
+};
+pubKeyCredParams: {
+type: string;
+items: {
+type: string;
+properties: {
+type: {
+type: string;
+};
+alg: {
+type: string;
+};
+};
+};
+};
+timeout: {
+type: string;
+};
+excludeCredentials: {
+type: string;
+items: {
+type: string;
+properties: {
+id: {
+type: string;
+};
+type: {
+type: string;
+};
+transports: {
+type: string;
+items: {
+type: string;
+};
+};
+};
+};
+};
+authenticatorSelection: {
+type: string;
+properties: {
+authenticatorAttachment: {
+type: string;
+};
+requireResidentKey: {
+type: string;
+};
+userVerification: {
+type: string;
+};
+};
+};
+attestation: {
+type: string;
+};
+extensions: {
+type: string;
+};
+};
+};
+};
+};
+};
+};
+};
+};
+}, PublicKeyCredentialCreationOptionsJSON>;
+generatePasskeyAuthenticationOptions: StrictEndpoint<"/passkey/generate-authenticate-options", {
+method: "GET";
+metadata: {
+openapi: {
+operationId: string;
+description: string;
+responses: {
+200: {
+description: string;
+content: {
+"application/json": {
+schema: {
+type: "object";
+properties: {
+challenge: {
+type: string;
+};
+rp: {
+type: string;
+properties: {
+name: {
+type: string;
+};
+id: {
+type: string;
+};
+};
+};
+user: {
+type: string;
+properties: {
+id: {
+type: string;
+};
+name: {
+type: string;
+};
+displayName: {
+type: string;
+};
+};
+};
+timeout: {
+type: string;
+};
+allowCredentials: {
+type: string;
+items: {
+type: string;
+properties: {
+id: {
+type: string;
+};
+type: {
+type: string;
+};
+transports: {
+type: string;
+items: {
+type: string;
+};
+};
+};
+};
+};
+userVerification: {
+type: string;
+};
+authenticatorSelection: {
+type: string;
+properties: {
+authenticatorAttachment: {
+type: string;
+};
+requireResidentKey: {
+type: string;
+};
+userVerification: {
+type: string;
+};
+};
+};
+extensions: {
+type: string;
+};
+};
+};
+};
+};
+};
+};
+};
+};
+}, PublicKeyCredentialRequestOptionsJSON>;
+verifyPasskeyRegistration: StrictEndpoint<"/passkey/verify-registration", {
+method: "POST";
+body: ZodObject<    {
+response: ZodAny;
+name: ZodOptional<ZodString>;
+createSession: ZodOptional<ZodBoolean>;
+}, $strip>;
+use: Middleware<MiddlewareOptions, (inputContext: MiddlewareInputContext<MiddlewareOptions>) => Promise<{
+session: {
+session: Record<string, any> & {
+id: string;
+createdAt: Date;
+updatedAt: Date;
+userId: string;
+expiresAt: Date;
+token: string;
+ipAddress?: string | null | undefined;
+userAgent?: string | null | undefined;
+};
+user: Record<string, any> & {
+id: string;
+createdAt: Date;
+updatedAt: Date;
+email: string;
+emailVerified: boolean;
+name: string;
+image?: string | null | undefined;
+};
+};
+}>>[];
+metadata: {
+openapi: {
+operationId: string;
+description: string;
+responses: {
+200: {
+description: string;
+content: {
+"application/json": {
+schema: {
+readonly type: "object";
+readonly allOf: readonly [{
+readonly $ref: "#/components/schemas/Passkey";
+}, {
+readonly type: "object";
+readonly properties: {
+readonly session: {
+readonly $ref: "#/components/schemas/Session";
+};
+readonly user: {
+readonly $ref: "#/components/schemas/User";
+};
+};
+}];
+};
+};
+};
+};
+400: {
+description: string;
+};
+};
+};
+};
+}, Passkey>;
+verifyPasskeyAuthentication: StrictEndpoint<"/passkey/verify-authentication", {
+method: "POST";
+body: ZodObject<    {
+response: ZodRecord<ZodAny, ZodAny>;
+}, $strip>;
+metadata: {
+openapi: {
+operationId: string;
+description: string;
+responses: {
+200: {
+description: string;
+content: {
+"application/json": {
+schema: {
+type: "object";
+properties: {
+session: {
+$ref: string;
+};
+user: {
+$ref: string;
+};
+};
+};
+};
+};
+};
+};
+};
+$Infer: {
+body: {
+response: AuthenticationResponseJSON;
+};
+};
+};
+}, {
+session: {
+id: string;
+createdAt: Date;
+updatedAt: Date;
+userId: string;
+expiresAt: Date;
+token: string;
+ipAddress?: string | null | undefined;
+userAgent?: string | null | undefined;
+};
+user: {
+id: string;
+createdAt: Date;
+updatedAt: Date;
+email: string;
+emailVerified: boolean;
+name: string;
+image?: string | null | undefined;
+};
+}>;
+listPasskeys: StrictEndpoint<"/passkey/list-user-passkeys", {
+method: "GET";
+use: Middleware<MiddlewareOptions, (inputContext: MiddlewareInputContext<MiddlewareOptions>) => Promise<{
+session: {
+session: Record<string, any> & {
+id: string;
+createdAt: Date;
+updatedAt: Date;
+userId: string;
+expiresAt: Date;
+token: string;
+ipAddress?: string | null | undefined;
+userAgent?: string | null | undefined;
+};
+user: Record<string, any> & {
+id: string;
+createdAt: Date;
+updatedAt: Date;
+email: string;
+emailVerified: boolean;
+name: string;
+image?: string | null | undefined;
+};
+};
+}>>[];
+metadata: {
+openapi: {
+description: string;
+responses: {
+"200": {
+description: string;
+content: {
+"application/json": {
+schema: {
+type: "array";
+items: {
+$ref: string;
+required: string[];
+};
+description: string;
+};
+};
+};
+};
+};
+};
+};
+}, Passkey[]>;
+deletePasskey: StrictEndpoint<"/passkey/delete-passkey", {
+method: "POST";
+body: ZodObject<    {
+id: ZodString;
+}, $strip>;
+use: (Middleware<MiddlewareOptions, (inputContext: MiddlewareInputContext<MiddlewareOptions>) => Promise<{
+session: {
+session: Record<string, any> & {
+id: string;
+createdAt: Date;
+updatedAt: Date;
+userId: string;
+expiresAt: Date;
+token: string;
+ipAddress?: string | null | undefined;
+userAgent?: string | null | undefined;
+};
+user: Record<string, any> & {
+id: string;
+createdAt: Date;
+updatedAt: Date;
+email: string;
+emailVerified: boolean;
+name: string;
+image?: string | null | undefined;
+};
+};
+}>> | Middleware<MiddlewareOptions, (inputContext: MiddlewareInputContext<MiddlewareOptions>) => Promise<{
+verifiedResource: {};
+}>>)[];
+metadata: {
+openapi: {
+description: string;
+responses: {
+"200": {
+description: string;
+content: {
+"application/json": {
+schema: {
+type: "object";
+properties: {
+status: {
+type: string;
+description: string;
+};
+};
+required: string[];
+};
+};
+};
+};
+};
+};
+};
+}, {
+status: boolean;
+}>;
+updatePasskey: StrictEndpoint<"/passkey/update-passkey", {
+method: "POST";
+body: ZodObject<    {
+id: ZodString;
+name: ZodString;
+}, $strip>;
+use: (Middleware<MiddlewareOptions, (inputContext: MiddlewareInputContext<MiddlewareOptions>) => Promise<{
+session: {
+session: Record<string, any> & {
+id: string;
+createdAt: Date;
+updatedAt: Date;
+userId: string;
+expiresAt: Date;
+token: string;
+ipAddress?: string | null | undefined;
+userAgent?: string | null | undefined;
+};
+user: Record<string, any> & {
+id: string;
+createdAt: Date;
+updatedAt: Date;
+email: string;
+emailVerified: boolean;
+name: string;
+image?: string | null | undefined;
+};
+};
+}>> | Middleware<MiddlewareOptions, (inputContext: MiddlewareInputContext<MiddlewareOptions>) => Promise<{
+verifiedResource: {};
+}>>)[];
+metadata: {
+openapi: {
+description: string;
+responses: {
+"200": {
+description: string;
+content: {
+"application/json": {
+schema: {
+type: "object";
+properties: {
+passkey: {
+$ref: string;
+};
+};
+required: string[];
+};
+};
+};
+};
+};
+};
+};
+}, {
+passkey: Passkey;
+}>;
+};
+schema: {
+passkey: {
+fields: {
+name: {
+type: "string";
+required: false;
+};
+publicKey: {
+type: "string";
+required: true;
+};
+userId: {
+type: "string";
+references: {
+model: string;
+field: string;
+};
+required: true;
+index: true;
+};
+credentialID: {
+type: "string";
+required: true;
+index: true;
+};
+counter: {
+type: "number";
+required: true;
+};
+deviceType: {
+type: "string";
+required: true;
+};
+backedUp: {
+type: "boolean";
+required: true;
+};
+transports: {
+type: "string";
+required: false;
+};
+createdAt: {
+type: "date";
+required: false;
+};
+aaguid: {
+type: "string";
+required: false;
+};
+};
+};
+};
+$ERROR_CODES: {
+CHALLENGE_NOT_FOUND: RawError<"CHALLENGE_NOT_FOUND">;
+YOU_ARE_NOT_ALLOWED_TO_REGISTER_THIS_PASSKEY: RawError<"YOU_ARE_NOT_ALLOWED_TO_REGISTER_THIS_PASSKEY">;
+FAILED_TO_VERIFY_REGISTRATION: RawError<"FAILED_TO_VERIFY_REGISTRATION">;
+PASSKEY_NOT_FOUND: RawError<"PASSKEY_NOT_FOUND">;
+AUTHENTICATION_FAILED: RawError<"AUTHENTICATION_FAILED">;
+UNABLE_TO_CREATE_SESSION: RawError<"UNABLE_TO_CREATE_SESSION">;
+USER_NOT_FOUND: RawError<"USER_NOT_FOUND">;
+FAILED_TO_UPDATE_PASSKEY: RawError<"FAILED_TO_UPDATE_PASSKEY">;
+PREVIOUSLY_REGISTERED: RawError<"PREVIOUSLY_REGISTERED">;
+REGISTRATION_CANCELLED: RawError<"REGISTRATION_CANCELLED">;
+AUTH_CANCELLED: RawError<"AUTH_CANCELLED">;
+UNKNOWN_ERROR: RawError<"UNKNOWN_ERROR">;
+SESSION_REQUIRED: RawError<"SESSION_REQUIRED">;
+RESOLVE_USER_REQUIRED: RawError<"RESOLVE_USER_REQUIRED">;
+RESOLVED_USER_INVALID: RawError<"RESOLVED_USER_INVALID">;
+};
+options: PasskeyOptions | undefined;
+}, {
+id: "admin";
+version: string;
+init(): {
+options: {
+databaseHooks: {
+user: {
+create: {
+before(user: {
+id: string;
+createdAt: Date;
+updatedAt: Date;
+email: string;
+emailVerified: boolean;
+name: string;
+image?: string | null | undefined;
+} & Record<string, unknown>): Promise<{
+data: {
+id: string;
+createdAt: Date;
+updatedAt: Date;
+email: string;
+emailVerified: boolean;
+name: string;
+image?: string | null | undefined;
+role: string;
+};
+}>;
+};
+};
+session: {
+create: {
+before(session: {
+id: string;
+createdAt: Date;
+updatedAt: Date;
+userId: string;
+expiresAt: Date;
+token: string;
+ipAddress?: string | null | undefined;
+userAgent?: string | null | undefined;
+} & Record<string, unknown>, ctx: GenericEndpointContext | null): Promise<void>;
+};
+};
+};
+};
+};
+hooks: {
+after: {
+matcher(context: HookEndpointContext): boolean;
+handler: Middleware<MiddlewareOptions, (inputContext: MiddlewareInputContext<MiddlewareOptions>) => Promise<SessionWithImpersonatedBy[] | undefined>>;
+}[];
+};
+endpoints: {
+setRole: StrictEndpoint<"/admin/set-role", {
+method: "POST";
+body: ZodObject<    {
+userId: ZodCoercedString<unknown>;
+role: ZodUnion<readonly [ZodString, ZodArray<ZodString>]>;
+}, $strip>;
+requireHeaders: true;
+use: Middleware<MiddlewareOptions, (inputContext: MiddlewareInputContext<MiddlewareOptions>) => Promise<{
+session: {
+user: UserWithRole;
+session: {
+id: string;
+createdAt: Date;
+updatedAt: Date;
+userId: string;
+expiresAt: Date;
+token: string;
+ipAddress?: string | null | undefined;
+userAgent?: string | null | undefined;
+};
+};
+}>>[];
+metadata: {
+openapi: {
+operationId: string;
+summary: string;
+description: string;
+responses: {
+200: {
+description: string;
+content: {
+"application/json": {
+schema: {
+type: "object";
+properties: {
+user: {
+$ref: string;
+};
+};
+};
+};
+};
+};
+};
+};
+$Infer: {
+body: {
+userId: string;
+role: "admin" | "user" | ("admin" | "user")[];
+};
+};
+};
+}, {
+user: UserWithRole;
+}>;
+getUser: StrictEndpoint<"/admin/get-user", {
+method: "GET";
+query: ZodObject<    {
+id: ZodString;
+}, $strip>;
+use: Middleware<MiddlewareOptions, (inputContext: MiddlewareInputContext<MiddlewareOptions>) => Promise<{
+session: {
+user: UserWithRole;
+session: {
+id: string;
+createdAt: Date;
+updatedAt: Date;
+userId: string;
+expiresAt: Date;
+token: string;
+ipAddress?: string | null | undefined;
+userAgent?: string | null | undefined;
+};
+};
+}>>[];
+metadata: {
+openapi: {
+operationId: string;
+summary: string;
+description: string;
+responses: {
+200: {
+description: string;
+content: {
+"application/json": {
+schema: {
+type: "object";
+properties: {
+user: {
+$ref: string;
+};
+};
+};
+};
+};
+};
+};
+};
+};
+}, UserWithRole>;
+createUser: StrictEndpoint<"/admin/create-user", {
+method: "POST";
+body: ZodObject<    {
+email: ZodString;
+password: ZodOptional<ZodString>;
+name: ZodString;
+role: ZodOptional<ZodUnion<readonly [ZodString, ZodArray<ZodString>]>>;
+data: ZodOptional<ZodRecord<ZodString, ZodAny>>;
+}, $strip>;
+metadata: {
+openapi: {
+operationId: string;
+summary: string;
+description: string;
+responses: {
+200: {
+description: string;
+content: {
+"application/json": {
+schema: {
+type: "object";
+properties: {
+user: {
+$ref: string;
+};
+};
+};
+};
+};
+};
+};
+};
+$Infer: {
+body: {
+email: string;
+password?: string | undefined;
+name: string;
+role?: "admin" | "user" | ("admin" | "user")[] | undefined;
+data?: Record<string, any> | undefined;
+};
+};
+};
+}, {
+user: UserWithRole;
+}>;
+adminUpdateUser: StrictEndpoint<"/admin/update-user", {
+method: "POST";
+body: ZodObject<    {
+userId: ZodCoercedString<unknown>;
+data: ZodRecord<ZodAny, ZodAny>;
+}, $strip>;
+use: Middleware<MiddlewareOptions, (inputContext: MiddlewareInputContext<MiddlewareOptions>) => Promise<{
+session: {
+user: UserWithRole;
+session: {
+id: string;
+createdAt: Date;
+updatedAt: Date;
+userId: string;
+expiresAt: Date;
+token: string;
+ipAddress?: string | null | undefined;
+userAgent?: string | null | undefined;
+};
+};
+}>>[];
+metadata: {
+openapi: {
+operationId: string;
+summary: string;
+description: string;
+responses: {
+200: {
+description: string;
+content: {
+"application/json": {
+schema: {
+type: "object";
+properties: {
+user: {
+$ref: string;
+};
+};
+};
+};
+};
+};
+};
+};
+};
+}, UserWithRole>;
+listUsers: StrictEndpoint<"/admin/list-users", {
+method: "GET";
+use: Middleware<MiddlewareOptions, (inputContext: MiddlewareInputContext<MiddlewareOptions>) => Promise<{
+session: {
+user: UserWithRole;
+session: {
+id: string;
+createdAt: Date;
+updatedAt: Date;
+userId: string;
+expiresAt: Date;
+token: string;
+ipAddress?: string | null | undefined;
+userAgent?: string | null | undefined;
+};
+};
+}>>[];
+query: ZodObject<    {
+searchValue: ZodOptional<ZodString>;
+searchField: ZodOptional<ZodEnum<    {
+email: "email";
+name: "name";
+}>>;
+searchOperator: ZodOptional<ZodEnum<    {
+contains: "contains";
+starts_with: "starts_with";
+ends_with: "ends_with";
+}>>;
+limit: ZodOptional<ZodUnion<[ZodString, ZodNumber]>>;
+offset: ZodOptional<ZodUnion<[ZodString, ZodNumber]>>;
+sortBy: ZodOptional<ZodString>;
+sortDirection: ZodOptional<ZodEnum<    {
+asc: "asc";
+desc: "desc";
+}>>;
+filterField: ZodOptional<ZodString>;
+filterValue: ZodOptional<ZodUnion<[ZodUnion<[ZodUnion<[ZodUnion<[ZodString, ZodNumber]>, ZodBoolean]>, ZodArray<ZodString>]>, ZodArray<ZodNumber>]>>;
+filterOperator: ZodOptional<ZodEnum<    {
+in: "in";
+lte: "lte";
+eq: "eq";
+ne: "ne";
+lt: "lt";
+gt: "gt";
+gte: "gte";
+not_in: "not_in";
+contains: "contains";
+starts_with: "starts_with";
+ends_with: "ends_with";
+}>>;
+}, $strip>;
+metadata: {
+openapi: {
+operationId: string;
+summary: string;
+description: string;
+responses: {
+200: {
+description: string;
+content: {
+"application/json": {
+schema: {
+type: "object";
+properties: {
+users: {
+type: string;
+items: {
+$ref: string;
+};
+};
+total: {
+type: string;
+};
+limit: {
+type: string;
+};
+offset: {
+type: string;
+};
+};
+required: string[];
+};
+};
+};
+};
+};
+};
+};
+}, {
+users: UserWithRole[];
+total: number;
+}>;
+listUserSessions: StrictEndpoint<"/admin/list-user-sessions", {
+method: "POST";
+use: Middleware<MiddlewareOptions, (inputContext: MiddlewareInputContext<MiddlewareOptions>) => Promise<{
+session: {
+user: UserWithRole;
+session: {
+id: string;
+createdAt: Date;
+updatedAt: Date;
+userId: string;
+expiresAt: Date;
+token: string;
+ipAddress?: string | null | undefined;
+userAgent?: string | null | undefined;
+};
+};
+}>>[];
+body: ZodObject<    {
+userId: ZodCoercedString<unknown>;
+}, $strip>;
+metadata: {
+openapi: {
+operationId: string;
+summary: string;
+description: string;
+responses: {
+200: {
+description: string;
+content: {
+"application/json": {
+schema: {
+type: "object";
+properties: {
+sessions: {
+type: string;
+items: {
+$ref: string;
+};
+};
+};
+};
+};
+};
+};
+};
+};
+};
+}, {
+sessions: SessionWithImpersonatedBy[];
+}>;
+unbanUser: StrictEndpoint<"/admin/unban-user", {
+method: "POST";
+body: ZodObject<    {
+userId: ZodCoercedString<unknown>;
+}, $strip>;
+use: Middleware<MiddlewareOptions, (inputContext: MiddlewareInputContext<MiddlewareOptions>) => Promise<{
+session: {
+user: UserWithRole;
+session: {
+id: string;
+createdAt: Date;
+updatedAt: Date;
+userId: string;
+expiresAt: Date;
+token: string;
+ipAddress?: string | null | undefined;
+userAgent?: string | null | undefined;
+};
+};
+}>>[];
+metadata: {
+openapi: {
+operationId: string;
+summary: string;
+description: string;
+responses: {
+200: {
+description: string;
+content: {
+"application/json": {
+schema: {
+type: "object";
+properties: {
+user: {
+$ref: string;
+};
+};
+};
+};
+};
+};
+};
+};
+};
+}, {
+user: UserWithRole;
+}>;
+banUser: StrictEndpoint<"/admin/ban-user", {
+method: "POST";
+body: ZodObject<    {
+userId: ZodCoercedString<unknown>;
+banReason: ZodOptional<ZodString>;
+banExpiresIn: ZodOptional<ZodNumber>;
+}, $strip>;
+use: Middleware<MiddlewareOptions, (inputContext: MiddlewareInputContext<MiddlewareOptions>) => Promise<{
+session: {
+user: UserWithRole;
+session: {
+id: string;
+createdAt: Date;
+updatedAt: Date;
+userId: string;
+expiresAt: Date;
+token: string;
+ipAddress?: string | null | undefined;
+userAgent?: string | null | undefined;
+};
+};
+}>>[];
+metadata: {
+openapi: {
+operationId: string;
+summary: string;
+description: string;
+responses: {
+200: {
+description: string;
+content: {
+"application/json": {
+schema: {
+type: "object";
+properties: {
+user: {
+$ref: string;
+};
+};
+};
+};
+};
+};
+};
+};
+};
+}, {
+user: UserWithRole;
+}>;
+impersonateUser: StrictEndpoint<"/admin/impersonate-user", {
+method: "POST";
+body: ZodObject<    {
+userId: ZodCoercedString<unknown>;
+}, $strip>;
+use: Middleware<MiddlewareOptions, (inputContext: MiddlewareInputContext<MiddlewareOptions>) => Promise<{
+session: {
+user: UserWithRole;
+session: {
+id: string;
+createdAt: Date;
+updatedAt: Date;
+userId: string;
+expiresAt: Date;
+token: string;
+ipAddress?: string | null | undefined;
+userAgent?: string | null | undefined;
+};
+};
+}>>[];
+metadata: {
+openapi: {
+operationId: string;
+summary: string;
+description: string;
+responses: {
+200: {
+description: string;
+content: {
+"application/json": {
+schema: {
+type: "object";
+properties: {
+session: {
+$ref: string;
+};
+user: {
+$ref: string;
+};
+};
+};
+};
+};
+};
+};
+};
+};
+}, {
+session: {
+id: string;
+createdAt: Date;
+updatedAt: Date;
+userId: string;
+expiresAt: Date;
+token: string;
+ipAddress?: string | null | undefined;
+userAgent?: string | null | undefined;
+};
+user: UserWithRole;
+}>;
+stopImpersonating: StrictEndpoint<"/admin/stop-impersonating", {
+method: "POST";
+requireHeaders: true;
+}, {
+session: {
+id: string;
+createdAt: Date;
+updatedAt: Date;
+userId: string;
+expiresAt: Date;
+token: string;
+ipAddress?: string | null | undefined;
+userAgent?: string | null | undefined;
+} & Record<string, any>;
+user: {
+id: string;
+createdAt: Date;
+updatedAt: Date;
+email: string;
+emailVerified: boolean;
+name: string;
+image?: string | null | undefined;
+} & Record<string, any>;
+}>;
+revokeUserSession: StrictEndpoint<"/admin/revoke-user-session", {
+method: "POST";
+body: ZodObject<    {
+sessionToken: ZodString;
+}, $strip>;
+use: Middleware<MiddlewareOptions, (inputContext: MiddlewareInputContext<MiddlewareOptions>) => Promise<{
+session: {
+user: UserWithRole;
+session: {
+id: string;
+createdAt: Date;
+updatedAt: Date;
+userId: string;
+expiresAt: Date;
+token: string;
+ipAddress?: string | null | undefined;
+userAgent?: string | null | undefined;
+};
+};
+}>>[];
+metadata: {
+openapi: {
+operationId: string;
+summary: string;
+description: string;
+responses: {
+200: {
+description: string;
+content: {
+"application/json": {
+schema: {
+type: "object";
+properties: {
+success: {
+type: string;
+};
+};
+};
+};
+};
+};
+};
+};
+};
+}, {
+success: boolean;
+}>;
+revokeUserSessions: StrictEndpoint<"/admin/revoke-user-sessions", {
+method: "POST";
+body: ZodObject<    {
+userId: ZodCoercedString<unknown>;
+}, $strip>;
+use: Middleware<MiddlewareOptions, (inputContext: MiddlewareInputContext<MiddlewareOptions>) => Promise<{
+session: {
+user: UserWithRole;
+session: {
+id: string;
+createdAt: Date;
+updatedAt: Date;
+userId: string;
+expiresAt: Date;
+token: string;
+ipAddress?: string | null | undefined;
+userAgent?: string | null | undefined;
+};
+};
+}>>[];
+metadata: {
+openapi: {
+operationId: string;
+summary: string;
+description: string;
+responses: {
+200: {
+description: string;
+content: {
+"application/json": {
+schema: {
+type: "object";
+properties: {
+success: {
+type: string;
+};
+};
+};
+};
+};
+};
+};
+};
+};
+}, {
+success: boolean;
+}>;
+removeUser: StrictEndpoint<"/admin/remove-user", {
+method: "POST";
+body: ZodObject<    {
+userId: ZodCoercedString<unknown>;
+}, $strip>;
+use: Middleware<MiddlewareOptions, (inputContext: MiddlewareInputContext<MiddlewareOptions>) => Promise<{
+session: {
+user: UserWithRole;
+session: {
+id: string;
+createdAt: Date;
+updatedAt: Date;
+userId: string;
+expiresAt: Date;
+token: string;
+ipAddress?: string | null | undefined;
+userAgent?: string | null | undefined;
+};
+};
+}>>[];
+metadata: {
+openapi: {
+operationId: string;
+summary: string;
+description: string;
+responses: {
+200: {
+description: string;
+content: {
+"application/json": {
+schema: {
+type: "object";
+properties: {
+success: {
+type: string;
+};
+};
+};
+};
+};
+};
+};
+};
+};
+}, {
+success: boolean;
+}>;
+setUserPassword: StrictEndpoint<"/admin/set-user-password", {
+method: "POST";
+body: ZodObject<    {
+newPassword: ZodString;
+userId: ZodCoercedString<unknown>;
+}, $strip>;
+use: Middleware<MiddlewareOptions, (inputContext: MiddlewareInputContext<MiddlewareOptions>) => Promise<{
+session: {
+user: UserWithRole;
+session: {
+id: string;
+createdAt: Date;
+updatedAt: Date;
+userId: string;
+expiresAt: Date;
+token: string;
+ipAddress?: string | null | undefined;
+userAgent?: string | null | undefined;
+};
+};
+}>>[];
+metadata: {
+openapi: {
+operationId: string;
+summary: string;
+description: string;
+responses: {
+200: {
+description: string;
+content: {
+"application/json": {
+schema: {
+type: "object";
+properties: {
+status: {
+type: string;
+};
+};
+};
+};
+};
+};
+};
+};
+};
+}, {
+status: boolean;
+}>;
+userHasPermission: StrictEndpoint<"/admin/has-permission", {
+method: "POST";
+body: ZodIntersection<ZodObject<    {
+userId: ZodOptional<ZodCoercedString<unknown>>;
+role: ZodOptional<ZodString>;
+}, $strip>, ZodXor<readonly [ZodObject<    {
+permission: ZodRecord<ZodString, ZodArray<ZodString>>;
+}, $strip>, ZodObject<    {
+permissions: ZodRecord<ZodString, ZodArray<ZodString>>;
+}, $strip>]>>;
+metadata: {
+openapi: {
+description: string;
+requestBody: {
+content: {
+"application/json": {
+schema: {
+type: "object";
+properties: {
+permissions: {
+type: string;
+description: string;
+};
+};
+required: string[];
+};
+};
+};
+};
+responses: {
+"200": {
+description: string;
+content: {
+"application/json": {
+schema: {
+type: "object";
+properties: {
+error: {
+type: string;
+};
+success: {
+type: string;
+};
+};
+required: string[];
+};
+};
+};
+};
+};
+};
+$Infer: {
+body: {
+permissions: {
+readonly user?: ("set-role" | "create" | "update" | "delete" | "list" | "ban" | "impersonate" | "impersonate-admins" | "set-password" | "set-email" | "get")[] | undefined;
+readonly session?: ("delete" | "list" | "revoke")[] | undefined;
+};
+} & {
+userId?: string | undefined;
+role?: "admin" | "user" | undefined;
+};
+};
+};
+}, {
+error: null;
+success: boolean;
+}>;
+};
+$ERROR_CODES: {
+USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL: RawError<"USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL">;
+FAILED_TO_CREATE_USER: RawError<"FAILED_TO_CREATE_USER">;
+USER_ALREADY_EXISTS: RawError<"USER_ALREADY_EXISTS">;
+YOU_CANNOT_BAN_YOURSELF: RawError<"YOU_CANNOT_BAN_YOURSELF">;
+YOU_ARE_NOT_ALLOWED_TO_CHANGE_USERS_ROLE: RawError<"YOU_ARE_NOT_ALLOWED_TO_CHANGE_USERS_ROLE">;
+YOU_ARE_NOT_ALLOWED_TO_CREATE_USERS: RawError<"YOU_ARE_NOT_ALLOWED_TO_CREATE_USERS">;
+YOU_ARE_NOT_ALLOWED_TO_LIST_USERS: RawError<"YOU_ARE_NOT_ALLOWED_TO_LIST_USERS">;
+YOU_ARE_NOT_ALLOWED_TO_LIST_USERS_SESSIONS: RawError<"YOU_ARE_NOT_ALLOWED_TO_LIST_USERS_SESSIONS">;
+YOU_ARE_NOT_ALLOWED_TO_BAN_USERS: RawError<"YOU_ARE_NOT_ALLOWED_TO_BAN_USERS">;
+YOU_ARE_NOT_ALLOWED_TO_IMPERSONATE_USERS: RawError<"YOU_ARE_NOT_ALLOWED_TO_IMPERSONATE_USERS">;
+YOU_ARE_NOT_ALLOWED_TO_REVOKE_USERS_SESSIONS: RawError<"YOU_ARE_NOT_ALLOWED_TO_REVOKE_USERS_SESSIONS">;
+YOU_ARE_NOT_ALLOWED_TO_DELETE_USERS: RawError<"YOU_ARE_NOT_ALLOWED_TO_DELETE_USERS">;
+YOU_ARE_NOT_ALLOWED_TO_SET_USERS_PASSWORD: RawError<"YOU_ARE_NOT_ALLOWED_TO_SET_USERS_PASSWORD">;
+BANNED_USER: RawError<"BANNED_USER">;
+YOU_ARE_NOT_ALLOWED_TO_GET_USER: RawError<"YOU_ARE_NOT_ALLOWED_TO_GET_USER">;
+NO_DATA_TO_UPDATE: RawError<"NO_DATA_TO_UPDATE">;
+YOU_ARE_NOT_ALLOWED_TO_UPDATE_USERS: RawError<"YOU_ARE_NOT_ALLOWED_TO_UPDATE_USERS">;
+YOU_CANNOT_REMOVE_YOURSELF: RawError<"YOU_CANNOT_REMOVE_YOURSELF">;
+YOU_ARE_NOT_ALLOWED_TO_SET_NON_EXISTENT_VALUE: RawError<"YOU_ARE_NOT_ALLOWED_TO_SET_NON_EXISTENT_VALUE">;
+YOU_CANNOT_IMPERSONATE_ADMINS: RawError<"YOU_CANNOT_IMPERSONATE_ADMINS">;
+INVALID_ROLE_TYPE: RawError<"INVALID_ROLE_TYPE">;
+YOU_ARE_NOT_ALLOWED_TO_SET_USERS_EMAIL: RawError<"YOU_ARE_NOT_ALLOWED_TO_SET_USERS_EMAIL">;
+PASSWORD_CANNOT_BE_UPDATED_VIA_UPDATE_USER: RawError<"PASSWORD_CANNOT_BE_UPDATED_VIA_UPDATE_USER">;
+};
+schema: {
+user: {
+fields: {
+role: {
+type: "string";
+required: false;
+input: false;
+};
+banned: {
+type: "boolean";
+defaultValue: false;
+required: false;
+input: false;
+};
+banReason: {
+type: "string";
+required: false;
+input: false;
+};
+banExpires: {
+type: "date";
+required: false;
+input: false;
+};
+};
+};
+session: {
+fields: {
+impersonatedBy: {
+type: "string";
+required: false;
+input: false;
+};
+};
+};
+};
+options: NoInfer<{
+defaultRole: string;
+adminRoles: string[];
+}>;
+}, DefaultOrganizationPlugin<    {
+invitationLimit: number;
+}>];
+}>;
+
+// @public (undocumented)
+export interface CreateAuthOptions {
+    // (undocumented)
+    baseURL?: string;
+    // (undocumented)
+    origin?: string | null;
+    pool: Pool;
+    rpID?: string;
+    // (undocumented)
+    rpName?: string;
+    // (undocumented)
+    secret?: string;
+    sendVerificationOTP: Parameters<typeof emailOTP>[0]["sendVerificationOTP"];
+    // (undocumented)
+    trustedOrigins?: string[];
 }
 
 // @public
@@ -82,6 +3469,9 @@ export function evaluateAccess(request: AccessRequest): AccessDecision;
 
 // @public
 export function hasRole(user: SessionUser | null | undefined, role: string): boolean;
+
+// @public
+export type HyperfixationAuth = ReturnType<typeof createAuth>;
 
 // @public
 export const PASSKEY_AUTHENTICATION_PATH = "/passkey/verify-authentication";
@@ -132,6 +3522,9 @@ export interface SessionUser {
     // (undocumented)
     role?: string | null;
 }
+
+// @public
+export function upgradeSessionFactor(pool: Pool, sessionToken: string): Promise<boolean>;
 
 // (No @packageDocumentation comment for this package)
 
