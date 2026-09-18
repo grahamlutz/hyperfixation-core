@@ -4,6 +4,132 @@
 
 ```ts
 
+import type { Pool } from 'pg';
+import { Registry } from '@hyperfixation/core';
+import { RequireSession } from '@hyperfixation/auth';
+import { ResetSecondFactorAction } from '@hyperfixation/auth';
+import { Table } from 'drizzle-orm';
+
+// @public
+export const ADMIN_BASE_PATH = "/admin";
+
+// @public (undocumented)
+export const ADMIN_USERS_RESOURCE = "users";
+
+// @public (undocumented)
+export interface AdminActionDescriptor {
+    // (undocumented)
+    label: string;
+    // (undocumented)
+    name: string;
+    scope: "row";
+}
+
+// @public
+export interface AdminActions {
+    // (undocumented)
+    resetSecondFactor: ResetSecondFactorAction;
+}
+
+// @public (undocumented)
+export interface AdminField {
+    column: string;
+    // (undocumented)
+    hasDefault: boolean;
+    // (undocumented)
+    kind: AdminFieldKind;
+    // (undocumented)
+    label: string;
+    name: string;
+    // (undocumented)
+    nullable: boolean;
+    // (undocumented)
+    primaryKey: boolean;
+    // (undocumented)
+    unique: boolean;
+}
+
+// @public
+export type AdminFieldKind = "string" | "number" | "boolean" | "date" | "json";
+
+// @public (undocumented)
+export interface AdminResource {
+    // (undocumented)
+    actions: readonly AdminActionDescriptor[];
+    // (undocumented)
+    fields: readonly AdminField[];
+    list: readonly string[];
+    // (undocumented)
+    name: string;
+    // (undocumented)
+    primaryKey: readonly string[];
+    table: string;
+    view: readonly string[];
+}
+
+// @public (undocumented)
+export type AdminRoute = {
+    kind: "index";
+} | {
+    kind: "list";
+    resource: AdminResource;
+} | {
+    kind: "detail";
+    resource: AdminResource;
+    id: string;
+};
+
+// @public (undocumented)
+export interface AdminRouter {
+    // (undocumented)
+    readonly actions: AdminActions;
+    // (undocumented)
+    readonly resources: Registry<AdminResource>;
+    route(path?: string | readonly string[]): Promise<AdminRoute | undefined>;
+}
+
+// @public (undocumented)
+export interface AdminRouterOptions {
+    pool: Pool;
+    // (undocumented)
+    requireSession: RequireSession;
+    resources?: readonly AdminResource[];
+}
+
+// @public
+export function createAdminRouter(options: AdminRouterOptions): AdminRouter;
+
+// @public
+export const RESET_SECOND_FACTOR_ACTION = "reset-second-factor";
+
+// @public
+export function resourceFromTable(table: Table, options: ResourceFromTableOptions): AdminResource;
+
+// @public (undocumented)
+export interface ResourceFromTableOptions {
+    // (undocumented)
+    actions?: readonly AdminActionDescriptor[];
+    // (undocumented)
+    list: readonly string[];
+    // (undocumented)
+    name: string;
+    view?: readonly string[];
+}
+
+// @public
+export class UnknownAdminField extends Error {
+    constructor(resource: string, field: string, known: readonly string[]);
+    // (undocumented)
+    readonly field: string;
+    // (undocumented)
+    readonly known: readonly string[];
+    // (undocumented)
+    readonly resource: string;
+}
+
+// @public
+export const usersResource: AdminResource;
+
 // (No @packageDocumentation comment for this package)
 
 ```
