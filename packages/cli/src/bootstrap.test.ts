@@ -90,6 +90,20 @@ describe("hf bootstrap", () => {
     }
   });
 
+  it("accepts --budget-usd in place of HF_BOOTSTRAP_BUDGET_USD, like --email does for the address", async () => {
+    // No HF_BOOTSTRAP_BUDGET_USD in this dir's .env: only `budgetUsd` clears `requireEnv`'s
+    // refusal. The run still fails past that point — the shared `db` already has an admin from
+    // the first test in this suite — which is exactly what proves the env var was never read.
+    const empty = await fakeApp({ appName: "demo_app2", env: { DATABASE_URL: db.applicationUrl } });
+    try {
+      await expect(
+        bootstrapApp({ dir: empty, email: "flagged@example.com", budgetUsd: "75" }),
+      ).rejects.toThrow(BootstrapRefused);
+    } finally {
+      await rm(empty, { recursive: true, force: true });
+    }
+  });
+
   it("refuses a non-positive budget", async () => {
     const empty = await fakeApp({
       appName: "demo_app",

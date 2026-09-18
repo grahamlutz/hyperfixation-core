@@ -8,6 +8,13 @@ export interface BootstrapAppOptions {
   /** Overrides `HF_BOOTSTRAP_EMAIL`; one of the two has to be set. */
   email?: string;
   name?: string;
+  /**
+   * Overrides `HF_BOOTSTRAP_BUDGET_USD`; one of the two has to be set. Not part of
+   * `REQUIRED_ENV` — like `HF_BOOTSTRAP_EMAIL`, it is a one-shot bootstrap input, not something
+   * the deployed `web`/`worker`/`migrate` containers carry, so a flag is `.env.example`'s only
+   * alternative for a local run.
+   */
+  budgetUsd?: string;
 }
 
 export interface BootstrapAppResult extends BootstrapResult {
@@ -34,7 +41,7 @@ export async function bootstrapApp(
 ): Promise<BootstrapAppResult> {
   const app = await resolveApp(options.dir);
   const databaseUrl = requireEnv(app, "DATABASE_URL");
-  const budgetUsd = requireEnv(app, BOOTSTRAP_BUDGET_ENV);
+  const budgetUsd = options.budgetUsd ?? requireEnv(app, BOOTSTRAP_BUDGET_ENV);
   if (!Number.isFinite(Number(budgetUsd)) || Number(budgetUsd) <= 0) {
     throw new Error(`${BOOTSTRAP_BUDGET_ENV} must be a positive number, got ${budgetUsd}`);
   }

@@ -60,7 +60,7 @@ describe("hf status-token", () => {
     });
 
     it("provisions only the requested kind when --read or --write narrows it", async () => {
-      const result = await statusTokenApp({ dir, kinds: ["read"] });
+      const result = await statusTokenApp({ dir, kinds: ["read"], explicit: true });
 
       expect(result.tokens).toEqual({ read: result.tokens.read });
       const { rows } = await asRole(db.migratorUrl, (pg) =>
@@ -72,10 +72,30 @@ describe("hf status-token", () => {
       expect(rows[0]!.write_token_hash).toBeNull();
     });
 
-    it("refuses to overwrite a token that is already set, one kind at a time", async () => {
-      await statusTokenApp({ dir, kinds: ["read"] });
+    it("a default two-kind run fills in only the unset one, leaving the live one untouched", async () => {
+      const first = await statusTokenApp({ dir, kinds: ["read"], explicit: true });
 
-      const refusal = await statusTokenApp({ dir, kinds: ["read", "write"] }).catch((e) => e);
+      const result = await statusTokenApp({ dir });
+
+      expect(result.tokens.read).toBeUndefined();
+      expect(result.tokens.write).toBeTypeOf("string");
+      const { rows } = await asRole(db.migratorUrl, (pg) =>
+        pg.query<{ read_token_hash: string; write_token_hash: string }>(
+          "SELECT read_token_hash, write_token_hash FROM hf_app_state WHERE id = 1",
+        ),
+      );
+      expect(rows[0]!.read_token_hash).toBe(hashStatusToken(first.tokens.read!));
+      expect(rows[0]!.write_token_hash).toBe(hashStatusToken(result.tokens.write!));
+    });
+
+    it("refuses an explicit --read/--write for a kind that is already set", async () => {
+      await statusTokenApp({ dir, kinds: ["read"], explicit: true });
+
+      const refusal = await statusTokenApp({
+        dir,
+        kinds: ["read", "write"],
+        explicit: true,
+      }).catch((e: unknown) => e);
       expect(refusal).toBeInstanceOf(StatusTokenAlreadySet);
       expect((refusal as StatusTokenAlreadySet).kind).toBe("read");
 
@@ -88,8 +108,8 @@ describe("hf status-token", () => {
     });
 
     it("replaces a set token when --rotate authorizes it, and the old token stops matching", async () => {
-      const first = await statusTokenApp({ dir, kinds: ["write"] });
-      const second = await statusTokenApp({ dir, kinds: ["write"], rotate: true });
+      const first = await statusTokenApp({ dir, kinds: ["write"], explicit: true });
+      const second = await statusTokenApp({ dir, kinds: ["write"], explicit: true, rotate: true });
 
       expect(second.tokens.write).not.toBe(first.tokens.write);
       const { rows } = await asRole(db.migratorUrl, (pg) =>
@@ -98,6 +118,18 @@ describe("hf status-token", () => {
         ),
       );
       expect(rows[0]!.write_token_hash).toBe(hashStatusToken(second.tokens.write!));
+    });
+
+    it("audits what it provisioned, and only that — never the plaintext", async () => {
+      const result = await statusTokenApp({ dir, kinds: ["read"], explicit: true });
+
+      const { rows } = await asRole(db.migratorUrl, (pg) =>
+        pg.query<{ action: string; meta: { kinds: string[] } }>(
+          "SELECT action, meta FROM hf_audit ORDER BY id",
+        ),
+      );
+      expect(rows).toEqual([{ action: "app.status_token_provisioned", meta: { kinds: ["read"] } }]);
+      expect(JSON.stringify(rows)).not.toContain(result.tokens.read);
     });
   });
 });

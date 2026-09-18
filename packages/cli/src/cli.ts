@@ -23,12 +23,13 @@ export const USAGE = `hf — the hyperfixation CLI
 
   hf bootstrap              grant the app its one bootstrap admin, and seed hf_app_state
       --email <address>       the address to promote; otherwise HF_BOOTSTRAP_EMAIL
-                               also needs HF_BOOTSTRAP_BUDGET_USD, the app's starting budget
+      --budget-usd <amount>    the app's starting budget; otherwise HF_BOOTSTRAP_BUDGET_USD
 
   hf status-token           provision /api/status's read and write tokens
-      --read                   only the read token; otherwise both
-      --write                  only the write token; otherwise both
+      --read                   only the read token; refuses if it is already set
+      --write                  only the write token; refuses if it is already set
       --rotate                 replace a token that is already set
+                               (no flags: fills in whichever of the two is unset)
 
   hf check                  declared env, pending migrations, and E001-E006
 
@@ -152,10 +153,16 @@ async function commandBootstrap(argv: readonly string[], io: Io): Promise<number
       dir: { type: "string" },
       email: { type: "string" },
       name: { type: "string" },
+      "budget-usd": { type: "string" },
     },
   });
 
-  const result = await bootstrapApp({ dir: values.dir, email: values.email, name: values.name });
+  const result = await bootstrapApp({
+    dir: values.dir,
+    email: values.email,
+    name: values.name,
+    budgetUsd: values["budget-usd"],
+  });
   io.out(
     `${result.created ? "created" : "promoted"} ${result.email} as ${result.app.appName}'s admin`,
   );
@@ -173,15 +180,29 @@ async function commandStatusToken(argv: readonly string[], io: Io): Promise<numb
     },
   });
 
-  const kinds: StatusTokenKind[] =
-    values.read || values.write
-      ? [...(values.read ? (["read"] as const) : []), ...(values.write ? (["write"] as const) : [])]
-      : ["read", "write"];
+  const explicit = values.read || values.write;
+  const kinds: StatusTokenKind[] = explicit
+    ? [...(values.read ? (["read"] as const) : []), ...(values.write ? (["write"] as const) : [])]
+    : ["read", "write"];
 
-  const result = await statusTokenApp({ dir: values.dir, kinds, rotate: values.rotate });
+  const result = await statusTokenApp({
+    dir: values.dir,
+    kinds,
+    rotate: values.rotate,
+    explicit,
+  });
+
+  const generated = kinds.filter((kind) => result.tokens[kind] !== undefined);
+  if (generated.length === 0) {
+    io.out(`${result.app.appName}: every requested token is already set; nothing to do`);
+    return 0;
+  }
 
   io.out(`${result.app.appName}: status token(s) provisioned — shown once, not stored:`);
-  for (const kind of kinds) io.out(`  ${kind}: ${result.tokens[kind]}`);
+  for (const kind of generated) io.out(`  ${kind}: ${result.tokens[kind]}`);
+  for (const kind of kinds) {
+    if (!generated.includes(kind)) io.out(`  ${kind}: already set, left alone`);
+  }
   return 0;
 }
 
