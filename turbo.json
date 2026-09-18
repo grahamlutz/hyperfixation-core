@@ -29,6 +29,12 @@
       "dependsOn": [
         "build"
       ]
+    },
+    "api-extractor:update": {
+      "dependsOn": [
+        "build"
+      ],
+      "cache": false
     }
   }
 }

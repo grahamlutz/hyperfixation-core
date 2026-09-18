@@ -1,0 +1,37 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/api-extractor/v7/api-extractor.schema.json",
+
+  /**
+   * The committed report under `etc/` is the package's public API. `api-extractor run` compares
+   * the build against it and fails on any difference, so a change to exported surface has to be
+   * made deliberately — `pnpm api-extractor:update` — and shows up in the diff of the review
+   * that changes it.
+   */
+  // No "projectFolder": it is inferred per config file, which is what makes one base usable
+  // from every package.
+  "mainEntryPointFilePath": "<projectFolder>/dist/index.d.ts",
+
+  "apiReport": {
+    "enabled": true,
+    "reportFolder": "<projectFolder>/etc/",
+    "reportTempFolder": "<projectFolder>/temp/"
+  },
+
+  "docModel": { "enabled": false },
+  "dtsRollup": { "enabled": false },
+  "tsdocMetadata": { "enabled": false },
+
+  "messages": {
+    "compilerMessageReporting": {
+      "default": { "logLevel": "error" }
+    },
+    "extractorMessageReporting": {
+      "default": { "logLevel": "error" },
+      // This repo documents with plain TSDoc prose and no release tags; every export is public.
+      "ae-missing-release-tag": { "logLevel": "none" }
+    },
+    "tsdocMessageReporting": {
+      "default": { "logLevel": "none" }
+    }
+  }
+}

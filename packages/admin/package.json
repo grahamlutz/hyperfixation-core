@@ -17,6 +17,8 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src",
+    "api-extractor": "api-extractor run",
+    "api-extractor:update": "api-extractor run --local",
     "test": "vitest run --passWithNoTests"
   },
   "devDependencies": {

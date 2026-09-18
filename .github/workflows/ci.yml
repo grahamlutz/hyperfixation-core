@@ -34,4 +34,8 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm turbo typecheck test
+      - run: pnpm turbo typecheck lint test
+      # Not folded into the line above: `api-extractor` compares each package's build against
+      # its committed `etc/*.api.md` and fails on any difference, so its failure means
+      # "the public API changed" rather than "the code is broken".
+      - run: pnpm turbo api-extractor

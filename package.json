@@ -10,6 +10,7 @@
     "typecheck": "turbo run typecheck",
     "lint": "turbo run lint",
     "api-extractor": "turbo run api-extractor",
+    "api-extractor:update": "turbo run api-extractor:update",
     "test": "turbo run test",
     "changeset": "changeset"
   },

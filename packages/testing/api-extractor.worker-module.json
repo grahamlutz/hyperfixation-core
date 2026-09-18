@@ -1,0 +1,9 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/api-extractor/v7/api-extractor.schema.json",
+  "extends": "../../api-extractor-base.json",
+  "mainEntryPointFilePath": "<projectFolder>/dist/worker-module.d.ts",
+  "apiReport": {
+    "enabled": true,
+    "reportFileName": "testing-worker.api.md"
+  }
+}

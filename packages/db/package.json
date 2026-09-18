@@ -22,6 +22,8 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src",
+    "api-extractor": "api-extractor run && api-extractor run -c api-extractor.migrator.json",
+    "api-extractor:update": "api-extractor run --local && api-extractor run --local -c api-extractor.migrator.json",
     "test": "vitest run --passWithNoTests",
     "db:generate": "drizzle-kit generate"
   },
