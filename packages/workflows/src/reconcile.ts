@@ -1,9 +1,16 @@
 import type { DBOSClient } from "@dbos-inc/dbos-sdk";
-import { assertNotInWorkflow, controlPlaneTx, type BumpedAttempt } from "@hyperfixation/db";
+import {
+  appPaused,
+  assertNotInWorkflow,
+  controlPlaneTx,
+  type BumpedAttempt,
+} from "@hyperfixation/db";
 import type { Pool, PoolClient } from "pg";
 import { decide } from "./approvals.js";
 import { bumpAndEnqueueOn, flowForRun } from "./bump.js";
+import { PAUSED_CONCURRENCY, PAUSED_QUEUES, registeredConcurrency } from "./queue-concurrency.js";
 import { concludeRun } from "./run-status.js";
+import type { QueueName } from "./start-worker.js";
 
 /** How often the worker runs a pass after the one it runs at boot. */
 export const RECONCILE_INTERVAL_MS = 60_000;
@@ -23,6 +30,13 @@ export const RECONCILE_FAILED_MARKER = "hf-reconcile: run refused";
  * redeploy that moved a whole backlog a single number, with no way back to which run went where.
  */
 export const RECONCILE_ACTION_MARKER = "hf-reconcile: run moved";
+
+/**
+ * One line per queue a pass re-derived from `hf_app_state.paused`, carrying both concurrencies.
+ * Its own marker rather than the action one: nothing about it is a run, and a stall this fixed
+ * is diagnosed by reading which direction it went.
+ */
+export const RECONCILE_QUEUE_MARKER = "hf-reconcile: queue concurrency corrected";
 
 /** One line per pass, carrying the report. */
 export const RECONCILE_PASS_MARKER = "hf-reconcile: pass";
@@ -123,8 +137,9 @@ export interface ReconcileAnomaly {
 }
 
 export interface ReconcileFailure {
-  runId: string;
-  step: "reattempt" | "conclude" | "resume" | "anomaly" | "expire";
+  /** Null on a failure no run owns; step (6)'s subject is the app's queues, not a run. */
+  runId: string | null;
+  step: "reattempt" | "conclude" | "resume" | "anomaly" | "expire" | "queues";
   error: string;
 }
 
@@ -133,6 +148,15 @@ export interface ExpiredApproval {
   runId: string;
   /** The attempt `decide()` enqueued to tell the run its approval expired. */
   workflowId: string;
+}
+
+export interface QueueConcurrencyCorrection {
+  name: QueueName;
+  /** `hf_app_state.paused` as this pass read it, which is what the correction was against. */
+  paused: boolean;
+  /** What the queue's row said before the pass wrote it; `null` is a registered no-limit. */
+  was: number | null;
+  now: number;
 }
 
 export interface PeriodDrift {
@@ -149,6 +173,7 @@ export interface ReconcileReport {
   abandonedLlmCalls: number;
   uncertainActions: number;
   expired: ExpiredApproval[];
+  queueConcurrency: QueueConcurrencyCorrection[];
   drift: PeriodDrift[];
   failures: ReconcileFailure[];
 }
@@ -174,8 +199,9 @@ interface RunningRunRow {
  * One run's refusal never ends the pass: the runs are independent, and a pass that stopped at
  * the first one would leave the rest of a backlog stranded until the defect was fixed.
  *
- * Steps (1), (3), (4) and (5) and the drift read; step (2) is deleted, not re-predicated — the
- * enqueue is in the bump's own transaction, so there is no commit-to-enqueue window to backstop.
+ * Steps (1), (3), (4), (5) and (6) and the drift read; step (2) is deleted, not re-predicated —
+ * the enqueue is in the bump's own transaction, so there is no commit-to-enqueue window to
+ * backstop.
  */
 export async function reconcile(
   pool: Pool,
@@ -191,6 +217,7 @@ export async function reconcile(
     abandonedLlmCalls: 0,
     uncertainActions: 0,
     expired: [],
+    queueConcurrency: [],
     drift: [],
     failures: [],
   };
@@ -222,6 +249,8 @@ export async function reconcile(
   report.abandonedLlmCalls = hygiene.calls;
   report.uncertainActions = hygiene.actions;
 
+  await reconcileQueueConcurrency(pool, dbosClient, report);
+
   const drift = await pool.query<{ period: string; spent_usd: string; ledger_usd: string }>(
     DRIFT_STATEMENT,
   );
@@ -236,6 +265,60 @@ export async function reconcile(
 
   console.info(RECONCILE_PASS_MARKER, JSON.stringify(summaryOf(report)));
   return report;
+}
+
+/**
+ * Step (6). `pause`/`resume` write the flag and the queues in two statements and `startWorker()`
+ * reads the flag and writes the queues in two more, so a resume landing inside a booting
+ * worker's window leaves `paused = false` with `llm` and `actions` pinned at zero: runs enqueued
+ * behind a dequeue that claims nothing, and `/api/status` reporting `ok` because it grades health
+ * on anomalies and budget drift alone. Nothing else notices, so every pass re-derives the queues
+ * from the flag — including `startWorker()`'s own boot pass, which runs after that window.
+ *
+ * Only the two disagreements that race produces are corrected. A non-zero concurrency that is
+ * merely not the registered one is somebody's tuning, and a pass that overwrote it every minute
+ * would be a worse defect than the stall it fixes.
+ *
+ * The flag is read the way step (3) reads it — a plain `SELECT`, no lock, no transaction of its
+ * own — so this step takes nothing the lock order has an opinion about. One queue's refusal
+ * never ends the pass, for the reason every other step's does not.
+ */
+async function reconcileQueueConcurrency(
+  pool: Pool,
+  dbosClient: DBOSClient,
+  report: ReconcileReport,
+): Promise<void> {
+  const paused = await appPaused(pool);
+  for (const name of PAUSED_QUEUES) {
+    try {
+      const queue = await dbosClient.retrieveQueue(name);
+      // No row at all: no worker has ever launched, so there is no live concurrency to disagree
+      // with the flag, and `startWorker()` applies it on the way up.
+      if (queue === null) continue;
+
+      const was = (await queue.getGlobalConcurrency()) ?? null;
+      const stuck = !paused && was === PAUSED_CONCURRENCY;
+      // A NULL concurrency is "no limit", which is the loudest form of still dispatching.
+      const dispatching = paused && was !== PAUSED_CONCURRENCY;
+      if (!stuck && !dispatching) continue;
+
+      const now = paused ? PAUSED_CONCURRENCY : registeredConcurrency(name);
+      await queue.setGlobalConcurrency(now);
+      const corrected: QueueConcurrencyCorrection = { name, paused, was, now };
+      console.info(RECONCILE_QUEUE_MARKER, JSON.stringify(corrected));
+      report.queueConcurrency.push(corrected);
+    } catch (error) {
+      recordFailure(report, null, "queues", namingQueue(name, error));
+    }
+  }
+}
+
+/** Keeps the queue on a failure whose `runId` is null because no run owns it. */
+function namingQueue(name: QueueName, error: unknown): Error {
+  const thrown = error as Error | undefined;
+  const named = new Error(`${name}: ${thrown?.message ?? String(error)}`);
+  named.name = thrown?.name ?? "Error";
+  return named;
 }
 
 /**
@@ -469,7 +552,7 @@ function lockTimeoutOf(options: ReconcileOptions): { lockTimeout?: string } {
 
 function recordFailure(
   report: ReconcileReport,
-  runId: string,
+  runId: string | null,
   step: ReconcileFailure["step"],
   error: unknown,
 ): void {
@@ -487,6 +570,7 @@ function summaryOf(report: ReconcileReport): Record<string, number> {
     abandonedLlmCalls: report.abandonedLlmCalls,
     uncertainActions: report.uncertainActions,
     expired: report.expired.length,
+    queueConcurrency: report.queueConcurrency.length,
     failures: report.failures.length,
   };
 }

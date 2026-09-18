@@ -1,12 +1,19 @@
 import { DBOS, type DBOSClient } from "@dbos-inc/dbos-sdk";
-import { ControlPlaneInWorkflow } from "@hyperfixation/db";
+import { appPaused, ControlPlaneInWorkflow } from "@hyperfixation/db";
 import { asRole, createTestDatabase, testBuildSha, type TestDatabase } from "@hyperfixation/testing";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getClient, resetClient } from "./client.js";
 import { createControlPool, type ControlPool } from "./control-pool.js";
 import { defineFlow, type Flow } from "./define-flow.js";
-import { reconcile, sweepDecisionKey, type ReconcileReport } from "./reconcile.js";
+import { setPausedQueueConcurrency } from "./queue-concurrency.js";
+import {
+  reconcile,
+  sweepDecisionKey,
+  RECONCILE_QUEUE_MARKER,
+  type ReconcileReport,
+} from "./reconcile.js";
 import { runsStart } from "./runs.js";
+import { QUEUES } from "./start-worker.js";
 
 const THIS_VERSION = "version-b";
 const DEAD_VERSION = "version-a";
@@ -498,4 +505,115 @@ describe("reconcile()'s drift read", () => {
       holder.release();
     }
   }, 30_000);
+});
+
+describe("reconcile() step (6) — queue concurrency against the pause flag", () => {
+  /** The rows a launched worker's `registerQueue` calls would have written. */
+  beforeAll(async () => {
+    for (const queue of QUEUES) {
+      await client.registerQueue(queue.name, { globalConcurrency: queue.globalConcurrency });
+    }
+  }, 30_000);
+
+  beforeEach(async () => {
+    await setPausedQueueConcurrency(client, false);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  async function queueConcurrency(): Promise<Record<string, number | null>> {
+    const rows = await query<{ name: string; concurrency: number | null }>(
+      "SELECT name, concurrency FROM dbos.queues ORDER BY name",
+    );
+    return Object.fromEntries(rows.map((row) => [row.name, row.concurrency]));
+  }
+
+  /**
+   * Chunk 13's race, in its order and through the real functions: worker B reads `paused`, the
+   * admin's resume clears the flag and restores the queues, and worker B's zeroing lands after
+   * it. Nothing here is timing-dependent — the interleaving is written out.
+   */
+  async function raceResumeAgainstABootingWorker(): Promise<void> {
+    await query("UPDATE hf_app_state SET paused = true WHERE id = 1");
+    await setPausedQueueConcurrency(client, true);
+
+    const workerRead = await appPaused(control.pool);
+
+    await query("UPDATE hf_app_state SET paused = false WHERE id = 1");
+    await setPausedQueueConcurrency(client, false);
+
+    if (workerRead) await setPausedQueueConcurrency(client, true);
+  }
+
+  it("restores the queues a resume lost to a booting worker's stale read", async () => {
+    await raceResumeAgainstABootingWorker();
+    expect(await queueConcurrency()).toEqual({ actions: 0, llm: 0, resolve: 1 });
+
+    const info = vi.spyOn(console, "info");
+    const report = await pass();
+
+    expect(report.queueConcurrency).toEqual([
+      { name: "llm", paused: false, was: 0, now: 4 },
+      { name: "actions", paused: false, was: 0, now: 2 },
+    ]);
+    // `resolve` is not a queue `pause` touches, so it is not a queue this step touches either.
+    expect(await queueConcurrency()).toEqual({ actions: 2, llm: 4, resolve: 1 });
+    // Both concurrencies on the line: which direction a pass went is the whole diagnosis.
+    expect(info).toHaveBeenCalledWith(
+      RECONCILE_QUEUE_MARKER,
+      JSON.stringify({ name: "llm", paused: false, was: 0, now: 4 }),
+    );
+  });
+
+  it("zeroes a queue still dispatching under a paused app", async () => {
+    // The mirror: a pause whose queue half never landed, which is a "paused" app still
+    // reaching the outside world.
+    await query("UPDATE hf_app_state SET paused = true WHERE id = 1");
+    expect(await queueConcurrency()).toEqual({ actions: 2, llm: 4, resolve: 1 });
+
+    const report = await pass();
+
+    expect(report.queueConcurrency).toEqual([
+      { name: "llm", paused: true, was: 4, now: 0 },
+      { name: "actions", paused: true, was: 2, now: 0 },
+    ]);
+    expect(await queueConcurrency()).toEqual({ actions: 0, llm: 0, resolve: 1 });
+  });
+
+  it("leaves an agreeing state alone, paused or not, however many passes run", async () => {
+    expect((await pass()).queueConcurrency).toEqual([]);
+    expect((await pass()).queueConcurrency).toEqual([]);
+    expect(await queueConcurrency()).toEqual({ actions: 2, llm: 4, resolve: 1 });
+
+    await query("UPDATE hf_app_state SET paused = true WHERE id = 1");
+    await setPausedQueueConcurrency(client, true);
+
+    expect((await pass()).queueConcurrency).toEqual([]);
+    expect((await pass()).queueConcurrency).toEqual([]);
+    expect(await queueConcurrency()).toEqual({ actions: 0, llm: 0, resolve: 1 });
+  });
+
+  it("corrects a stuck queue once, and the pass after it has nothing to do", async () => {
+    await raceResumeAgainstABootingWorker();
+
+    const first = await pass();
+    const second = await pass();
+
+    expect(first.queueConcurrency).toHaveLength(2);
+    expect(second.queueConcurrency).toEqual([]);
+    expect(await queueConcurrency()).toEqual({ actions: 2, llm: 4, resolve: 1 });
+  });
+
+  it("leaves a concurrency somebody tuned to a non-zero value alone", async () => {
+    // Only the two disagreements the race produces are corrected; a queue running at 1 under an
+    // unpaused app is an operator's, and a pass that overwrote it every minute would be worse
+    // than the stall it fixes.
+    const llm = (await client.retrieveQueue("llm"))!;
+    await llm.setGlobalConcurrency(1);
+
+    expect((await pass()).queueConcurrency).toEqual([]);
+    expect(await queueConcurrency()).toMatchObject({ llm: 1 });
+  });
 });

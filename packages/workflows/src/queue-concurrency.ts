@@ -22,6 +22,11 @@ export interface QueueConcurrency {
 /** What `pause` sets the two queues to. Zero means the dequeue claims nothing at all. */
 export const PAUSED_CONCURRENCY = 0;
 
+/** What a resume — and `reconcile()`'s step (6) — puts a queue back to. */
+export function registeredConcurrency(name: QueueName): number {
+  return QUEUES.find((queue) => queue.name === name)!.globalConcurrency;
+}
+
 /**
  * Sets `llm` and `actions` to zero, or back to their registered concurrency. The queues are
  * database-backed (`DBOS.registerQueue` persists them), so a worker in another process picks
@@ -37,8 +42,7 @@ export async function setPausedQueueConcurrency(
 ): Promise<QueueConcurrency[]> {
   const applied: QueueConcurrency[] = [];
   for (const name of PAUSED_QUEUES) {
-    const registered = QUEUES.find((queue) => queue.name === name)!.globalConcurrency;
-    const globalConcurrency = paused ? PAUSED_CONCURRENCY : registered;
+    const globalConcurrency = paused ? PAUSED_CONCURRENCY : registeredConcurrency(name);
     const queue = await client.retrieveQueue(name);
     if (queue === null) {
       applied.push({ name, globalConcurrency, applied: false });

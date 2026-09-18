@@ -342,6 +342,16 @@ export interface QueueConcurrency {
 }
 
 // @public (undocumented)
+export interface QueueConcurrencyCorrection {
+    // (undocumented)
+    name: QueueName;
+    // (undocumented)
+    now: number;
+    paused: boolean;
+    was: number | null;
+}
+
+// @public (undocumented)
 export type QueueName = (typeof QUEUES)[number]["name"];
 
 // @public
@@ -385,6 +395,9 @@ export const RECONCILE_INTERVAL_MS = 60000;
 // @public
 export const RECONCILE_PASS_MARKER = "hf-reconcile: pass";
 
+// @public
+export const RECONCILE_QUEUE_MARKER = "hf-reconcile: queue concurrency corrected";
+
 // @public (undocumented)
 export interface ReconcileAnomaly {
     enqueued: boolean;
@@ -398,10 +411,9 @@ export interface ReconcileAnomaly {
 export interface ReconcileFailure {
     // (undocumented)
     error: string;
+    runId: string | null;
     // (undocumented)
-    runId: string;
-    // (undocumented)
-    step: "reattempt" | "conclude" | "resume" | "anomaly" | "expire";
+    step: "reattempt" | "conclude" | "resume" | "anomaly" | "expire" | "queues";
 }
 
 // @public (undocumented)
@@ -432,6 +444,8 @@ export interface ReconcileReport {
     expired: ExpiredApproval[];
     // (undocumented)
     failures: ReconcileFailure[];
+    // (undocumented)
+    queueConcurrency: QueueConcurrencyCorrection[];
     // (undocumented)
     reattempted: Reattempted[];
     // (undocumented)
