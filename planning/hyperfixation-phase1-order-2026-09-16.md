@@ -829,13 +829,15 @@ added is below it.
    migration count in three places; every future migration bumps them. Maintenance, not a defect — and it
    **was** hit by the first track-C migration, exactly as predicted: `0003_auth_invitation` took all three
    from `"3"` to `"4"` (8004d96). Phase 2's first migration will take them to `"5"`.
-6. 🚧 **Chunk 14 cannot close until tracks B, D and E do.** Tracks A and C are done, so four of its bullets
+6. 🚧 **Chunk 14 cannot close until tracks D and E do.** Tracks A, B and C are done, so five of its bullets
    are struck: the deep-import fixture fails `tsc`, `lint` is green across core, `api-extractor` is green
-   against committed reports, and the auth negatives are proven. What remains is **passkey enrolment through
-   a software authenticator** — which is track C's subject but not its code, since nothing in this repo
-   drives WebAuthn and the app that would is the template — plus `hf new demo-app --local && pnpm dev` (E)
-   and `docker compose -f docker-compose.prod.yml config` (B). The spine still has nothing left to build.
-   **This, not the spine, is what Phase 1 is waiting on.**
+   against committed reports, the auth negatives are proven, and `docker compose -f docker-compose.prod.yml
+   config` validates (track B ran both compose files' `config`, green). What remains is **passkey enrolment
+   through a software authenticator** — track C's subject but not its code, since nothing in either repo
+   drives WebAuthn yet; the template (B) has the routes but not the sign-in/enrolment pages themselves, so
+   this is a gap neither B, C, nor D squarely owns and needs an explicit home before chunk 14 closes — plus
+   `hf new demo-app --local && pnpm dev` (E). The spine still has nothing left to build. **This, not the
+   spine, is what Phase 1 is waiting on.**
 7. 🔁 **The API reports are now a file every API-changing PR touches.** `etc/*.api.md` is committed and CI
    fails on drift, which is the point. Track C hit it first and hard: `etc/auth.api.md` went from an empty
    placeholder to ~3,600 lines, because `createAuth`'s return type has to be inferred out of better-auth's
