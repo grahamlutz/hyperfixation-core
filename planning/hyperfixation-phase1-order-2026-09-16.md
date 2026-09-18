@@ -19,9 +19,10 @@ and drifted silently through chunks 11–13 until this pass.
 | 🚧 In progress | partially built |
 | ⬜ Not started | nothing built yet |
 
-**Where the spine stands:** chunks 0–13 are ✅; chunk 14 is 🚧; tracks A and C are ✅ and tracks B, D and E
+**Where the spine stands:** chunks 0–13 are ✅; chunk 14 is 🚧; tracks A, B and C are ✅ and tracks D and E
 are ⬜. **All twelve redeploy cases are now written and committed** — case 5, the lint assertion, landed with
-track A at 51bc37e; case 7 landed at e6bde42. The `session-factor` gate case landed with track C at a86660f.
+track A at 51bc37e; case 7 landed at e6bde42. The `session-factor` gate case landed with track C at a86660f;
+`compose-envs` landed with track B in the sibling `hyperfixation-template` repo.
 
 **What this pass verified, and what it did not.** Every marker below was set by reading the source and the
 commit diffs — `packages/{db,ai,workflows,core}/src`, the migrations, and `git log -p` on the files in
@@ -558,7 +559,7 @@ cannot close; and the pause/resume liveness race in "Still open" has to be settl
 | Track | Contents | Can start | Must land by | Status |
 |---|---|---|---|---|
 | **A — lint and contract mechanics** | Shared ESLint config (the `DBOS` property ban, `no-restricted-imports` on `@hyperfixation/*/src/*` and `dist/*`, the `src/flows/**` raw-handle hint), ban fixtures, API Extractor in all 8 packages with committed `etc/*.api.md`, deep-import `tsc` fixture | chunk 0 | 14 | ✅ Done (deviated) — 95c166c, 51bc37e, 2bb9040, 257f4a4. See the track A note below |
-| **B — template and compose** | `Dockerfile` (`ARG SOURCE_COMMIT` → `ENV HF_BUILD_SHA`, `git rev-parse HEAD` fallback), both compose files with full `environment:` blocks, `mem_limit`, `stop_grace_period: 90s` on `worker`, `REQUIRED_ENV` + `compose-envs.test.ts`, CI workflows, dependabot, turbo generators, `components.json`, the two catch-all routes, `worker.ts`, `instrumentation.ts` | chunk 0 | 14 | ⬜ Not started — `hyperfixation-template` does not exist; `.github/workflows/ci.yml` is chunk 0's skeleton, not this track's |
+| **B — template and compose** | `Dockerfile` (`ARG SOURCE_COMMIT` → `ENV HF_BUILD_SHA`, `git rev-parse HEAD` fallback), both compose files with full `environment:` blocks, `mem_limit`, `stop_grace_period: 90s` on `worker`, `REQUIRED_ENV` + `compose-envs.test.ts`, CI workflows, dependabot, turbo generators, `components.json`, the two catch-all routes, `worker.ts`, `instrumentation.ts` | chunk 0 | 14 | ✅ Done (deviated) — built in the sibling `hyperfixation-template` repo, 9c900e5..a1c7b30. See the track B note below |
 | **C — auth** | better-auth factory with `emailOTP` (`disableSignUp: true`), passkey, admin, organization; session-factor policy (`factor: 'code' \| 'passkey'`, code sessions confined to `/auth/*`, `/admin/*` needs `admin` and 404s otherwise); `requireSession({ factor, role })` in both layouts and every server action and route handler; bootstrap user; reset-second-factor action | chunk 2 | 14 | ✅ Done (deviated) — 8004d96, a86660f, 08cc4c3, 2c6a3df, 6b3657c. See the track C note below |
 | **D — admin** | Users resource generated from Drizzle metadata, reset-passkey action, guards | track C | 14 | ⬜ Not started — `packages/admin/src/index.ts` is a placeholder. Track C has landed, so it is unblocked, and `createResetSecondFactorAction` is the reset-passkey action already guarded |
 | **E — CLI** | `hf new --local` (giget copy, `__APP_NAME__`/`__DB_NAME__` substitution, `^[a-z][a-z0-9_]{0,62}$` validation), `hf migrate`, `hf bootstrap`, `hf check`, `hf gen`, `hf dev` (sets `HF_BUILD_SHA=dev-<timestamp>`) | track B for `new`; chunk 3 for `migrate` | 14 | ⬜ Not started — `packages/cli/src/index.ts` is a placeholder |
@@ -670,6 +671,51 @@ to end, `bootstrapAdmin`, `resetSecondFactor`, and the exports contract — 38 t
 > drives WebAuthn, and the app that would is track B's template. No `next` dependency, no UI, no
 > `packages/admin` (track D). `emailAndPassword` is left off entirely rather than configured off.
 
+> **Track B note.** Built in the sibling repo `/Users/grahamlutz/Code/hyperfixation-template`
+> (9c900e5..a1c7b30, 9 commits), not in `hyperfixation-core` — this is a per-app template, not an
+> hyperfixation-core package, so it lives in its own checkout with its own toolchain.
+>
+> `REQUIRED_ENV` (14 vars, `src/env.ts`): `HF_PROCESS`, `HF_BUILD_SHA`, `DATABASE_URL`,
+> `MIGRATOR_DATABASE_URL`, `APP_URL`, `BETTER_AUTH_SECRET`, `SMTP_URL`, `EMAIL_FROM`, `SENTRY_DSN`,
+> `LANGFUSE_BASE_URL`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` —
+> derived by grepping core's actual env reads, not guessed. Deliberately excluded: the status-route tokens
+> (`hf_app_state` columns, not deploy config) and `S3_*` (Phase 3's, read by no Phase 1 code).
+>
+> **Deviation — the unpublished-package bridge.** `pnpm-workspace.yaml` overrides `@hyperfixation/*` to
+> `link:../hyperfixation/packages/<name>`, plus (found the hard way) `drizzle-orm` and `@dbos-inc/dbos-sdk`
+> to core's own copies — two pnpm stores otherwise give TypeScript two incompatible identities for the same
+> type (`db.execute(sql…)` fails to typecheck: "separate declarations of a private property"). The entire
+> fix, once packages are actually published: delete `pnpm-workspace.yaml`.
+>
+> **Deviation — `next build` needs `--webpack`, not Turbopack, until publishing.** Turbopack can't resolve
+> a `link:`-ed package outside the project root; verified the app itself is sound by building with
+> `npx next build --webpack` (compiles, typechecks, emits all four routes). `package.json` keeps plain
+> `next build`, correct once published. CI's build step can't pass until then — same as `pnpm install`, so
+> nothing new is broken.
+>
+> **Deviation — `worker.ts`/`migrate.ts` run via `tsx`, no `dist/`.** A compiled second `tsc` project forced
+> `.js` extensions on relative imports, which Turbopack can't resolve back to `.ts` — so `app/` importing
+> `src/` broke. Extensionless imports + `node --import tsx` instead, matching how `@hyperfixation/testing`'s
+> own harness spawns workers.
+>
+> **Deviation — `app/api/status/[[...route]]/route.ts`, not the plan's literal `route.ts`.** Matches core's
+> own `status-route.ts`, which handles `/status`, `/status/pause`, `/status/resume` as one catch-all; a plain
+> `route.ts` would only ever serve one of the three.
+>
+> **Deviation — `docker-entrypoint.sh`, a file not in the plan's layout.** `ENV HF_BUILD_SHA=$SOURCE_COMMIT`
+> alone can't carry the `git rev-parse HEAD` fallback the doc requires (Docker can't compute an `ENV` from a
+> `RUN`). The builder writes the resolved sha to `/app/.hf-build-sha`; the entrypoint fills `HF_BUILD_SHA`
+> from it only when unset. `.git` is deliberately not in `.dockerignore` for this reason.
+>
+> **Deviation — ships a demo flow and `demo_note` table**, ahead of the plan's Phase 5 placement — otherwise
+> `flow-restart.test.ts` passes vacuously over zero flows, and `.claude/skills/replace-demo/` presumes a demo
+> exists. The test asserts `flows.length > 0` so the vacuum can't return.
+>
+> **Not done, correctly left open.** The two catch-all routes don't call `requireSession()` yet — track C's
+> auth landed mid-session; the routes' TODOs now name the real guard (`createSessionGuard()`,
+> `AccessRefused`, `ADMIN_ROLE`, a1c7b30) but wiring it needs sign-in/step-up routes this template doesn't
+> have yet. This is now unblocked and is the obvious next piece.
+
 ### Execution model (decided 2026-09-16): spine solo, tracks farmed out
 
 **One session owns the serial spine start to finish. The five standing tracks go to background sessions.**
@@ -733,7 +779,7 @@ maintenance note.
 | `migration-policy` | 2 | ✅ Done | `packages/db/src/migration-policy.test.ts` |
 | `boot-checks` (E006 both ways) | 3 | ✅ Done | `packages/db/src/boot-checks.test.ts` |
 | `session-factor`, auth negatives | Track C | ✅ Done | `packages/auth/src/session-factor.test.ts` (no database); the database-backed halves in `auth-flow.test.ts`, `bootstrap.test.ts` and `reset-second-factor.test.ts` |
-| `compose-envs` | Track B | ⬜ Not started | — |
+| `compose-envs` | Track B | ✅ Done | `hyperfixation-template` repo, `tests/compose-envs.test.ts` (11 tests) |
 | Worker isolation, deep-import `tsc` | 6, Track A | ✅ Done | `packages/workflows/src/worker-isolation.test.ts`; the deep-import fixture in `packages/workflows/src/deep-import.test.ts` over `fixtures/deep-import/` |
 
 **All twelve redeploy cases and all seven fence cases are written, committed and observed green together**
