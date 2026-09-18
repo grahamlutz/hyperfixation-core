@@ -84,13 +84,13 @@ describe("boot checks E001-E006", () => {
   describe("E002 — every stored record_type is registered", () => {
     beforeAll(async () => {
       await migrator.query(
-        "CREATE TABLE hf_approval (id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, record_type text NOT NULL, record_id bigint NOT NULL)",
+        "INSERT INTO hf_approval (run_id, key, workflow_id, type, status, record_type, record_id) " +
+          "VALUES ('e002-run', 'send', 'e002-run', 'send-email', 'pending', 'widget', '1')",
       );
-      await migrator.query("INSERT INTO hf_approval (record_type, record_id) VALUES ('widget', 1)");
     });
 
     afterAll(async () => {
-      await migrator.query("DROP TABLE IF EXISTS hf_approval");
+      await migrator.query("DELETE FROM hf_approval");
     });
 
     it("passes when the type is registered", async () => {

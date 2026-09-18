@@ -42,13 +42,30 @@ export {
   type ActionResult,
   type ActionsPerformOptions,
 } from "./actions.js";
+export {
+  approvals,
+  decide,
+  waitForApproval,
+  ApprovalBatchRefused,
+  ApprovalRunMoved,
+  ApprovalWriteLost,
+  APPROVAL_DECISIONS,
+  DECIDE_OPERATION,
+  type ApprovalDecision,
+  type ApprovalDecisionKind,
+  type ApprovalNotice,
+  type DecideOptions,
+  type DecideResult,
+  type DecidedApproval,
+  type WaitForApprovalOptions,
+} from "./approvals.js";
+export { UnknownFlow } from "./bump.js";
 export { Suspend, SUSPEND_STATUSES, type SuspendStatus } from "./suspend.js";
 export { currentRun, OutsideRun, type RunContext } from "./run-context.js";
 export { runsStart, START_RUN_STATEMENT, type RunsStartOptions, type StartedRun } from "./runs.js";
 export {
   reconcile,
   startReconciler,
-  UnknownFlow,
   ABANDON_LLM_CALLS_STATEMENT,
   DRIFT_STATEMENT,
   PAUSED_RUNS_STATEMENT,

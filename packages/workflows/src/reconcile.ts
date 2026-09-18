@@ -1,12 +1,7 @@
 import type { DBOSClient } from "@dbos-inc/dbos-sdk";
-import {
-  assertNotInWorkflow,
-  bumpAttempt,
-  controlPlaneTx,
-  type BumpedAttempt,
-} from "@hyperfixation/db";
+import { assertNotInWorkflow, controlPlaneTx, type BumpedAttempt } from "@hyperfixation/db";
 import type { Pool, PoolClient } from "pg";
-import { definedFlows } from "./define-flow.js";
+import { bumpAndEnqueueOn, flowForRun } from "./bump.js";
 import { concludeRun } from "./run-status.js";
 
 /** How often the worker runs a pass after the one it runs at boot. */
@@ -33,19 +28,6 @@ export const RECONCILE_PASS_MARKER = "hf-reconcile: pass";
 
 /** DBOS statuses that mean the attempt has not run yet or is believed to be running. */
 const LIVE_DBOS_STATUSES = ["PENDING", "ENQUEUED", "DELAYED"];
-
-export class UnknownFlow extends Error {
-  readonly runId: string;
-
-  constructor(runId: string, flow: string) {
-    super(
-      `UnknownFlow: hf_run ${runId} names flow ${JSON.stringify(flow)}, which this worker does ` +
-        "not register; its next attempt has no queue to be enqueued on",
-    );
-    this.name = "UnknownFlow";
-    this.runId = runId;
-  }
-}
 
 /**
  * The drift scan. `reconcile()` reports it and never corrects it: correcting a counter is how
@@ -177,8 +159,7 @@ interface RunningRunRow {
  *
  * Steps (1), (3) and (4) and the drift read; step (2) is deleted, not re-predicated — the
  * enqueue is in the bump's own transaction, so there is no commit-to-enqueue window to backstop.
- * Step (5), expiring pending approvals through `decide()`, arrives with the approvals slice:
- * neither `hf_approval` nor `decide()` exists yet.
+ * Step (5), expiring pending approvals through `decide()`, arrives with the approvals slice.
  */
 export async function reconcile(
   pool: Pool,
@@ -314,10 +295,7 @@ async function reattempt(
   }
 }
 
-/**
- * The one attempt-bump path, with the enqueue in the same transaction. The queue name comes
- * from the flow registry and from nowhere else (round-2 finding 2).
- */
+/** One run's bump in its own control-plane transaction, around the shared bump path. */
 async function bumpAndEnqueue(
   pool: Pool,
   dbosClient: DBOSClient,
@@ -327,16 +305,7 @@ async function bumpAndEnqueue(
   return controlPlaneTx(
     pool,
     { operation: "reconcile.bump", ...lockTimeoutOf(options) },
-    async (client) => {
-      const bumped = await bumpAttempt(client, runId);
-      const flow = flowOf(runId, bumped.flow);
-      await dbosClient.enqueueInTransaction(
-        client,
-        { queueName: flow.queue, workflowName: flow.name, workflowID: bumped.workflowId },
-        { runId, attempt: bumped.attempt, input: bumped.input },
-      );
-      return bumped;
-    },
+    async (client) => bumpAndEnqueueOn(client, dbosClient, runId),
   );
 }
 
@@ -403,19 +372,13 @@ async function enqueueCurrentAttempt(
   const taken = await client.query(WORKFLOW_ID_TAKEN_STATEMENT, [row.current_workflow_id]);
   if (taken.rowCount !== 0) return false;
 
-  const flow = flowOf(row.run_id, run.flow);
+  const flow = flowForRun(row.run_id, run.flow);
   await dbosClient.enqueueInTransaction(
     client,
     { queueName: flow.queue, workflowName: flow.name, workflowID: run.current_workflow_id },
     { runId: row.run_id, attempt: run.attempt, input: run.input },
   );
   return true;
-}
-
-function flowOf(runId: string, name: string): { name: string; queue: string } {
-  const flow = definedFlows().get(name);
-  if (flow === undefined) throw new UnknownFlow(runId, name);
-  return flow;
 }
 
 function isTerminalFailure(dbosStatus: string): boolean {

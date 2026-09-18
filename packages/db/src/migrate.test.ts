@@ -51,7 +51,7 @@ describe("the five-step migrator", () => {
       const { rows: applied } = await migrator.query<{ count: string }>(
         "SELECT count(*)::text AS count FROM drizzle.hf_core_migrations",
       );
-      expect(applied[0]?.count).toBe("2");
+      expect(applied[0]?.count).toBe("3");
 
       const { rows: index } = await migrator.query<{ indexdef: string }>(
         "SELECT indexdef FROM pg_indexes WHERE indexname = 'hf_llm_call_reservation_idx'",
@@ -64,7 +64,7 @@ describe("the five-step migrator", () => {
       const { rows } = await migrator.query<{ count: string }>(
         "SELECT count(*)::text AS count FROM drizzle.hf_core_migrations",
       );
-      expect(rows[0]?.count).toBe("2");
+      expect(rows[0]?.count).toBe("3");
     });
   });
 
@@ -91,7 +91,7 @@ describe("the five-step migrator", () => {
       const { rows: core } = await migrator.query<{ count: string }>(
         "SELECT count(*)::text AS count FROM drizzle.hf_core_migrations",
       );
-      expect(core[0]?.count).toBe("2");
+      expect(core[0]?.count).toBe("3");
     });
 
     it("refuses an app migration that touches an hf_* table, before applying it", async () => {
@@ -117,12 +117,6 @@ describe("the five-step migrator", () => {
   describe("step 4 — delete-guard triggers", () => {
     beforeAll(async () => {
       await migrator.query(
-        `CREATE TABLE IF NOT EXISTS hf_approval (
-           id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-           record_type text NOT NULL,
-           record_id bigint NOT NULL)`,
-      );
-      await migrator.query(
         "CREATE TABLE IF NOT EXISTS widget (id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY)",
       );
       await migrate(db.migratorUrl, {
@@ -132,7 +126,8 @@ describe("the five-step migrator", () => {
     }, 60_000);
 
     afterAll(async () => {
-      await migrator.query("DROP TABLE IF EXISTS widget, hf_approval");
+      await migrator.query("DELETE FROM hf_approval");
+      await migrator.query("DROP TABLE IF EXISTS widget");
     });
 
     it("refuses a hard DELETE of a record an approval references", async () => {
@@ -140,9 +135,11 @@ describe("the five-step migrator", () => {
         "INSERT INTO widget DEFAULT VALUES RETURNING id",
       );
       const id = rows[0]!.id;
-      await migrator.query("INSERT INTO hf_approval (record_type, record_id) VALUES ('widget', $1)", [
-        id,
-      ]);
+      await migrator.query(
+        "INSERT INTO hf_approval (run_id, key, workflow_id, type, status, record_type, record_id) " +
+          "VALUES ('guarded-run', 'send', 'guarded-run', 'send-email', 'pending', 'widget', $1)",
+        [id],
+      );
 
       const error = await migrator.query("DELETE FROM widget WHERE id = $1", [id]).then(
         () => undefined,

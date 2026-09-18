@@ -15,6 +15,13 @@
       "when": 1789590299990,
       "tag": "0001_llm_call_reservation_index",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1789692114896,
+      "tag": "0002_approvals",
+      "breakpoints": true
     }
   ]
 }

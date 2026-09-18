@@ -73,7 +73,9 @@ async function existingReferencingTables(client: Client): Promise<string[]> {
 export function deleteGuardFunctionSql(referencingTables: readonly string[]): string {
   const checks = referencingTables
     .map(
-      (t) => `  IF EXISTS (SELECT 1 FROM ${quoteIdent(t)} WHERE record_type = TG_ARGV[0] AND record_id = OLD.id) THEN
+      // `record_id` is text on every machinery table — a record id is carried, not joined on —
+      // while a record table's `id` is the bigint identity E001 insists on.
+      (t) => `  IF EXISTS (SELECT 1 FROM ${quoteIdent(t)} WHERE record_type = TG_ARGV[0] AND record_id = OLD.id::text) THEN
     RAISE EXCEPTION 'delete-guard: % % is referenced by ${t}; use records.archive()', TG_ARGV[0], OLD.id
       USING ERRCODE = 'restrict_violation';
   END IF;`,
