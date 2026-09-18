@@ -306,13 +306,29 @@ importers:
         version: 10.10.0(supports-color@8.1.1)
 
   packages/cli:
+    dependencies:
+      '@hyperfixation/auth':
+        specifier: workspace:*
+        version: link:../auth
+      '@hyperfixation/db':
+        specifier: workspace:*
+        version: link:../db
+      pg:
+        specifier: ^8.23.0
+        version: 8.23.0
     devDependencies:
       '@hyperfixation/eslint-config':
         specifier: workspace:*
         version: link:../eslint-config
+      '@hyperfixation/testing':
+        specifier: workspace:*
+        version: link:../testing
       '@microsoft/api-extractor':
         specifier: ^7.59.1
         version: 7.59.1(@types/node@22.20.2)
+      '@types/pg':
+        specifier: ^8.23.1
+        version: 8.23.1
       eslint:
         specifier: ^10.10.0
         version: 10.10.0(supports-color@8.1.1)

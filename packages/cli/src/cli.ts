@@ -1,0 +1,201 @@
+import { parseArgs } from "node:util";
+import { bootstrapApp } from "./bootstrap.js";
+import { checkApp } from "./check.js";
+import { dev, devBuildSha } from "./dev.js";
+import { generate } from "./gen.js";
+import { migrateApp } from "./migrate.js";
+import { newApp } from "./new.js";
+import { requireTemplateSource } from "./template-source.js";
+
+export const COMMANDS = ["new", "migrate", "bootstrap", "check", "gen", "dev"] as const;
+
+export type Command = (typeof COMMANDS)[number];
+
+export const USAGE = `hf — the hyperfixation CLI
+
+  hf new <name> --local     copy the template into ./<name> and substitute its placeholders
+      --from <dir>            template checkout (default: the sibling hyperfixation-template)
+      --into <dir>            where to create <name> (default: the working directory)
+
+  hf migrate                create the application role, then run the app's migrate.ts
+      --skip-roles            the cloud path, where the roles already exist
+
+  hf bootstrap              grant the app its one bootstrap admin
+      --email <address>       the address to promote; otherwise HF_BOOTSTRAP_EMAIL
+
+  hf check                  declared env, pending migrations, and E001-E006
+
+  hf gen [generator]        the app's turbo generators
+
+  hf dev                    docker compose up, then pnpm dev under HF_BUILD_SHA=dev-<timestamp>
+      --no-compose            leave the dev infrastructure alone
+      --compose-only          bring the infrastructure up and stop
+
+Every command but \`new\` runs against the app at or above the working directory, or --dir.
+`;
+
+export interface Io {
+  out(line: string): void;
+  err(line: string): void;
+}
+
+const consoleIo: Io = {
+  out: (line) => console.log(line),
+  err: (line) => console.error(line),
+};
+
+/**
+ * Parses argv and runs one command, returning the process's exit code.
+ *
+ * Every failure is caught here and printed as one line: these commands fail for reasons the
+ * user can act on — a name that is not an identifier, an unset var, a template checkout that is
+ * not there — and a stack trace in front of that sentence buries it.
+ */
+export async function main(argv: readonly string[], io: Io = consoleIo): Promise<number> {
+  const [command, ...rest] = argv;
+
+  if (command === undefined || command === "--help" || command === "-h") {
+    io.out(USAGE);
+    return command === undefined ? 1 : 0;
+  }
+  if (!(COMMANDS as readonly string[]).includes(command)) {
+    io.err(`unknown command ${JSON.stringify(command)}`);
+    io.err(USAGE);
+    return 1;
+  }
+
+  try {
+    return await dispatch(command as Command, rest, io);
+  } catch (error) {
+    io.err(`hf ${command}: ${(error as Error).message}`);
+    return 1;
+  }
+}
+
+async function dispatch(command: Command, argv: readonly string[], io: Io): Promise<number> {
+  switch (command) {
+    case "new":
+      return await commandNew(argv, io);
+    case "migrate":
+      return await commandMigrate(argv, io);
+    case "bootstrap":
+      return await commandBootstrap(argv, io);
+    case "check":
+      return await commandCheck(argv, io);
+    case "gen":
+      return await commandGen(argv);
+    case "dev":
+      return await commandDev(argv, io);
+  }
+}
+
+async function commandNew(argv: readonly string[], io: Io): Promise<number> {
+  const { values, positionals } = parseArgs({
+    args: [...argv],
+    options: {
+      local: { type: "boolean", default: false },
+      from: { type: "string" },
+      into: { type: "string" },
+    },
+    allowPositionals: true,
+  });
+
+  const name = positionals[0];
+  if (name === undefined) {
+    io.err("hf new needs a name: hf new <name> --local");
+    return 1;
+  }
+
+  const from = values.from ?? (await requireTemplateSource());
+  const result = await newApp({ name, from, into: values.into, local: values.local });
+
+  io.out(`created ${result.dir} from ${from}`);
+  io.out(`  app ${result.appName}, database ${result.databaseName}`);
+  io.out(
+    `  ${result.substituted.length} file(s) substituted` +
+      (result.wroteEnv ? ", .env written from .env.example" : ""),
+  );
+  io.out("");
+  io.out(`next: cd ${result.given} && pnpm install && hf dev --compose-only && hf migrate`);
+  return 0;
+}
+
+async function commandMigrate(argv: readonly string[], io: Io): Promise<number> {
+  const { values } = parseArgs({
+    args: [...argv],
+    options: { dir: { type: "string" }, "skip-roles": { type: "boolean", default: false } },
+  });
+
+  const result = await migrateApp({ dir: values.dir, skipRoles: values["skip-roles"] });
+  if (result.roles !== undefined) {
+    io.out(
+      `${result.roles.created ? "created" : "updated"} application role ${result.roles.applicationRole}`,
+    );
+  }
+  io.out(`migrated ${result.app.appName}`);
+  return 0;
+}
+
+async function commandBootstrap(argv: readonly string[], io: Io): Promise<number> {
+  const { values } = parseArgs({
+    args: [...argv],
+    options: {
+      dir: { type: "string" },
+      email: { type: "string" },
+      name: { type: "string" },
+    },
+  });
+
+  const result = await bootstrapApp({ dir: values.dir, email: values.email, name: values.name });
+  io.out(
+    `${result.created ? "created" : "promoted"} ${result.email} as ${result.app.appName}'s admin`,
+  );
+  return 0;
+}
+
+async function commandCheck(argv: readonly string[], io: Io): Promise<number> {
+  const { values } = parseArgs({ args: [...argv], options: { dir: { type: "string" } } });
+
+  const result = await checkApp({ dir: values.dir });
+  if (result.ok) {
+    io.out(`${result.app.appName}: env, migrations and E001-E006 all clear`);
+    return 0;
+  }
+  for (const finding of result.findings) io.err(`${finding.code}: ${finding.message}`);
+  return 1;
+}
+
+async function commandGen(argv: readonly string[]): Promise<number> {
+  // No `parseArgs`: everything after `hf gen` is the generator's, including flags this CLI
+  // happens to share a name with.
+  const dirFlag = argv.indexOf("--dir");
+  const dir = dirFlag === -1 ? undefined : argv[dirFlag + 1];
+  const rest = dirFlag === -1 ? argv : [...argv.slice(0, dirFlag), ...argv.slice(dirFlag + 2)];
+
+  await generate({ dir, args: rest });
+  return 0;
+}
+
+async function commandDev(argv: readonly string[], io: Io): Promise<number> {
+  const { values } = parseArgs({
+    args: [...argv],
+    options: {
+      dir: { type: "string" },
+      "no-compose": { type: "boolean", default: false },
+      "compose-only": { type: "boolean", default: false },
+    },
+  });
+
+  // Printed before the child starts, not after it exits: `pnpm dev` runs until interrupted,
+  // and the version is what the user needs in front of them while it does.
+  const buildSha = devBuildSha();
+  io.out(`HF_BUILD_SHA=${buildSha}`);
+
+  await dev({
+    dir: values.dir,
+    skipCompose: values["no-compose"],
+    composeOnly: values["compose-only"],
+    buildSha,
+  });
+  return 0;
+}

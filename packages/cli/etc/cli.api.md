@@ -4,6 +4,308 @@
 
 ```ts
 
+import { BootstrapResult } from '@hyperfixation/auth';
+import { RecordTable } from '@hyperfixation/db';
+import { StdioOptions } from 'node:child_process';
+
+// @public
+export const APP_ID: RegExp;
+
+// @public (undocumented)
+export interface AppNames {
+    applicationRole: string;
+    appName: string;
+    databaseName: string;
+    given: string;
+    // (undocumented)
+    migratorRole: string;
+}
+
+// @public (undocumented)
+export interface AppRegistry {
+    // (undocumented)
+    appName: string;
+    // (undocumented)
+    recordTables: readonly RecordTable[];
+}
+
+// @public
+export function bootstrapApp(options?: BootstrapAppOptions): Promise<BootstrapAppResult>;
+
+// @public (undocumented)
+export interface BootstrapAppOptions {
+    // (undocumented)
+    dir?: string;
+    email?: string;
+    // (undocumented)
+    name?: string;
+}
+
+// @public (undocumented)
+export interface BootstrapAppResult extends BootstrapResult {
+    // (undocumented)
+    app: ResolvedApp;
+}
+
+// @public
+export function checkApp(options?: {
+    dir?: string;
+}): Promise<CheckAppResult>;
+
+// @public (undocumented)
+export interface CheckAppResult {
+    // (undocumented)
+    app: ResolvedApp;
+    // (undocumented)
+    findings: readonly CheckFinding[];
+    // (undocumented)
+    ok: boolean;
+    recordTables: readonly RecordTable[] | undefined;
+}
+
+// @public (undocumented)
+export interface CheckFinding {
+    code: string;
+    // (undocumented)
+    message: string;
+}
+
+// @public (undocumented)
+export type Command = (typeof COMMANDS)[number];
+
+// @public (undocumented)
+export class CommandFailed extends Error {
+    constructor(command: string, exitCode: number | null, signal: NodeJS.Signals | null);
+    // (undocumented)
+    readonly exitCode: number | null;
+    // (undocumented)
+    readonly signal: NodeJS.Signals | null;
+}
+
+// @public (undocumented)
+export const COMMANDS: readonly ["new", "migrate", "bootstrap", "check", "gen", "dev"];
+
+// @public
+export function credentialsOf(connectionString: string): {
+    user: string;
+    password: string;
+};
+
+// @public
+export function declaredNames(contents: string): string[];
+
+// @public
+export function deriveNames(given: string): AppNames;
+
+// @public
+export function dev(options?: DevOptions): Promise<DevResult>;
+
+// @public
+export const DEV_COMPOSE_FILE = "docker-compose.yml";
+
+// @public
+export function devBuildSha(now?: number): string;
+
+// @public (undocumented)
+export interface DevOptions {
+    // (undocumented)
+    buildSha?: string;
+    composeOnly?: boolean;
+    // (undocumented)
+    dir?: string;
+    skipCompose?: boolean;
+}
+
+// @public (undocumented)
+export interface DevResult {
+    // (undocumented)
+    app: ResolvedApp;
+    // (undocumented)
+    buildSha: string;
+}
+
+// @public
+export const EXCLUDED_ENTRIES: readonly string[];
+
+// @public
+export function findTemplateSource(cwd?: string): Promise<string | undefined>;
+
+// @public
+export function generate(options?: GenerateOptions): Promise<ResolvedApp>;
+
+// @public (undocumented)
+export interface GenerateOptions {
+    args?: readonly string[];
+    // (undocumented)
+    dir?: string;
+}
+
+// @public
+export const GENERATOR_BIN = "gen";
+
+// @public
+export const GENERATOR_CONFIG: string;
+
+// @public
+export const GIVEN_NAME: RegExp;
+
+// @public (undocumented)
+export class InvalidAppName extends Error {
+    constructor(message: string);
+}
+
+// @public (undocumented)
+export interface Io {
+    // (undocumented)
+    err(line: string): void;
+    // (undocumented)
+    out(line: string): void;
+}
+
+// @public (undocumented)
+export interface LocalRoleOptions {
+    // (undocumented)
+    applicationPassword: string;
+    // (undocumented)
+    applicationRole: string;
+    // (undocumented)
+    databaseName: string;
+}
+
+// @public (undocumented)
+export interface LocalRoleResult {
+    // (undocumented)
+    applicationRole: string;
+    // (undocumented)
+    created: boolean;
+}
+
+// @public
+export function main(argv: readonly string[], io?: Io): Promise<number>;
+
+// @public
+export const MIGRATE_ENTRY = "migrate.ts";
+
+// @public
+export function migrateApp(options?: MigrateAppOptions): Promise<MigrateAppResult>;
+
+// @public (undocumented)
+export interface MigrateAppOptions {
+    // (undocumented)
+    dir?: string;
+    skipRoles?: boolean;
+}
+
+// @public (undocumented)
+export interface MigrateAppResult {
+    // (undocumented)
+    app: ResolvedApp;
+    // (undocumented)
+    roles: LocalRoleResult | undefined;
+}
+
+// @public (undocumented)
+export class MissingEnv extends Error {
+    constructor(names: readonly string[], dir: string);
+    // (undocumented)
+    readonly names: readonly string[];
+}
+
+// @public
+export function newApp(options: NewAppOptions): Promise<NewAppResult>;
+
+// @public (undocumented)
+export interface NewAppOptions {
+    from: string;
+    into?: string;
+    local: boolean;
+    name: string;
+}
+
+// @public (undocumented)
+export interface NewAppResult extends AppNames {
+    dir: string;
+    substituted: readonly string[];
+    wroteEnv: boolean;
+}
+
+// @public (undocumented)
+export class NoGenerators extends Error {
+    constructor(dir: string);
+}
+
+// @public (undocumented)
+export class NotAnApp extends Error {
+    constructor(message: string);
+}
+
+// @public
+export function parseEnvFile(contents: string): Record<string, string>;
+
+// @public
+export function placeholders(names: AppNames): Record<string, string>;
+
+// @public
+export function probeApp(app: ResolvedApp): Promise<AppRegistry | undefined>;
+
+// @public
+export function provisionLocalRoles(migratorConnectionString: string, options: LocalRoleOptions): Promise<LocalRoleResult>;
+
+// @public (undocumented)
+export function readEnvFile(file: string): Promise<Record<string, string>>;
+
+// @public
+export function requireEnv(app: ResolvedApp, name: string): string;
+
+// @public
+export function requireTemplateSource(cwd?: string): Promise<string>;
+
+// @public
+export function resolveApp(dir?: string): Promise<ResolvedApp>;
+
+// @public (undocumented)
+export interface ResolvedApp {
+    appName: string;
+    declared: readonly string[];
+    // (undocumented)
+    dir: string;
+    env: Record<string, string | undefined>;
+    envFile: Record<string, string>;
+    migrationsDir: string;
+    // (undocumented)
+    names: AppNames;
+}
+
+// @public
+export function run(command: string, args: readonly string[], options: RunOptions): Promise<void>;
+
+// @public (undocumented)
+export interface RunOptions {
+    // (undocumented)
+    cwd: string;
+    // (undocumented)
+    env?: NodeJS.ProcessEnv;
+    // (undocumented)
+    stdio?: StdioOptions;
+}
+
+// @public (undocumented)
+export function substitute(contents: string, names: AppNames): string;
+
+// @public
+export const TEMPLATE_DIR_ENV = "HF_TEMPLATE_DIR";
+
+// @public
+export const TEMPLATE_MARKER = ".hyperfixation-template";
+
+// @public (undocumented)
+export class TemplateError extends Error {
+    constructor(message: string);
+}
+
+// @public (undocumented)
+export const USAGE = "hf \u2014 the hyperfixation CLI\n\n  hf new <name> --local     copy the template into ./<name> and substitute its placeholders\n      --from <dir>            template checkout (default: the sibling hyperfixation-template)\n      --into <dir>            where to create <name> (default: the working directory)\n\n  hf migrate                create the application role, then run the app's migrate.ts\n      --skip-roles            the cloud path, where the roles already exist\n\n  hf bootstrap              grant the app its one bootstrap admin\n      --email <address>       the address to promote; otherwise HF_BOOTSTRAP_EMAIL\n\n  hf check                  declared env, pending migrations, and E001-E006\n\n  hf gen [generator]        the app's turbo generators\n\n  hf dev                    docker compose up, then pnpm dev under HF_BUILD_SHA=dev-<timestamp>\n      --no-compose            leave the dev infrastructure alone\n      --compose-only          bring the infrastructure up and stop\n\nEvery command but `new` runs against the app at or above the working directory, or --dir.\n";
+
 // (No @packageDocumentation comment for this package)
 
 ```

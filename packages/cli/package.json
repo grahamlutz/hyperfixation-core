@@ -4,11 +4,15 @@
   "description": "The hf binary and its Turborepo generator templates",
   "type": "module",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "hf": "./dist/bin.js"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    }
+    },
+    "./package.json": "./package.json"
   },
   "files": [
     "dist"
@@ -21,9 +25,16 @@
     "api-extractor:update": "api-extractor run --local",
     "test": "vitest run --passWithNoTests"
   },
+  "dependencies": {
+    "@hyperfixation/auth": "workspace:*",
+    "@hyperfixation/db": "workspace:*",
+    "pg": "^8.23.0"
+  },
   "devDependencies": {
     "@hyperfixation/eslint-config": "workspace:*",
+    "@hyperfixation/testing": "workspace:*",
     "@microsoft/api-extractor": "^7.59.1",
+    "@types/pg": "^8.23.1",
     "eslint": "^10.10.0"
   }
 }
