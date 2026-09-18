@@ -1,7 +1,7 @@
 import { DBOS } from "@dbos-inc/dbos-sdk";
 import { OutsideRun, withRunContext, type RunContext } from "./run-context.js";
 import { claimRun, concludeRun } from "./run-status.js";
-import { QUEUES, type QueueName } from "./start-worker.js";
+import { QUEUES, WORKER_PROCESS, type QueueName } from "./start-worker.js";
 import { Suspend } from "./suspend.js";
 import { workerRuntime } from "./worker-runtime.js";
 
@@ -15,7 +15,11 @@ export interface FlowArgs<I> {
 export interface Flow<I = unknown, O = unknown> {
   readonly name: string;
   readonly queue: QueueName;
-  /** The registered DBOS workflow. `runs.start` enqueues it by name, never by reference. */
+  /**
+   * The registered DBOS workflow in a worker, and the bare body anywhere else — see
+   * `defineFlow`. Either way nothing calls it: `runs.start` enqueues by name, never by
+   * reference, and calling it outside a run throws `OutsideRun`.
+   */
   readonly workflow: (args: FlowArgs<I>) => Promise<O | undefined>;
 }
 
@@ -55,6 +59,8 @@ export function definedFlows(): ReadonlyMap<string, Flow<never, unknown>> {
  * `hf_run` status write of the attempt, and every one of them carries the
  * `AND current_workflow_id = …` fence — the wrapper's job is as much to *not* write after a
  * bump as it is to write.
+ *
+ * The DBOS registration itself happens only in a worker process; see the comment on it.
  */
 export function defineFlow<I, O>(
   name: string,
@@ -66,36 +72,44 @@ export function defineFlow<I, O>(
     throw new UnknownQueue(name, options.queue);
   }
 
-  const workflow = DBOS.registerWorkflow(
-    async (args: FlowArgs<I>): Promise<O | undefined> => {
-      const workflowId = DBOS.workflowID;
-      if (workflowId === undefined) throw new OutsideRun(`flow ${name}`);
-      const runtime = workerRuntime(`flow ${name}`);
-      const run: RunContext = { runId: args.runId, attempt: args.attempt, workflowId };
+  const body = async (args: FlowArgs<I>): Promise<O | undefined> => {
+    const workflowId = DBOS.workflowID;
+    if (workflowId === undefined) throw new OutsideRun(`flow ${name}`);
+    const runtime = workerRuntime(`flow ${name}`);
+    const run: RunContext = { runId: args.runId, attempt: args.attempt, workflowId };
 
-      // The claim is the fence as well as the status write: zero rows means a bump moved the
-      // run on before this attempt was dequeued, so it stops here without touching the run.
-      // Not an error — a superseded attempt ending quietly is the design working.
-      if (!(await claimRun(runtime.control.pool, run.runId, workflowId, runtime.applicationVersion))) {
-        console.info(SUPERSEDED_MARKER, JSON.stringify({ flow: name, ...run }));
+    // The claim is the fence as well as the status write: zero rows means a bump moved the
+    // run on before this attempt was dequeued, so it stops here without touching the run.
+    // Not an error — a superseded attempt ending quietly is the design working.
+    if (!(await claimRun(runtime.control.pool, run.runId, workflowId, runtime.applicationVersion))) {
+      console.info(SUPERSEDED_MARKER, JSON.stringify({ flow: name, ...run }));
+      return undefined;
+    }
+
+    try {
+      const output = await withRunContext(run, () => fn(args.input, run));
+      await concludeRun(runtime.control.pool, run.runId, workflowId, "done", null);
+      return output;
+    } catch (error) {
+      if (error instanceof Suspend) {
+        await concludeRun(runtime.control.pool, run.runId, workflowId, error.status, null);
         return undefined;
       }
+      await concludeRun(runtime.control.pool, run.runId, workflowId, "failed", messageOf(error));
+      throw error;
+    }
+  };
 
-      try {
-        const output = await withRunContext(run, () => fn(args.input, run));
-        await concludeRun(runtime.control.pool, run.runId, workflowId, "done", null);
-        return output;
-      } catch (error) {
-        if (error instanceof Suspend) {
-          await concludeRun(runtime.control.pool, run.runId, workflowId, error.status, null);
-          return undefined;
-        }
-        await concludeRun(runtime.control.pool, run.runId, workflowId, "failed", messageOf(error));
-        throw error;
-      }
-    },
-    { name },
-  );
+  // Only in the worker, and for the same reason `DBOS.launch()` is only there: a registration
+  // is a global side effect in the one object DBOS keeps per process, and the web's copy of
+  // this module is not one per process. Next splits an app's server code per route, so
+  // `src/flows/*.ts` is evaluated once per chunk that reaches it while `@dbos-inc/dbos-sdk`
+  // stays external and singular — the second evaluation is refused and every route that
+  // touches the app 500s from then on. The web never dispatches a workflow anyway; it enqueues
+  // by name through `DBOSClient`, and the name comes from `flows` below, which is per-instance
+  // and identical in every instance.
+  const workflow =
+    process.env.HF_PROCESS === WORKER_PROCESS ? DBOS.registerWorkflow(body, { name }) : body;
 
   const flow: Flow<I, O> = { name, queue: options.queue, workflow };
   flows.set(name, flow as unknown as Flow<never, unknown>);
