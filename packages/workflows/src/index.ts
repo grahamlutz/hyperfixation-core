@@ -66,8 +66,10 @@ export { runsStart, START_RUN_STATEMENT, type RunsStartOptions, type StartedRun 
 export {
   reconcile,
   startReconciler,
+  sweepDecisionKey,
   ABANDON_LLM_CALLS_STATEMENT,
   DRIFT_STATEMENT,
+  EXPIRED_APPROVALS_STATEMENT,
   PAUSED_RUNS_STATEMENT,
   RECONCILE_ACTION_MARKER,
   RECONCILE_ANOMALY_MARKER,
@@ -77,6 +79,7 @@ export {
   RUNNING_RUNS_STATEMENT,
   UNCERTAIN_ACTIONS_STATEMENT,
   type Concluded,
+  type ExpiredApproval,
   type PeriodDrift,
   type Reattempted,
   type ReconcileAnomaly,

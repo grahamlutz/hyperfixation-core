@@ -5,7 +5,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { getClient, resetClient } from "./client.js";
 import { createControlPool, type ControlPool } from "./control-pool.js";
 import { defineFlow, type Flow } from "./define-flow.js";
-import { reconcile, type ReconcileReport } from "./reconcile.js";
+import { reconcile, sweepDecisionKey, type ReconcileReport } from "./reconcile.js";
 import { runsStart } from "./runs.js";
 
 const THIS_VERSION = "version-b";
@@ -103,6 +103,8 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
+  await query("DELETE FROM hf_approval");
+  await query("DELETE FROM hf_audit");
   await query("DELETE FROM hf_llm_call");
   await query("DELETE FROM hf_action_log");
   await query("DELETE FROM hf_run");
@@ -342,6 +344,112 @@ describe("reconcile() step (4) — ledger hygiene", () => {
       await query("SELECT status FROM hf_action_log WHERE run_id = $1", [runId]),
     ).toEqual([{ status: "uncertain" }]);
     expect((await pass()).uncertainActions).toBe(0);
+  });
+});
+
+describe("reconcile() step (5) — expiring pending approvals", () => {
+  /** `expiresAt` is a SQL expression rather than a value, so a deadline can be relative to now. */
+  async function insertApproval(
+    runId: string,
+    expiresAt: string,
+    status = "pending",
+  ): Promise<number> {
+    const rows = await query<{ id: string }>(
+      "INSERT INTO hf_approval (run_id, key, workflow_id, type, status, expires_at) " +
+        `VALUES ($1, 'send', $1, 'send-email', $2, ${expiresAt}) RETURNING id`,
+      [runId, status],
+    );
+    return Number(rows[0]!.id);
+  }
+
+  async function approval(id: number): Promise<Record<string, unknown> | undefined> {
+    return (
+      await query(
+        "SELECT status, decided_via, decision_key, decided_at, resume_workflow_id " +
+          "FROM hf_approval WHERE id = $1",
+        [id],
+      )
+    )[0];
+  }
+
+  it("decides an expired row via the sweep and bumps its run onto the resume attempt", async () => {
+    const runId = runIdFor("expired");
+    await startRun(runId);
+    await query("UPDATE hf_run SET status = 'waiting' WHERE run_id = $1", [runId]);
+    const id = await insertApproval(runId, "now() - interval '1 minute'");
+
+    const report = await pass();
+
+    expect(report.expired).toEqual([{ approvalId: id, runId, workflowId: `${runId}:2` }]);
+    expect(await approval(id)).toMatchObject({
+      status: "expired",
+      decided_via: "sweep",
+      decision_key: sweepDecisionKey(id),
+      resume_workflow_id: `${runId}:2`,
+    });
+    // The expiry is a decision like any other, so the run resumes to learn about it.
+    expect(await run(runId)).toMatchObject({
+      status: "running",
+      attempt: 2,
+      current_workflow_id: `${runId}:2`,
+    });
+    expect(await workflow(`${runId}:2`)).toMatchObject({ status: "ENQUEUED" });
+  });
+
+  it("leaves a row with no deadline, one still inside it, and one already decided alone", async () => {
+    const open = runIdFor("open");
+    const future = runIdFor("future");
+    const decided = runIdFor("decided");
+    for (const runId of [open, future, decided]) {
+      await startRun(runId);
+      await query("UPDATE hf_run SET status = 'waiting' WHERE run_id = $1", [runId]);
+    }
+    const ids = [
+      await insertApproval(open, "NULL"),
+      await insertApproval(future, "now() + interval '1 hour'"),
+      await insertApproval(decided, "now() - interval '1 minute'", "approved"),
+    ];
+
+    const report = await pass();
+
+    expect(report.expired).toEqual([]);
+    for (const runId of [open, future, decided]) {
+      expect(await run(runId)).toMatchObject({ attempt: 1, status: "waiting" });
+    }
+    expect(ids).toHaveLength(3);
+  });
+
+  it("expires a row once however many passes run", async () => {
+    const runId = runIdFor("sweep-idempotent");
+    await startRun(runId);
+    await query("UPDATE hf_run SET status = 'waiting' WHERE run_id = $1", [runId]);
+    const id = await insertApproval(runId, "now() - interval '1 minute'");
+
+    const first = await pass();
+    const expired = await approval(id);
+    const second = await pass();
+
+    expect([first.expired.length, second.expired.length]).toEqual([1, 0]);
+    expect(await approval(id)).toEqual(expired);
+    expect(await run(runId)).toMatchObject({ attempt: 2 });
+  });
+
+  it("carries on with the rest of the pass when one expiry is refused", async () => {
+    const orphan = runIdFor("orphan");
+    const good = runIdFor("good-after-orphan");
+    await startRun(good);
+    await query("UPDATE hf_run SET status = 'waiting' WHERE run_id = $1", [good]);
+    // An approval whose run was deleted from under it: `decide()`'s bump throws RunNotFound.
+    const orphaned = await insertApproval(orphan, "now() - interval '1 minute'");
+    const sound = await insertApproval(good, "now() - interval '1 minute'");
+
+    const report = await pass();
+
+    expect(report.expired).toEqual([{ approvalId: sound, runId: good, workflowId: `${good}:2` }]);
+    expect(report.failures).toEqual([
+      { runId: orphan, step: "expire", error: expect.stringContaining("RunNotFound") },
+    ]);
+    expect(await approval(orphaned)).toMatchObject({ status: "pending" });
   });
 });
 

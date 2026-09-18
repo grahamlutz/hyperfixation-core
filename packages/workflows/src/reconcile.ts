@@ -1,6 +1,7 @@
 import type { DBOSClient } from "@dbos-inc/dbos-sdk";
 import { assertNotInWorkflow, controlPlaneTx, type BumpedAttempt } from "@hyperfixation/db";
 import type { Pool, PoolClient } from "pg";
+import { decide } from "./approvals.js";
 import { bumpAndEnqueueOn, flowForRun } from "./bump.js";
 import { concludeRun } from "./run-status.js";
 
@@ -78,6 +79,14 @@ export const UNCERTAIN_ACTIONS_STATEMENT =
   "AND (r.status IN ('done', 'failed', 'waiting', 'paused') " +
   "OR a.workflow_id <> r.current_workflow_id)";
 
+/**
+ * Step (5)'s scan. A plain `SELECT`: `decide()` locks what it decides, and an approval this
+ * scan read a moment before someone decided it is simply not pending any more by then.
+ */
+export const EXPIRED_APPROVALS_STATEMENT =
+  "SELECT id, run_id FROM hf_approval WHERE status = 'pending' " +
+  "AND expires_at IS NOT NULL AND expires_at <= now() ORDER BY id";
+
 /** Re-read under `FOR UPDATE` before the anomaly branch enqueues the id it already carries. */
 const LOCK_RUN_FOR_ANOMALY_STATEMENT =
   "SELECT attempt, current_workflow_id, flow, input, status FROM hf_run " +
@@ -115,8 +124,15 @@ export interface ReconcileAnomaly {
 
 export interface ReconcileFailure {
   runId: string;
-  step: "reattempt" | "conclude" | "resume" | "anomaly";
+  step: "reattempt" | "conclude" | "resume" | "anomaly" | "expire";
   error: string;
+}
+
+export interface ExpiredApproval {
+  approvalId: number;
+  runId: string;
+  /** The attempt `decide()` enqueued to tell the run its approval expired. */
+  workflowId: string;
 }
 
 export interface PeriodDrift {
@@ -132,6 +148,7 @@ export interface ReconcileReport {
   anomalies: ReconcileAnomaly[];
   abandonedLlmCalls: number;
   uncertainActions: number;
+  expired: ExpiredApproval[];
   drift: PeriodDrift[];
   failures: ReconcileFailure[];
 }
@@ -157,9 +174,8 @@ interface RunningRunRow {
  * One run's refusal never ends the pass: the runs are independent, and a pass that stopped at
  * the first one would leave the rest of a backlog stranded until the defect was fixed.
  *
- * Steps (1), (3) and (4) and the drift read; step (2) is deleted, not re-predicated — the
+ * Steps (1), (3), (4) and (5) and the drift read; step (2) is deleted, not re-predicated — the
  * enqueue is in the bump's own transaction, so there is no commit-to-enqueue window to backstop.
- * Step (5), expiring pending approvals through `decide()`, arrives with the approvals slice.
  */
 export async function reconcile(
   pool: Pool,
@@ -174,6 +190,7 @@ export async function reconcile(
     anomalies: [],
     abandonedLlmCalls: 0,
     uncertainActions: 0,
+    expired: [],
     drift: [],
     failures: [],
   };
@@ -215,8 +232,54 @@ export async function reconcile(
     driftUsd: (Number(row.spent_usd) - Number(row.ledger_usd)).toFixed(6),
   }));
 
+  await expireApprovals(pool, dbosClient, options, report);
+
   console.info(RECONCILE_PASS_MARKER, JSON.stringify(summaryOf(report)));
   return report;
+}
+
+/**
+ * Step (5). There is no separate sweep: an expiry is a decision like any other, so it goes
+ * through `decide()` and gets its bump, its resume workflow and its audit row from the same
+ * transaction as a human's. One approval per call — a batch would make one bad row strand the
+ * rest — and the `decisionKey` is the approval's own id, so a pass that died after the commit
+ * replays instead of deciding twice.
+ */
+async function expireApprovals(
+  pool: Pool,
+  dbosClient: DBOSClient,
+  options: ReconcileOptions,
+  report: ReconcileReport,
+): Promise<void> {
+  const expiring = await pool.query<{ id: string; run_id: string }>(EXPIRED_APPROVALS_STATEMENT);
+  for (const row of expiring.rows) {
+    const approvalId = Number(row.id);
+    try {
+      const result = await decide(pool, dbosClient, {
+        ids: [approvalId],
+        decision: "expired",
+        via: "sweep",
+        decisionKey: sweepDecisionKey(approvalId),
+        ...lockTimeoutOf(options),
+      });
+      for (const decided of result.decided) {
+        const expired: ExpiredApproval = {
+          approvalId: decided.approvalId,
+          runId: decided.runId,
+          workflowId: decided.resumeWorkflowId,
+        };
+        console.info(RECONCILE_ACTION_MARKER, JSON.stringify({ action: "expire", ...expired }));
+        report.expired.push(expired);
+      }
+    } catch (error) {
+      recordFailure(report, row.run_id, "expire", error);
+    }
+  }
+}
+
+/** Stable across passes, so a re-decided row is a replay rather than a second decision. */
+export function sweepDecisionKey(approvalId: number): string {
+  return `sweep:${approvalId}`;
 }
 
 async function reconcileRunningRun(
@@ -423,6 +486,7 @@ function summaryOf(report: ReconcileReport): Record<string, number> {
     anomalies: report.anomalies.length,
     abandonedLlmCalls: report.abandonedLlmCalls,
     uncertainActions: report.uncertainActions,
+    expired: report.expired.length,
     failures: report.failures.length,
   };
 }
