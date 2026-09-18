@@ -1,6 +1,6 @@
 import { rm } from "node:fs/promises";
 import { BootstrapRefused } from "@hyperfixation/auth";
-import { createTestDatabase, type TestDatabase } from "@hyperfixation/testing";
+import { asRole, createTestDatabase, type TestDatabase } from "@hyperfixation/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { bootstrapApp } from "./bootstrap.js";
 import { MissingEnv } from "./require-env.js";
@@ -14,7 +14,11 @@ describe("hf bootstrap", () => {
     db = await createTestDatabase();
     dir = await fakeApp({
       appName: db.appName,
-      env: { DATABASE_URL: db.applicationUrl, MIGRATOR_DATABASE_URL: db.migratorUrl },
+      env: {
+        DATABASE_URL: db.applicationUrl,
+        MIGRATOR_DATABASE_URL: db.migratorUrl,
+        HF_BOOTSTRAP_BUDGET_USD: "50",
+      },
     });
   }, 90_000);
 
@@ -30,16 +34,71 @@ describe("hf bootstrap", () => {
     expect(result.app.appName).toBe(db.appName);
   }, 30_000);
 
+  it("seeds the hf_app_state singleton with HF_BOOTSTRAP_BUDGET_USD", async () => {
+    const row = await asRole(db.applicationUrl, (pg) =>
+      pg.query("SELECT paused, budget_usd FROM hf_app_state WHERE id = 1"),
+    );
+
+    expect(row.rows).toMatchObject([{ paused: false, budget_usd: "50.0000" }]);
+  }, 30_000);
+
   it("refuses the second run, because an app gets exactly one bootstrap admin", async () => {
     await expect(bootstrapApp({ dir, email: "someone@example.com" })).rejects.toThrow(
       BootstrapRefused,
     );
   }, 30_000);
 
+  it("leaves hf_app_state alone on a rerun, rather than overwriting the budget", async () => {
+    const empty = await fakeApp({
+      appName: "demo_app",
+      env: { DATABASE_URL: db.applicationUrl, HF_BOOTSTRAP_BUDGET_USD: "999" },
+    });
+    try {
+      await expect(bootstrapApp({ dir: empty, email: "again@example.com" })).rejects.toThrow(
+        BootstrapRefused,
+      );
+
+      const row = await asRole(db.applicationUrl, (pg) =>
+        pg.query("SELECT budget_usd FROM hf_app_state WHERE id = 1"),
+      );
+      expect(row.rows).toMatchObject([{ budget_usd: "50.0000" }]);
+    } finally {
+      await rm(empty, { recursive: true, force: true });
+    }
+  }, 30_000);
+
   it("refuses with no address at all rather than picking one", async () => {
-    const empty = await fakeApp({ appName: "demo_app", env: { DATABASE_URL: db.applicationUrl } });
+    const empty = await fakeApp({
+      appName: "demo_app",
+      env: { DATABASE_URL: db.applicationUrl, HF_BOOTSTRAP_BUDGET_USD: "50" },
+    });
     try {
       await expect(bootstrapApp({ dir: empty })).rejects.toThrow(MissingEnv);
+    } finally {
+      await rm(empty, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses with no budget set at all", async () => {
+    const empty = await fakeApp({ appName: "demo_app", env: { DATABASE_URL: db.applicationUrl } });
+    try {
+      await expect(bootstrapApp({ dir: empty, email: "someone@example.com" })).rejects.toThrow(
+        MissingEnv,
+      );
+    } finally {
+      await rm(empty, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a non-positive budget", async () => {
+    const empty = await fakeApp({
+      appName: "demo_app",
+      env: { DATABASE_URL: db.applicationUrl, HF_BOOTSTRAP_BUDGET_USD: "0" },
+    });
+    try {
+      await expect(bootstrapApp({ dir: empty, email: "someone@example.com" })).rejects.toThrow(
+        /positive number/,
+      );
     } finally {
       await rm(empty, { recursive: true, force: true });
     }

@@ -14,6 +14,8 @@ export interface BootstrapAppResult extends BootstrapResult {
   app: ResolvedApp;
 }
 
+const BOOTSTRAP_BUDGET_ENV = "HF_BOOTSTRAP_BUDGET_USD";
+
 /**
  * `hf bootstrap` — the app's first admin, granted from the box and never from a request.
  *
@@ -21,12 +23,21 @@ export interface BootstrapAppResult extends BootstrapResult {
  * `hf_user` row and the audit line an ordinary `hf_audit` row, and running the one grant that
  * has no admin behind it with owner privileges would be the only reason this command ever
  * needed them. `bootstrapAdmin` does the refusing; this only decides which address to offer it.
+ *
+ * It also seeds the `hf_app_state` singleton (`ON CONFLICT (id) DO NOTHING`), independently of
+ * the admin grant: `AppStateMissing` documents this command as the only thing that seeds it, and
+ * a redeploy that reruns `hf bootstrap` against an already-admin'd app must still be able to
+ * seed it if it hasn't been yet — `budget_usd` has no default, so nothing else ever will.
  */
 export async function bootstrapApp(
   options: BootstrapAppOptions = {},
 ): Promise<BootstrapAppResult> {
   const app = await resolveApp(options.dir);
   const databaseUrl = requireEnv(app, "DATABASE_URL");
+  const budgetUsd = requireEnv(app, BOOTSTRAP_BUDGET_ENV);
+  if (!Number.isFinite(Number(budgetUsd)) || Number(budgetUsd) <= 0) {
+    throw new Error(`${BOOTSTRAP_BUDGET_ENV} must be a positive number, got ${budgetUsd}`);
+  }
 
   const designated = app.env[BOOTSTRAP_EMAIL_ENV];
   const email = options.email ?? designated;
@@ -36,6 +47,10 @@ export async function bootstrapApp(
 
   const pool = new Pool({ connectionString: databaseUrl, max: 1 });
   try {
+    await pool.query(
+      "INSERT INTO hf_app_state (id, budget_usd) VALUES (1, $1) ON CONFLICT (id) DO NOTHING",
+      [budgetUsd],
+    );
     const result = await bootstrapAdmin(pool, {
       email,
       name: options.name,

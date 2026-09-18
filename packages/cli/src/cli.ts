@@ -21,8 +21,9 @@ export const USAGE = `hf — the hyperfixation CLI
   hf migrate                create the application role, then run the app's migrate.ts
       --skip-roles            the cloud path, where the roles already exist
 
-  hf bootstrap              grant the app its one bootstrap admin
+  hf bootstrap              grant the app its one bootstrap admin, and seed hf_app_state
       --email <address>       the address to promote; otherwise HF_BOOTSTRAP_EMAIL
+                               also needs HF_BOOTSTRAP_BUDGET_USD, the app's starting budget
 
   hf status-token           provision /api/status's read and write tokens
       --read                   only the read token; otherwise both
