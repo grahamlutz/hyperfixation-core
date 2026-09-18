@@ -11,7 +11,6 @@ import { resetClient } from "@hyperfixation/workflows";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   budgetPeriod,
-  bumpAndEnqueue,
   currentPeriod,
   derivedReservation,
   ledgerProbe,
@@ -91,9 +90,13 @@ describe("redeploy case 2 — a loop killed before a checkpoint, relaunched unde
       });
       let callsB: number;
       try {
+        // No bump by hand any more: since chunk 11, worker B's own boot `reconcile()` cancels
+        // the attempt A left under a dead version and enqueues attempt 2 before it is ready.
         await workerB.ready();
-        const bumped = await bumpAndEnqueue(probe, flow, runId);
-        expect(bumped.workflowId).toBe(`${runId}:2`);
+        expect(await runRow(probe, runId)).toMatchObject({
+          attempt: 2,
+          current_workflow_id: `${runId}:2`,
+        });
         await waitForStatus(probe, runId, "done", 120_000);
         assertNoFencingFailure(workerB);
         callsB = providerCalls(workerB.output());

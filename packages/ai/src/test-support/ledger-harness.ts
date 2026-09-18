@@ -8,7 +8,6 @@
  * The reservation query here is deliberately a copy of the gate's, not a shared helper: a test
  * that asserted "the reservation is 0" by calling the code under test would assert nothing.
  */
-import { bumpAttempt, controlPlaneTx, type BumpedAttempt } from "@hyperfixation/db";
 import { asRole, type TestDatabase } from "@hyperfixation/testing";
 import { getClient, runsStart, type Flow, type StartedRun } from "@hyperfixation/workflows";
 import { Pool } from "pg";
@@ -31,6 +30,7 @@ export interface LedgerRow {
   possible_double_charge: boolean;
   cost_usd: string | null;
   estimated_cost_usd: string;
+  finished_at: Date | null;
 }
 
 export interface RunRow {
@@ -56,7 +56,7 @@ export async function seedAppState(database: TestDatabase, budgetUsd: string): P
 export async function ledgerRows(probe: LedgerProbe, runId: string): Promise<LedgerRow[]> {
   const { rows } = await probe.pool.query<LedgerRow>(
     "SELECT key, status, workflow_id, period, possible_double_charge, cost_usd, " +
-      "estimated_cost_usd FROM hf_llm_call WHERE run_id = $1 ORDER BY key",
+      "estimated_cost_usd, finished_at FROM hf_llm_call WHERE run_id = $1 ORDER BY key",
     [runId],
   );
   return rows;
@@ -133,29 +133,4 @@ export async function startRun<I>(
     databaseUrl: probe.database.applicationUrl,
   });
   return runsStart(probe.pool, client, flow, input, { runId });
-}
-
-/**
- * `reconcile()`'s bump-and-enqueue by hand — it does not exist until chunk 11. This is the one
- * half of it these cases need: cancel the dead attempt by moving the fencing token on, and
- * enqueue the next attempt in the same transaction.
- */
-export async function bumpAndEnqueue<I>(
-  probe: LedgerProbe,
-  flow: Flow<I, unknown>,
-  runId: string,
-): Promise<BumpedAttempt> {
-  const client = await getClient({
-    appName: probe.database.appName,
-    databaseUrl: probe.database.applicationUrl,
-  });
-  return controlPlaneTx(probe.pool, { operation: "test-reconcile" }, async (pg) => {
-    const bumped = await bumpAttempt(pg, runId);
-    await client.enqueueInTransaction(
-      pg,
-      { queueName: flow.queue, workflowName: flow.name, workflowID: bumped.workflowId },
-      { runId, attempt: bumped.attempt, input: bumped.input },
-    );
-    return bumped;
-  });
 }

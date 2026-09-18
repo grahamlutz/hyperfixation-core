@@ -1,3 +1,4 @@
+import type { DBOSClient } from "@dbos-inc/dbos-sdk";
 import {
   createTestDatabase,
   killAt,
@@ -6,11 +7,10 @@ import {
   testBuildSha,
   type TestDatabase,
 } from "@hyperfixation/testing";
-import { resetClient } from "@hyperfixation/workflows";
+import { getClient, reconcile, resetClient } from "@hyperfixation/workflows";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   budgetPeriod,
-  bumpAndEnqueue,
   currentPeriod,
   derivedReservation,
   ledgerProbe,
@@ -34,11 +34,11 @@ const BUDGET_USD = "1.00";
 /**
  * Redeploy case 9, the adversary's round-2 finding 3: a `started` row orphaned by a run that
  * genuinely failed. The load-bearing claim is that such a row reserves nothing *before* anything
- * transitions it — the reservation's `r.status = 'running'` clause is what makes that true, and
- * the assertion below is deliberately taken while the row is still `started`.
+ * transitions it — the reservation's `r.status = 'running'` clause is what makes that true.
  *
- * `reconcile()`'s hygiene half — moving the row to `abandoned` — lands in chunk 11 and is tested
- * there; it is audit, not budget correctness.
+ * Chunk 11 adds the idempotency half: `reconcile()`'s hygiene step moves the row to `abandoned`
+ * exactly once, whatever the interval, because the transition's own predicate is the status it
+ * leaves. That is audit and hygiene; the budget was already whole at the bump.
  */
 describe("redeploy case 9 — an orphaned reservation on a failed run", () => {
   let database: TestDatabase;
@@ -57,7 +57,7 @@ describe("redeploy case 9 — an orphaned reservation on a failed run", () => {
   });
 
   it(
-    "leaves the row started, reserves nothing for it, and still refuses the next run",
+    "reserves nothing for the row, abandons it once, and still refuses the next run",
     async () => {
       const flow = llmFlow();
       const orphanedRun = `case9-${testBuildSha()}`;
@@ -87,19 +87,36 @@ describe("redeploy case 9 — an orphaned reservation on a failed run", () => {
         appName: database.appName,
         databaseUrl: database.applicationUrl,
       });
+      let client: DBOSClient;
       try {
+        // Worker B's own boot `reconcile()` cancels the attempt A left behind and enqueues
+        // attempt 2, which is the one that fails.
         await workerB.ready();
-        await bumpAndEnqueue(probe, flow, orphanedRun);
         await waitForStatus(probe, orphanedRun, "failed", 90_000);
+        client = await getClient({
+          appName: database.appName,
+          databaseUrl: database.applicationUrl,
+        });
         await workerB.shutdown();
       } finally {
         await workerB.kill().catch(() => undefined);
       }
 
       const period = await currentPeriod(probe);
-      // Still `started`, and already reserving nothing: the row's own status did not have to
-      // change for the budget to be whole again — its run leaving `running` was enough.
-      expect((await ledgerRows(probe, orphanedRun))[0]).toMatchObject({ status: "started" });
+      // The reservation was whole again at the bump, before any pass ran: the row's own status
+      // never had to change for that. Abandoning it is hygiene and audit on top, and worker B's
+      // boot pass is what did it — the row stopped being its run's current attempt at the bump.
+      expect(await derivedReservation(probe, period)).toBe("0");
+      const abandoned = (await ledgerRows(probe, orphanedRun))[0];
+      expect(abandoned).toMatchObject({ status: "abandoned" });
+
+      // Three further passes over the same row. `WHERE status = 'started'` is the idempotency,
+      // so none of them transitions anything and the one `finished_at` does not move.
+      for (let pass = 0; pass < 3; pass += 1) {
+        const report = await reconcile(probe.pool, client, { applicationVersion: workerB.version });
+        expect(report.abandonedLlmCalls).toBe(0);
+      }
+      expect((await ledgerRows(probe, orphanedRun))[0]).toEqual(abandoned);
       expect(await derivedReservation(probe, period)).toBe("0");
       expect(Number((await budgetPeriod(probe, period))?.spent_usd)).toBe(0);
 
