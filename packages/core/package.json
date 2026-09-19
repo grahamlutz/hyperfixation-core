@@ -8,6 +8,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./workspace": {
+      "types": "./dist/workspace.d.ts",
+      "default": "./dist/workspace.js"
     }
   },
   "files": [
@@ -17,8 +21,8 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src",
-    "api-extractor": "api-extractor run",
-    "api-extractor:update": "api-extractor run --local",
+    "api-extractor": "api-extractor run && api-extractor run -c api-extractor.workspace.json",
+    "api-extractor:update": "api-extractor run --local && api-extractor run --local -c api-extractor.workspace.json",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {

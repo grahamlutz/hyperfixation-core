@@ -181,6 +181,7 @@ export interface App {
     statusHandler(request: Request): Promise<Response>;
     // (undocumented)
     readonly tasks: AppTasks;
+    readonly workspace: AppWorkspace;
 }
 
 // @public
@@ -222,7 +223,7 @@ export interface AppOutcomes {
 export interface AppRecords {
     // (undocumented)
     archive(options: ArchiveOptions): Promise<ArchiveResult>;
-    readonly types: Registry<RecordTable>;
+    readonly types: Registry<RecordDefinition>;
 }
 
 // @public (undocumented)
@@ -278,6 +279,13 @@ export interface AppTasks {
 }
 
 // @public (undocumented)
+export interface AppWorkspace {
+    // (undocumented)
+    nav(): WorkspaceNavItem[];
+    route(path?: string | readonly string[]): WorkspaceRoute | undefined;
+}
+
+// @public (undocumented)
 export const ARCHIVE_OPERATION = "records.archive";
 
 // @public
@@ -314,6 +322,9 @@ export interface ArchiveResult {
 
 // @public (undocumented)
 export function assertActivityKind(kind: string): void;
+
+// @public
+export function assertRecordStages(definition: RecordDefinition): void;
 
 // @public
 export function bearerToken(request: Request): string | null;
@@ -353,6 +364,9 @@ export function createStatusHandler(options: StatusHandlerOptions): (request: Re
 // @public
 export function createTask(ctx: StepContext, records: Registry<RecordTable>, options: TaskCreateOptions): Promise<TaskCreated>;
 
+// @public
+export const DEFAULT_DISPLAY_COLUMN = "normalized_name";
+
 // @public (undocumented)
 export const DEFAULT_RESOLVE_LIMIT = 500;
 
@@ -375,8 +389,7 @@ export interface DefineAppOptions {
     name: string;
     // (undocumented)
     pages?: readonly PageDefinition[];
-    // (undocumented)
-    records?: readonly RecordTable[];
+    records?: readonly RecordDefinition[];
     // (undocumented)
     resolvers?: readonly ResolverDefinition[];
     // (undocumented)
@@ -403,6 +416,18 @@ export function defineSource<P>(definition: SourceDefinition<P>): SourceDefiniti
 
 // @public (undocumented)
 export function defineSpec<C>(definition: SpecDefinition<C>): SpecDefinition<C>;
+
+// @public (undocumented)
+export function displayColumnOf(definition: RecordDefinition): string;
+
+// @public
+export interface DraftField {
+    // (undocumented)
+    readonly label: string;
+    readonly path: string;
+    // (undocumented)
+    readonly value: string;
+}
 
 // @public
 export class DuplicateRegistration extends Error {
@@ -630,6 +655,13 @@ export interface QueueStatus {
 export function recordActivity(ctx: StepContext, options: ActivityRecordOptions): Promise<ActivityRecorded>;
 
 // @public
+export interface RecordDefinition extends RecordTable {
+    readonly displayColumn?: string;
+    readonly stages?: readonly StageDefinition[];
+    readonly title?: string;
+}
+
+// @public
 export function recordOutcome(pool: Pool, records: Registry<RecordTable>, options: OutcomeRecordOptions): Promise<{
     id: number;
 }>;
@@ -805,6 +837,14 @@ export interface SpecDefinition<C = unknown> {
     // (undocumented)
     readonly name: string;
     readonly version: number;
+}
+
+// @public
+export interface StageDefinition {
+    // (undocumented)
+    readonly name: string;
+    // (undocumented)
+    readonly title: string;
 }
 
 // @public
@@ -1007,6 +1047,42 @@ export class UnknownRegistration extends Error {
     // (undocumented)
     readonly known: readonly string[];
 }
+
+// @public (undocumented)
+export interface WorkspaceNavItem {
+    // (undocumented)
+    readonly path: string;
+    // (undocumented)
+    readonly title: string;
+}
+
+// @public
+export interface WorkspaceRegistries {
+    // (undocumented)
+    readonly pages: Registry<PageDefinition>;
+    // (undocumented)
+    readonly records: Registry<RecordDefinition>;
+}
+
+// @public (undocumented)
+export type WorkspaceRoute = {
+    kind: "home";
+} | {
+    kind: "inbox";
+} | {
+    kind: "approval";
+    id: number;
+} | {
+    kind: "board";
+    record: RecordDefinition;
+} | {
+    kind: "record";
+    record: RecordDefinition;
+    id: string;
+} | {
+    kind: "page";
+    page: PageDefinition;
+};
 
 // @public
 export const WRITE_SCORE_STATEMENT: string;

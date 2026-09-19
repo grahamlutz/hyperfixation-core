@@ -1,5 +1,5 @@
 import type { DBOSClient } from "@dbos-inc/dbos-sdk";
-import type { RecordTable, StepDatabase } from "@hyperfixation/db";
+import type { StepDatabase } from "@hyperfixation/db";
 import {
   reconcile,
   runsStart,
@@ -40,7 +40,13 @@ import {
 } from "./outcomes.js";
 import type { PageDefinition } from "./pages.js";
 import { pauseApp, resumeApp, type PauseOptions, type PauseResult, type ResumeResult } from "./pause.js";
-import { archiveRecord, type ArchiveOptions, type ArchiveResult } from "./records.js";
+import {
+  archiveRecord,
+  assertRecordStages,
+  type ArchiveOptions,
+  type ArchiveResult,
+  type RecordDefinition,
+} from "./records.js";
 import { createRegistry, UnknownRegistration, type Registry } from "./registry.js";
 import { resolveBatch, type ResolveBatchResult } from "./resolution.js";
 import type { ResolverDefinition } from "./resolvers.js";
@@ -70,6 +76,12 @@ import {
   type TaskListOptions,
   type TaskRow,
 } from "./tasks.js";
+import {
+  workspaceNav,
+  workspaceRoute,
+  type AppWorkspace,
+  type WorkspaceRegistries,
+} from "./workspace.js";
 
 /**
  * A flow of any shape. `Flow<never, unknown>` is the bottom of the family: its input is
@@ -128,14 +140,15 @@ export interface DefineAppOptions {
   specs?: readonly SpecDefinition[];
   approvalTypes?: readonly ApprovalTypeDefinition[];
   channels?: readonly ActionChannel[];
-  records?: readonly RecordTable[];
+  /** A bare `RecordTable` is still one of these: everything the workspace adds is optional. */
+  records?: readonly RecordDefinition[];
   pages?: readonly PageDefinition[];
   schedules?: readonly AnySchedule[];
 }
 
 export interface AppRecords {
   /** Registered record types, keyed by the `record_type` machinery rows carry. */
-  readonly types: Registry<RecordTable>;
+  readonly types: Registry<RecordDefinition>;
   archive(options: ArchiveOptions): Promise<ArchiveResult>;
 }
 
@@ -214,6 +227,8 @@ export interface App {
   /** Keyed by `path`, not by a name: the path is what a workspace link points at. */
   readonly pages: Registry<PageDefinition>;
   readonly schedules: AppSchedules;
+  /** Paths and nav items for the workspace the template renders. */
+  readonly workspace: AppWorkspace;
 
   /** Hands the app the handles every control-plane operation below runs on. */
   attach(controlPlane: ControlPlane): void;
@@ -253,7 +268,7 @@ export function defineApp(options: DefineAppOptions): App {
   const specs = createRegistry<SpecDefinition>("spec");
   const approvalTypes = createRegistry<ApprovalTypeDefinition>("approval type");
   const channels = createRegistry<ActionChannel>("channel");
-  const recordTypes = createRegistry<RecordTable>("record type", (entry) => entry.recordType);
+  const recordTypes = createRegistry<RecordDefinition>("record type", (entry) => entry.recordType);
   const pages = createRegistry<PageDefinition>("page", (entry) => entry.path);
   // `Object.assign` rather than a spread: the registry's `size` is a getter, and a spread would
   // copy today's count instead of it.
@@ -276,7 +291,10 @@ export function defineApp(options: DefineAppOptions): App {
   for (const scorer of options.scorers ?? []) scorers.register(scorer);
   for (const type of options.approvalTypes ?? []) approvalTypes.register(type);
   for (const channel of options.channels ?? []) channels.register(channel);
-  for (const record of options.records ?? []) recordTypes.register(record);
+  for (const record of options.records ?? []) {
+    assertRecordStages(record);
+    recordTypes.register(record);
+  }
   for (const page of options.pages ?? []) pages.register(page);
   for (const schedule of options.schedules ?? []) schedules.register(schedule);
 
@@ -304,6 +322,8 @@ export function defineApp(options: DefineAppOptions): App {
     return applicationVersion;
   };
 
+  const workspaceRegistries: WorkspaceRegistries = { records: recordTypes, pages };
+
   const app: App = {
     name: options.name,
     applicationVersion,
@@ -316,6 +336,10 @@ export function defineApp(options: DefineAppOptions): App {
     channels,
     pages,
     schedules,
+    workspace: {
+      route: (path) => workspaceRoute(workspaceRegistries, path),
+      nav: () => workspaceNav(workspaceRegistries),
+    },
     records: {
       types: recordTypes,
       async archive(archiveOptions) {
