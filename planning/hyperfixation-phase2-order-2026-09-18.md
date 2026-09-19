@@ -237,7 +237,7 @@ Lives in `ai` — it drives `llm.run` — though the plan's verification line li
 **Done:** `pnpm --filter @hyperfixation/ai test kill-switch`. Budget the runtime: 100 passes each scanning
 `hf_run` is seconds, not minutes, but say so in the file's timeout.
 
-### L5a — `budget.test.ts` (b), (c), (d) — ⬜ Not started
+### L5a — `budget.test.ts` (b), (c), (d) — ✅ Done
 
 (b) *re-entry through the gate*: an `abandoned` `$1` row on a `waiting` run, period at `budget − $0.50`,
 `decide()` → the replaying attempt's `llm.run` throws `BudgetExceeded`, row stays `abandoned`. (c) *lock-order
@@ -247,6 +247,38 @@ runs, zero `40P01`, zero `55P03`. (d) *the finding-8 inversion*: a completion an
 
 **Done:** `pnpm --filter @hyperfixation/ai test budget` green for (b)–(d), with (a) `it.todo` naming open
 question 1.
+
+> **Built, and where it differs from the wording above:** 4 tests plus (a)'s `it.todo` in ~3.3 s over three
+> runs, on **one** test database for the whole file — every case sets the `hf_budget_period` row it needs, so
+> three databases bought nothing. **No env gate was needed:** (c)'s 200 iterations run in ~2.7 s, so the
+> `HF_STRESS` switch the Risks section allows was not added and CI needs no new variable. Everything is
+> in-process (`createStepPool` + `decide()`/`reconcile()` from `@hyperfixation/workflows`, no worker), the
+> way `approvals.test.ts` drives `decide()`.
+>
+> (c) drives 1,200 operations — 4 gates+completions, one `reconcile()` pass and one two-run `decide()` batch
+> per iteration — over 8 runs, and the `decide()` batch deliberately targets **two of the same runs being
+> gated**, so its `hf_run FOR UPDATE` really queues behind a gate's `FOR SHARE`. That produces ~300
+> `StaleAttempt` refusals per run, which the case asserts are the *only* refusals, on top of zero `40P01` and
+> zero `55P03`; with the run sets disjoint every operation succeeded and the case proved much less. It also
+> asserts the period's `spent_usd` still equals `SUM(cost_usd)` of its `ok` rows at the end — the payoff of
+> the order — which is why its `beforeAll` first repairs the invariant (b) breaks by writing `spent_usd` by
+> hand.
+>
+> (d) is **two** cases, one per transaction, and each was verified by inverting production's order and
+> watching it fail with `40P01` before the order was put back: moving the completion's budget `UPDATE` after
+> its ledger `UPDATE` fails the completion case only, and taking the ledger row before the budget row in the
+> gate fails the gate case only. The lock-step lever is a `pg.Client` of the test's own holding the period row
+> while the production transaction blocks on it, and the case then takes the *ledger* row from that same
+> connection — the second half of finding 8's cycle, granted immediately under this order. For the completion
+> half the park sits in `LedgerContext.tx`, counting transactions: the completion is the second one, and
+> nothing else reaches between the gate and it. Blockage is detected through `pg_stat_activity`
+> (`wait_event_type = 'Lock'`, scoped to `current_database()`), not `pg_locks` — a row-lock waiter waits on
+> the holder's `transactionid` lock, whose `pg_locks.database` is null and so cannot be scoped to one
+> database on a shared instance.
+>
+> **Worth knowing for the plan:** (c) passed under *both* inversions. It is a genuine lock-order stress, but
+> it is (d), not (c), that pins finding 8 — round 3's note that "`budget.test.ts` runs a 200-iteration stress
+> … and asserts zero `40P01`" should not be read as the regression test for the inverted order.
 
 ### L5b — `withClock` and `budget.test.ts` (a) — ⬜ Not started, **shape decided 2026-09-18 via `/brainstorm`**
 
