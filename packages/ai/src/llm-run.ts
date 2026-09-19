@@ -1,5 +1,7 @@
+import { OpenTelemetry } from "@ai-sdk/otel";
 import type { JSONSchema7 } from "@ai-sdk/provider";
 import type { StepDatabase } from "@hyperfixation/db";
+import { trace } from "@opentelemetry/api";
 import { generateText, jsonSchema, Output } from "ai";
 import { sql } from "drizzle-orm";
 import { AppPaused, BudgetExceeded, LedgerKeyCollision } from "./errors.js";
@@ -53,6 +55,8 @@ interface LedgeredCall {
   promptName: string;
   promptHash: string;
   estimatedCostUsd: number;
+  /** The enclosing step span's trace, or undefined when nothing is recording. */
+  traceId: string | undefined;
 }
 
 interface ProviderAnswer {
@@ -121,6 +125,9 @@ async function runCall<O>(
       promptBytes: Buffer.byteLength(prompt.text),
       inputBytes: Buffer.byteLength(userText),
     }),
+    // Read before the gate so the row carries it even on the branches that never call the
+    // provider; the SDK's own spans are children of the same trace.
+    traceId: trace.getActiveSpan()?.spanContext().traceId,
   };
 
   const gate = await openGate(ctx, call);
@@ -149,10 +156,18 @@ async function runCall<O>(
 }
 
 /**
+ * The integration that turns the SDK's telemetry events into OTel spans, which is what Langfuse
+ * exports. Per-call rather than `registerTelemetry()`: a test builds a `createLlm` per call and a
+ * global registration would accumulate duplicates. The tracer it holds is the global proxy, so
+ * one instance is correct whether or not a provider is ever registered.
+ */
+const telemetry = new OpenTelemetry({ runtimeContext: true });
+
+/**
  * The SDK call. `maxRetries: 0` because the SDK's default of two would re-bill the provider
  * behind the ledger's back; a retry is the run's business, not the call's. The four join fields
- * travel as runtime context, which is how `ai@7`'s telemetry integrations — Langfuse in L2 —
- * receive them.
+ * travel as runtime context, which is how `ai@7`'s telemetry integrations receive them; the
+ * integration re-emits them as `ai.settings.context.*` span attributes.
  */
 async function callProvider(
   model: Parameters<typeof generateText>[0]["model"],
@@ -175,6 +190,7 @@ async function callProvider(
     },
     telemetry: {
       functionId: "llm.run",
+      integrations: telemetry,
       includeRuntimeContext: {
         runId: true,
         key: true,
@@ -239,10 +255,11 @@ async function openGate(ctx: LedgerContext, call: LedgeredCall): Promise<GateOut
     const insert = await db.execute(sql`
       INSERT INTO hf_llm_call
         (run_id, key, workflow_id, period, input_hash, model, prompt_name, prompt_hash, status,
-         input, estimated_cost_usd)
+         input, estimated_cost_usd, trace_id)
       VALUES (${ctx.runId}, ${call.key}, ${ctx.workflowId}, ${period}, ${call.inputHash},
               ${call.model}, ${call.promptName}, ${call.promptHash}, 'started',
-              ${JSON.stringify(call.input) ?? null}::jsonb, ${call.estimatedCostUsd}::numeric)
+              ${JSON.stringify(call.input) ?? null}::jsonb, ${call.estimatedCostUsd}::numeric,
+              ${call.traceId ?? null})
       ON CONFLICT (run_id, key) DO NOTHING
     `);
     const read = await db.execute<LedgerRow>(sql`
@@ -293,7 +310,7 @@ async function openGate(ctx: LedgerContext, call: LedgeredCall): Promise<GateOut
         UPDATE hf_llm_call
         SET possible_double_charge = true, status = 'started', workflow_id = ${ctx.workflowId},
             period = ${period}, finished_at = NULL, prompt_name = ${call.promptName},
-            prompt_hash = ${call.promptHash}
+            prompt_hash = ${call.promptHash}, trace_id = ${call.traceId ?? null}
         WHERE run_id = ${ctx.runId} AND key = ${call.key}
       `);
     }
