@@ -63,6 +63,12 @@ export const DEFAULT_ATTEMPT_TIMEOUT_MS = 60000;
 // @public (undocumented)
 export const DEFAULT_READY_TIMEOUT_MS = 120000;
 
+// @public (undocumented)
+export const DEFAULT_WAIT_FOR_RUN_INTERVAL_MS = 100;
+
+// @public (undocumented)
+export const DEFAULT_WAIT_FOR_RUN_TIMEOUT_MS = 60000;
+
 // @public
 export const DOUBLE_CHARGE_COUNT_KEY = "hf_llm_call.possible_double_charge";
 
@@ -189,6 +195,9 @@ export class RestartChangedCounts extends Error {
     readonly runId: string;
 }
 
+// @public
+export type RunCondition = string | ((run: RunState) => boolean);
+
 // @public (undocumented)
 export function runFlowSync(harness: FlowSyncHarness, flow: FlowRef, input: unknown, options?: RunFlowSyncOptions): Promise<FlowSyncResult>;
 
@@ -198,6 +207,30 @@ export interface RunFlowSyncOptions {
         skip: string;
     };
     timeoutMs?: number;
+}
+
+// @public (undocumented)
+export class RunNeverMatched extends Error {
+    constructor(runId: string, condition: RunCondition, timeoutMs: number, lastSeen?: RunState);
+    readonly lastSeen: RunState | undefined;
+    // (undocumented)
+    readonly runId: string;
+}
+
+// @public
+export interface RunState {
+    // (undocumented)
+    attempt: number;
+    // (undocumented)
+    currentWorkflowId: string;
+    // (undocumented)
+    error: string | null;
+    // (undocumented)
+    finishedAt: Date | null;
+    // (undocumented)
+    runId: string;
+    // (undocumented)
+    status: string;
 }
 
 // @public
@@ -281,6 +314,17 @@ export interface TestDatabase {
     readonlyUrl: string;
     // (undocumented)
     roles: ProvisionedRoles;
+}
+
+// @public
+export function waitForRun(pool: Pool, runId: string, condition: RunCondition, options?: WaitForRunOptions): Promise<RunState>;
+
+// @public (undocumented)
+export interface WaitForRunOptions {
+    // (undocumented)
+    intervalMs?: number;
+    // (undocumented)
+    timeoutMs?: number;
 }
 
 // @public (undocumented)

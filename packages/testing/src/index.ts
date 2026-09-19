@@ -30,6 +30,15 @@ export {
   type SettledRunStatus,
   type StartedRunRef,
 } from "./run-flow-sync.js";
+export {
+  waitForRun,
+  RunNeverMatched,
+  DEFAULT_WAIT_FOR_RUN_INTERVAL_MS,
+  DEFAULT_WAIT_FOR_RUN_TIMEOUT_MS,
+  type RunCondition,
+  type RunState,
+  type WaitForRunOptions,
+} from "./wait-for-run.js";
 export { killAt, killWhenParked } from "./kill-at.js";
 export {
   parkedMarker,

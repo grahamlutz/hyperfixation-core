@@ -97,21 +97,27 @@ export const hfScore = pgTable(
     id: id(),
     recordType: text("record_type").notNull(),
     recordId: text("record_id").notNull(),
+    // Which spec decided this, alongside the version it decided under: two specs score one
+    // record, and without the name their rows are indistinguishable. Nullable for the rows
+    // written before it existed — every write path fills it.
+    specName: text("spec_name"),
     specVersion: integer("spec_version").notNull(),
     score: doublePrecision("score").notNull(),
     explanation: text("explanation"),
     // The ledger row of the call that produced an LLM-assigned score; a rule-based score has none.
     llmCallId: bigint("llm_call_id", { mode: "number" }),
     // What makes a step-side score write replay-safe: attempt 2 runs the step again under a new
-    // workflow id, and `(run_id, key)` is what it conflicts on. Null for a web-side write.
+    // workflow id, and `(run_id, key, spec_name)` is what it conflicts on. Null for a web-side
+    // write. The spec name is in the key because one step may score a record under two specs,
+    // which share the step's key and must not collapse into one row.
     runId: text("run_id"),
     key: text("key"),
     createdAt: at("created_at").notNull().defaultNow(),
   },
   (t) => [
     index("hf_score_record_idx").on(t.recordType, t.recordId),
-    uniqueIndex("hf_score_run_key_uq")
-      .on(t.runId, t.key)
+    uniqueIndex("hf_score_run_key_spec_uq")
+      .on(t.runId, t.key, t.specName)
       .where(sql`${t.key} IS NOT NULL`),
   ],
 );

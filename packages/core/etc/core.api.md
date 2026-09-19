@@ -485,7 +485,7 @@ export class DuplicateRegistration extends Error {
 export const EXISTING_ACTIVITY_STATEMENT = "SELECT id FROM hf_activity WHERE run_id = $1 AND key = $2";
 
 // @public (undocumented)
-export const EXISTING_SCORE_STATEMENT = "SELECT id FROM hf_score WHERE run_id = $1 AND key = $2";
+export const EXISTING_SCORE_STATEMENT = "SELECT id FROM hf_score WHERE run_id = $1 AND key = $2 AND spec_name = $3";
 
 // @public
 export function fireSchedule(pool: Pool, schedule: AnySchedule, start: (flow: Flow<unknown, unknown>, input: unknown) => Promise<StartedRun>): Promise<ScheduleFired>;
@@ -636,6 +636,37 @@ export interface LabelRow {
     userId: string | null;
     // (undocumented)
     value: LabelValue;
+}
+
+// @public
+export const LATEST_SCORES_STATEMENT: string;
+
+// @public
+export interface LatestScoreRow {
+    // (undocumented)
+    createdAt: Date;
+    // (undocumented)
+    explanation: string | null;
+    // (undocumented)
+    id: number;
+    // (undocumented)
+    llmCallId: number | null;
+    // (undocumented)
+    score: number;
+    specName: string | null;
+    // (undocumented)
+    specVersion: number;
+}
+
+// @public
+export function latestScores(queryable: Pool | ClientBase, options: LatestScoresOptions): Promise<LatestScoreRow[]>;
+
+// @public (undocumented)
+export interface LatestScoresOptions {
+    // (undocumented)
+    recordId: string | number;
+    // (undocumented)
+    recordType: string;
 }
 
 // @public
