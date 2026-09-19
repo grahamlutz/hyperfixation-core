@@ -21,6 +21,7 @@ export const ABANDON_LLM_CALLS_STATEMENT: string;
 
 // @public (undocumented)
 export interface ActionChannel {
+    readonly dedupes: boolean;
     // (undocumented)
     readonly name: string;
     // (undocumented)
@@ -63,6 +64,19 @@ export interface ActionsPerformOptions {
     recordType?: string;
     // (undocumented)
     request?: unknown;
+}
+
+// @public
+export class ActionUncertain extends Error {
+    constructor(runId: string, key: string, actionLogId: number, taskId: number | null);
+    // (undocumented)
+    readonly actionLogId: number;
+    // (undocumented)
+    readonly key: string;
+    // (undocumented)
+    readonly runId: string;
+    // (undocumented)
+    readonly taskId: number | null;
 }
 
 // @public
