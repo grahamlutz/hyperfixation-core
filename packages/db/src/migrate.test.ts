@@ -240,7 +240,10 @@ describe("0007_score_spec_name", () => {
   let migrator: Client;
   let dir: string;
 
-  /** The committed migrations up to, but not including, the one under test. */
+  /**
+   * A throwaway copy of the committed migrations through `tag`, so the one after it can be
+   * applied to a database that already carries rows.
+   */
   async function migrationsThrough(tag: string): Promise<string> {
     const target = await mkdtemp(path.join(tmpdir(), "hf-core-migrations-"));
     await mkdir(path.join(target, "meta"), { recursive: true });
