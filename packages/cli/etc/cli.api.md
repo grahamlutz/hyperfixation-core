@@ -6,7 +6,17 @@
 
 import { BootstrapResult } from '@hyperfixation/auth';
 import { RecordTable } from '@hyperfixation/db';
+import { RoleNames } from '@hyperfixation/db/migrator';
 import { StdioOptions } from 'node:child_process';
+
+// @public (undocumented)
+export interface AdminCredentials {
+    database?: string;
+    // (undocumented)
+    password?: string;
+    // (undocumented)
+    user: string;
+}
 
 // @public
 export const APP_ID: RegExp;
@@ -87,13 +97,48 @@ export class CommandFailed extends Error {
 export const COMMANDS: readonly ["new", "migrate", "bootstrap", "status-token", "check", "gen", "dev", "up"];
 
 // @public
+export function createLocalRunner(options?: LocalRunnerOptions): LocalRunner;
+
+// @public
+export function createSshRunner(options: SshRunnerOptions): Runner;
+
+// @public
 export function credentialsOf(connectionString: string): {
     user: string;
     password: string;
 };
 
 // @public
+export interface Database {
+    adminUrl(databaseName?: string): string | undefined;
+    // (undocumented)
+    close(): Promise<void>;
+    // (undocumented)
+    readonly kind: DatabaseTransport;
+    // (undocumented)
+    query(sql: string, options?: QueryOptions): Promise<QueryResult>;
+}
+
+// @public (undocumented)
+export type DatabaseTransport = "tunnel" | "docker-exec";
+
+// @public (undocumented)
+export class DatabaseTransportError extends Error {
+    constructor(transport: DatabaseTransport, message: string, options?: {
+        cause?: unknown;
+    });
+    // (undocumented)
+    readonly transport: DatabaseTransport;
+}
+
+// @public
 export function declaredNames(contents: string): string[];
+
+// @public (undocumented)
+export const DEFAULT_POSTGRES_PORT = 5432;
+
+// @public (undocumented)
+export const DEFAULT_TUNNEL_READY_TIMEOUT_MS = 10000;
 
 // @public
 export function deriveNames(given: string): AppNames;
@@ -127,6 +172,20 @@ export interface DevResult {
 
 // @public
 export const EXCLUDED_ENTRIES: readonly string[];
+
+// @public (undocumented)
+export interface ExecOptions {
+    input?: string;
+}
+
+// @public (undocumented)
+export interface ExecResult {
+    code: number | null;
+    // (undocumented)
+    stderr: string;
+    // (undocumented)
+    stdout: string;
+}
 
 // @public
 export function findTemplateSource(cwd?: string): Promise<string | undefined>;
@@ -179,6 +238,17 @@ export interface LocalRoleResult {
     applicationRole: string;
     // (undocumented)
     created: boolean;
+}
+
+// @public (undocumented)
+export interface LocalRunner extends Runner {
+    readonly commands: readonly (readonly string[])[];
+    readonly tunnels: readonly number[];
+}
+
+// @public (undocumented)
+export interface LocalRunnerOptions {
+    tunnelPort?: number;
 }
 
 // @public
@@ -244,6 +314,20 @@ export class NotAnApp extends Error {
 }
 
 // @public
+export function openDatabase(runner: Runner, options: OpenDatabaseOptions): Promise<Database>;
+
+// @public (undocumented)
+export interface OpenDatabaseOptions {
+    // (undocumented)
+    admin: AdminCredentials;
+    container?: string;
+    remotePort?: number;
+}
+
+// @public
+export function openDatabaseUrl(adminUrl: string): Database;
+
+// @public
 export function parseEnvFile(contents: string): Record<string, string>;
 
 // @public
@@ -253,10 +337,57 @@ export function placeholders(names: AppNames): Record<string, string>;
 export function probeApp(app: ResolvedApp): Promise<AppRegistry | undefined>;
 
 // @public
+export function provisionDatabase(target: Database | string, options: ProvisionDatabaseOptions): Promise<ProvisionDatabaseResult>;
+
+// @public (undocumented)
+export class ProvisionDatabaseError extends Error {
+    constructor(message: string);
+}
+
+// @public (undocumented)
+export interface ProvisionDatabaseOptions {
+    app: string;
+    readonlyRole?: boolean;
+    // Warning: (ae-forgotten-export) The symbol "AppStateStore" needs to be exported by the entry point index.d.ts
+    //
+    // (undocumented)
+    state: AppStateStore;
+}
+
+// @public (undocumented)
+export interface ProvisionDatabaseResult {
+    alreadyDone: boolean;
+    // (undocumented)
+    createdDatabase: boolean;
+    // (undocumented)
+    databaseName: string;
+    // (undocumented)
+    roles: RoleNames;
+    rotated: boolean;
+}
+
+// @public
 export function provisionLocalRoles(migratorConnectionString: string, options: LocalRoleOptions): Promise<LocalRoleResult>;
 
 // @public (undocumented)
+export interface QueryOptions {
+    database?: string;
+}
+
+// @public
+export interface QueryResult {
+    // (undocumented)
+    rows: string[][];
+}
+
+// @public (undocumented)
 export function readEnvFile(file: string): Promise<Record<string, string>>;
+
+// @public
+export function redactPasswords(text: string): string;
+
+// @public
+export const REQUIRED_EXTENSIONS: readonly ["vector", "pg_trgm"];
 
 // @public
 export function requireEnv(app: ResolvedApp, name: string): string;
@@ -283,6 +414,20 @@ export interface ResolvedApp {
 // @public
 export function run(command: string, args: readonly string[], options: RunOptions): Promise<void>;
 
+// @public
+export interface Runner {
+    // (undocumented)
+    exec(command: readonly string[], options?: ExecOptions): Promise<ExecResult>;
+    tunnel(remotePort: number): Promise<Tunnel>;
+}
+
+// @public (undocumented)
+export class RunnerError extends Error {
+    constructor(message: string, options?: {
+        cause?: unknown;
+    });
+}
+
 // @public (undocumented)
 export interface RunOptions {
     // (undocumented)
@@ -292,6 +437,22 @@ export interface RunOptions {
     // (undocumented)
     stdio?: StdioOptions;
 }
+
+// @public
+export function shellQuote(command: readonly string[]): string;
+
+// @public
+export function sshExecArgv(host: string, command: readonly string[]): string[];
+
+// @public (undocumented)
+export interface SshRunnerOptions {
+    host: string;
+    sshPath?: string;
+    tunnelReadyTimeoutMs?: number;
+}
+
+// @public (undocumented)
+export function sshTunnelArgv(host: string, localPort: number, remotePort: number): string[];
 
 // @public
 export class StatusTokenAlreadySet extends Error {
@@ -334,6 +495,13 @@ export const TEMPLATE_MARKER = ".hyperfixation-template";
 // @public (undocumented)
 export class TemplateError extends Error {
     constructor(message: string);
+}
+
+// @public (undocumented)
+export interface Tunnel {
+    // (undocumented)
+    close(): Promise<void>;
+    localPort: number;
 }
 
 // @public (undocumented)
