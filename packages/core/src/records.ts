@@ -7,7 +7,9 @@ import {
 } from "@hyperfixation/db";
 import { decide } from "@hyperfixation/workflows";
 import type { Pool } from "pg";
+import { insertActivity } from "./activity.js";
 import type { Registry } from "./registry.js";
+import { cancelOpenTasksForRecord } from "./tasks.js";
 
 export const ARCHIVE_OPERATION = "records.archive";
 
@@ -40,6 +42,8 @@ export interface ArchiveResult {
   archived: boolean;
   /** The approvals this archive cancelled, each through `decide()` and its own bump. */
   cancelledApprovals: number[];
+  /** The record's open tasks, cancelled in the same transaction as the record itself. */
+  cancelledTasks: number[];
 }
 
 /** Stable per approval, so an archive retried after a crash replays instead of deciding twice. */
@@ -93,32 +97,49 @@ export async function archiveRecord(
     cancelledApprovals.push(...result.decided.map((decided) => decided.approvalId));
   }
 
-  const archived = await controlPlaneTx(pool, { operation: ARCHIVE_OPERATION }, async (work) => {
-    // `archived_at` is the record mixin's column; a table registered as a record type without
-    // it fails here by name rather than by being quietly skipped.
-    const updated = await work.query(
-      `UPDATE ${quoteIdent(table)} SET archived_at = now() WHERE id = $1 AND archived_at IS NULL`,
-      [recordId],
-    );
-    await work.query(AUDIT_STATEMENT, [
-      options.userId ?? null,
-      options.recordType,
-      recordId,
-      JSON.stringify({
+  // The tasks go with the record and nothing else does: `hf_activity`, `hf_label` and
+  // `hf_outcome` are the record's history, and archiving is not a deletion.
+  const { archived, cancelledTasks } = await controlPlaneTx(
+    pool,
+    { operation: ARCHIVE_OPERATION },
+    async (work) => {
+      // `archived_at` is the record mixin's column; a table registered as a record type without
+      // it fails here by name rather than by being quietly skipped.
+      const updated = await work.query(
+        `UPDATE ${quoteIdent(table)} SET archived_at = now() WHERE id = $1 AND archived_at IS NULL`,
+        [recordId],
+      );
+      const cancelled = await cancelOpenTasksForRecord(work, options.recordType, recordId);
+      const meta = {
         table,
         reason: options.reason ?? null,
         cancelledApprovals,
+        cancelledTasks: cancelled,
         alreadyArchived: updated.rowCount === 0,
-      }),
-    ]);
-    return updated.rowCount === 1;
-  });
+      };
+      await insertActivity(work, {
+        recordType: options.recordType,
+        recordId,
+        kind: "record.archived",
+        actorId: options.userId ?? null,
+        meta,
+      });
+      await work.query(AUDIT_STATEMENT, [
+        options.userId ?? null,
+        options.recordType,
+        recordId,
+        JSON.stringify(meta),
+      ]);
+      return { archived: updated.rowCount === 1, cancelledTasks: cancelled };
+    },
+  );
 
   const result: ArchiveResult = {
     recordType: options.recordType,
     recordId,
     archived,
     cancelledApprovals,
+    cancelledTasks,
   };
   console.info(ARCHIVED_MARKER, JSON.stringify(result));
   return result;

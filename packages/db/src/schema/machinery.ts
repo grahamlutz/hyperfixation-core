@@ -100,9 +100,18 @@ export const hfScore = pgTable(
     explanation: text("explanation"),
     // The ledger row of the call that produced an LLM-assigned score; a rule-based score has none.
     llmCallId: bigint("llm_call_id", { mode: "number" }),
+    // What makes a step-side score write replay-safe: attempt 2 runs the step again under a new
+    // workflow id, and `(run_id, key)` is what it conflicts on. Null for a web-side write.
+    runId: text("run_id"),
+    key: text("key"),
     createdAt: at("created_at").notNull().defaultNow(),
   },
-  (t) => [index("hf_score_record_idx").on(t.recordType, t.recordId)],
+  (t) => [
+    index("hf_score_record_idx").on(t.recordType, t.recordId),
+    uniqueIndex("hf_score_run_key_uq")
+      .on(t.runId, t.key)
+      .where(sql`${t.key} IS NOT NULL`),
+  ],
 );
 
 export const hfActivity = pgTable(
@@ -120,9 +129,17 @@ export const hfActivity = pgTable(
     // The run that wrote it, for the timeline; null for a web-side write (a label, an
     // outcome, a manual task), which the timeline groups under "manual".
     runId: text("run_id"),
+    // The idempotency key of the step that wrote it; null for a web-side write, which happens
+    // once per request and has no replay to survive.
+    key: text("key"),
     at: at("at").notNull().defaultNow(),
   },
-  (t) => [index("hf_activity_record_idx").on(t.recordType, t.recordId)],
+  (t) => [
+    index("hf_activity_record_idx").on(t.recordType, t.recordId),
+    uniqueIndex("hf_activity_run_key_uq")
+      .on(t.runId, t.key)
+      .where(sql`${t.key} IS NOT NULL`),
+  ],
 );
 
 export const hfTask = pgTable(

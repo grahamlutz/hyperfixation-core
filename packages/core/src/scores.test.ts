@@ -1,18 +1,48 @@
-import { createTestDatabase, type TestDatabase } from "@hyperfixation/testing";
+import { checkE002, createStepPool, type RecordTable, type StepPool } from "@hyperfixation/db";
+import { asRole, createTestDatabase, type TestDatabase } from "@hyperfixation/testing";
+import type { StepContext } from "@hyperfixation/workflows";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { writeScore } from "./scores.js";
+import { createRegistry, UnknownRegistration, type Registry } from "./registry.js";
+import { writeScore, writeStepScore } from "./scores.js";
 import { defineSpec } from "./specs.js";
+
+const RECORD_TYPE = "business";
+const RECORD_TABLE = "businesses";
+const REGISTERED: RecordTable[] = [{ table: RECORD_TABLE, recordType: RECORD_TYPE }];
 
 let database: TestDatabase;
 let pool: Pool;
+let steps: StepPool;
+let records: Registry<RecordTable>;
 
 beforeAll(async () => {
   database = await createTestDatabase();
   pool = new Pool({ max: 2, connectionString: database.applicationUrl });
+  steps = createStepPool({ connectionString: database.applicationUrl });
+  records = createRegistry<RecordTable>("record type", (entry) => entry.recordType);
+  for (const record of REGISTERED) records.register(record);
+
+  // Shaped like `hfRecordColumns()`; the three score columns are what `scores.write` updates.
+  await asRole(database.migratorUrl, async (pg) => {
+    await pg.query(
+      `CREATE TABLE ${RECORD_TABLE} (
+         id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+         name text NOT NULL,
+         stage text,
+         score double precision,
+         score_explanation text,
+         spec_version integer,
+         normalized_name text)`,
+    );
+    await pg.query(
+      `GRANT SELECT, INSERT, UPDATE, DELETE ON ${RECORD_TABLE} TO ${database.roles.application}`,
+    );
+  });
 }, 120_000);
 
 afterAll(async () => {
+  await steps?.end();
   await pool?.end();
   await database?.drop();
 });
@@ -67,5 +97,121 @@ describe("writeScore()", () => {
       explanation: null,
       llm_call_id: null,
     });
+  });
+});
+
+describe("scores.write (step-side)", () => {
+  async function context(runId: string, key: string, attempt = 1): Promise<StepContext> {
+    const workflowId = attempt === 1 ? runId : `${runId}:${attempt}`;
+    await asRole(database.applicationUrl, async (pg) => {
+      await pg.query(
+        "INSERT INTO hf_run (run_id, flow, input, status, attempt, current_workflow_id) " +
+          "VALUES ($1, 'test', '{}', 'running', $2, $3) " +
+          "ON CONFLICT (run_id) DO UPDATE SET attempt = $2, current_workflow_id = $3",
+        [runId, attempt, workflowId],
+      );
+    });
+    return { runId, attempt, workflowId, key, tx: (work) => steps.tx(runId, workflowId, work) };
+  }
+
+  async function insertRecord(name: string): Promise<string> {
+    const { rows } = await pool.query<{ id: string }>(
+      `INSERT INTO ${RECORD_TABLE} (name) VALUES ($1) RETURNING id`,
+      [name],
+    );
+    return rows[0]!.id;
+  }
+
+  it("writes the row, the record's columns and the timeline entry, once per (run, key)", async () => {
+    const spec = defineSpec({ name: "buy-box", version: 3, criteria: { minMargin: 0.2 } });
+    const recordId = await insertRecord("scored");
+
+    const first = await writeStepScore(await context("score-replay", "score"), records, {
+      recordType: RECORD_TYPE,
+      recordId,
+      spec,
+      score: 0.9,
+      explanation: "clears every gate",
+    });
+    expect(first).toMatchObject({ created: true });
+
+    const second = await writeStepScore(await context("score-replay", "score", 2), records, {
+      recordType: RECORD_TYPE,
+      recordId,
+      spec,
+      score: 0.9,
+      explanation: "clears every gate",
+    });
+    expect(second).toEqual({ id: first.id, created: false });
+
+    const scores = await pool.query<{ id: string; run_id: string | null; key: string | null }>(
+      "SELECT id, run_id, key FROM hf_score WHERE record_type = $1 AND record_id = $2 ORDER BY id",
+      [RECORD_TYPE, recordId],
+    );
+    expect(scores.rows).toHaveLength(1);
+    expect(scores.rows[0]).toMatchObject({ run_id: "score-replay", key: "score" });
+
+    const record = await pool.query<Record<string, unknown>>(
+      `SELECT score, score_explanation, spec_version FROM ${RECORD_TABLE} WHERE id = $1`,
+      [recordId],
+    );
+    expect(record.rows[0]).toMatchObject({
+      score: 0.9,
+      score_explanation: "clears every gate",
+      spec_version: 3,
+    });
+
+    const activity = await pool.query<{ kind: string; key: string | null }>(
+      "SELECT kind, key FROM hf_activity WHERE run_id = $1 ORDER BY id",
+      ["score-replay"],
+    );
+    expect(activity.rows).toEqual([{ kind: "score.written", key: "score:score.written" }]);
+    await expect(checkE002(pool, REGISTERED)).resolves.toBeUndefined();
+  });
+
+  it("adds a row per spec version and moves the record's columns to the newest", async () => {
+    const v1 = defineSpec({ name: "buy-box", version: 1, criteria: {} });
+    const v2 = defineSpec({ name: "buy-box", version: 2, criteria: {} });
+    const recordId = await insertRecord("rescored");
+
+    await writeStepScore(await context("score-v1", "score"), records, {
+      recordType: RECORD_TYPE,
+      recordId,
+      spec: v1,
+      score: 0.3,
+    });
+    await writeStepScore(await context("score-v2", "score"), records, {
+      recordType: RECORD_TYPE,
+      recordId,
+      spec: v2,
+      score: 0.7,
+    });
+
+    const { rows } = await pool.query<{ spec_version: number; score: number }>(
+      "SELECT spec_version, score FROM hf_score WHERE record_id = $1 ORDER BY id",
+      [recordId],
+    );
+    expect(rows).toEqual([
+      { spec_version: 1, score: 0.3 },
+      { spec_version: 2, score: 0.7 },
+    ]);
+
+    const record = await pool.query<{ score: number; spec_version: number }>(
+      `SELECT score, spec_version FROM ${RECORD_TABLE} WHERE id = $1`,
+      [recordId],
+    );
+    expect(record.rows[0]).toEqual({ score: 0.7, spec_version: 2 });
+  });
+
+  it("refuses a record type this app never registered", async () => {
+    const spec = defineSpec({ name: "buy-box", version: 1, criteria: {} });
+    await expect(
+      writeStepScore(await context("score-ghost", "score"), records, {
+        recordType: "ghost",
+        recordId: 1,
+        spec,
+        score: 0.1,
+      }),
+    ).rejects.toBeInstanceOf(UnknownRegistration);
   });
 });

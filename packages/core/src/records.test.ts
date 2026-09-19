@@ -217,6 +217,63 @@ describe("records.archive()", () => {
     expect(enqueued.rows[0]).toMatchObject({ status: "ENQUEUED" });
   });
 
+  it("cancels the record's open tasks and keeps every history row", async () => {
+    const recordId = await insertRecord("with-history");
+    const call = await app.tasks.createManual({ title: "call", recordType: RECORD_TYPE, recordId });
+    const email = await app.tasks.createManual({
+      title: "email",
+      recordType: RECORD_TYPE,
+      recordId,
+    });
+    const finished = await app.tasks.createManual({
+      title: "already done",
+      recordType: RECORD_TYPE,
+      recordId,
+    });
+    await app.tasks.complete({ id: finished.id });
+    const label = await app.labels.add({
+      recordType: RECORD_TYPE,
+      recordId,
+      target: "record",
+      value: "up",
+      userId: "graham",
+    });
+    const before = await app.activity.list({ recordType: RECORD_TYPE, recordId });
+
+    const result = await app.records.archive({
+      recordType: RECORD_TYPE,
+      recordId,
+      userId: "graham",
+    });
+    expect(result.cancelledTasks).toEqual([call.id, email.id]);
+
+    const tasks = await app.tasks.list({ recordType: RECORD_TYPE, recordId });
+    expect(tasks.map((task) => task.cancelledAt !== null)).toEqual([true, true, false]);
+    // A task that was already done stays done: archiving closes what is open, it does not rewrite.
+    expect(tasks[2]).toMatchObject({ id: finished.id, cancelledAt: null });
+    expect(tasks[2]!.doneAt).toBeInstanceOf(Date);
+
+    // Archiving is not a deletion: every row written before it is still on the timeline.
+    const after = await app.activity.list({ recordType: RECORD_TYPE, recordId });
+    expect(after.slice(0, before.length).map((row) => row.id)).toEqual(
+      before.map((row) => row.id),
+    );
+    expect(after.at(-1)).toMatchObject({
+      kind: "record.archived",
+      actorId: "graham",
+      runId: null,
+    });
+    expect((await app.labels.list({ recordType: RECORD_TYPE, recordId })).map((row) => row.id)).toEqual(
+      [label.id],
+    );
+
+    const audit = await pool.query<{ meta: Record<string, unknown> }>(
+      "SELECT meta FROM hf_audit WHERE action = 'record.archived' AND target_id = $1",
+      [recordId],
+    );
+    expect(audit.rows[0]!.meta).toMatchObject({ cancelledTasks: [call.id, email.id] });
+  });
+
   it("cancels an approval assigned to someone else — archive carries no human decider", async () => {
     const recordId = await insertRecord("assigned-elsewhere");
     const runId = `archive-assigned-${testBuildSha()}`;

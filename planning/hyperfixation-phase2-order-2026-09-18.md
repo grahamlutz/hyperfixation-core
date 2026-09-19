@@ -460,7 +460,7 @@ that record `error` and the batch completes; `EXPLAIN` of the candidate query at
 index and no seq scan). Give the 200k case its own `describe` and timeout, and measure it once — it is the
 first test in the suite whose cost is the data, not the DBOS launch.
 
-### C4 — Activity, tasks, labels, outcomes, scores — ⬜ Not started
+### C4 — Activity, tasks, labels, outcomes, scores — ✅ Done (deviated — see note)
 
 The step-side helpers (`activity.record`, `tasks.create`, `scores.write` — every one a write through `ctx.tx`,
 synchronously inside it, per the run-model rule) and the web-side ones (`labels.add`, `outcomes.record`,
@@ -468,6 +468,36 @@ synchronously inside it, per the run-model rule) and the web-side ones (`labels.
 them). `hf_activity.run_id` set from the run context on the step side and null on the web side; that column
 is what C6's timeline groups by. `records.archive()` gains "cancels open tasks", which v1 lists and Phase 1
 did not build (no table).
+
+> **Built, and where it differs from the wording above:** two entry points per protocol rather than one that
+> sniffs the handle — `activity.record(ctx, …)`, `tasks.create(ctx, …)` and `scores.write(ctx, …)` write inside
+> `ctx.tx`; `tasks.createManual`/`complete`/`cancel`, `labels.add`, `outcomes.record` and every `list` go
+> through `controlPlaneTx`, so `assertNotInWorkflow()` refuses them from inside a run.
+>
+> **`0006_activity_score_key`** is the chunk's one migration, which this ordering did not anticipate: every
+> step-side write re-executes on attempt 2 under a new workflow id, and `hf_activity`/`hf_score` had no
+> `(run_id, key)` to `ON CONFLICT` on (P1's activity row is exactly-once only because it sits behind the
+> `started -> uncertain` transition). It adds `hf_activity.key`, `hf_score.run_id`/`key` and a partial unique
+> index `(run_id, key) WHERE key IS NOT NULL` on each — additive, so `migrate.test.ts` has no literal to bump
+> (#5's journal-derived set) and only the journal baseline grows.
+>
+> A flow task's `origin_ref` is `` `${runId}:${key}` ``; the colon keeps it disjoint from `actions.perform`'s
+> bare `hf_action_log` id on the same partial unique index. Kinds are `task.created|completed|cancelled`,
+> `label.added`, `outcome.recorded`, `score.written`, `record.archived`, and an app-supplied kind is validated
+> against `^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$` — the shape `action.uncertain` and `approval.<decision>`
+> already write. A step's default activity key is `` `${ctx.key}:${kind}` ``: one row per step per kind.
+>
+> `complete`/`cancel` on a task that is already done or cancelled answer `{ changed: false }` and write no
+> activity row rather than throwing. `records.archive()` gained the task cancellation, a `record.archived`
+> activity row, and `cancelledTasks` on `ArchiveResult` and in the audit meta — all inside the existing
+> control-plane transaction, which locks only last-tier tables. Nothing is deleted: `hf_activity`, `hf_label`
+> and `hf_outcome` are the record's history, and a task that was already done stays done.
+>
+> Two guards the wording did not ask for: every helper that names a record type calls
+> `records.types.require()` first, because a `record_type` no app registers is what E002 refuses at the next
+> boot (P2's CI lesson); and `outcomes.record` takes an optional `userId` so its activity row has an actor.
+> The "a second attempt adds zero rows" assertions live in `activity.test.ts`, `tasks.test.ts` and
+> `scores.test.ts`, where the step pool is, rather than in `records.test.ts`, which has none.
 
 **Done:** `pnpm --filter @hyperfixation/core test activity tasks labels outcomes`; `records.test.ts` gains the
 open-task cancellation and the "keeps history" assertion over real `hf_activity`/`hf_label` rows.
