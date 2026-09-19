@@ -277,6 +277,14 @@ export interface GetClientOptions {
 // @public (undocumented)
 export function idempotencyKey(runId: string, key: string): string;
 
+// @public
+export const LANGFUSE_ENV: readonly ["LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_BASE_URL"];
+
+// @public (undocumented)
+export interface LangfuseRegistration {
+    shutdown(): Promise<void>;
+}
+
 // @public (undocumented)
 export const LAUNCHED_MARKER = "hf-worker: DBOS launched";
 
@@ -451,6 +459,9 @@ export interface ReconcileReport {
     // (undocumented)
     uncertainActions: number;
 }
+
+// @public
+export function registerLangfuse(env?: NodeJS.ProcessEnv): LangfuseRegistration | undefined;
 
 // @public
 export function resetClient(): Promise<void>;
