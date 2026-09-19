@@ -8,10 +8,56 @@ import {
 import { decide } from "@hyperfixation/workflows";
 import type { Pool } from "pg";
 import { insertActivity } from "./activity.js";
-import type { Registry } from "./registry.js";
+import { InvalidDefinition, type Registry } from "./registry.js";
 import { cancelOpenTasksForRecord } from "./tasks.js";
 
 export const ARCHIVE_OPERATION = "records.archive";
+
+/** The `displayColumn` a record type gets when it names none: the mixin's own name column. */
+export const DEFAULT_DISPLAY_COLUMN = "normalized_name";
+
+/** One board column. `name` is the value the mixin's `stage` carries; `title` is the heading. */
+export interface StageDefinition {
+  readonly name: string;
+  readonly title: string;
+}
+
+/**
+ * What the workspace needs to know about a record type, on top of the two strings the delete
+ * guard and every machinery row already need. All of it is optional: a bare `RecordTable` is
+ * still a valid registration, and the workspace falls back to `recordType` and
+ * `DEFAULT_DISPLAY_COLUMN`.
+ */
+export interface RecordDefinition extends RecordTable {
+  /** What the nav and the board call this type; `recordType` when absent. */
+  readonly title?: string;
+  /** The column the workspace shows as a record's name. */
+  readonly displayColumn?: string;
+  /** The board's columns, in board order. A `stage` outside the list gets an "Other" column. */
+  readonly stages?: readonly StageDefinition[];
+}
+
+export function displayColumnOf(definition: RecordDefinition): string {
+  return definition.displayColumn ?? DEFAULT_DISPLAY_COLUMN;
+}
+
+/**
+ * Refused at registration rather than at render: a duplicate stage name would give the board two
+ * columns competing for the same rows, and which one won would depend on iteration order.
+ */
+export function assertRecordStages(definition: RecordDefinition): void {
+  const seen = new Set<string>();
+  for (const stage of definition.stages ?? []) {
+    if (seen.has(stage.name)) {
+      throw new InvalidDefinition(
+        "record type",
+        definition.recordType,
+        `lists the stage ${JSON.stringify(stage.name)} twice`,
+      );
+    }
+    seen.add(stage.name);
+  }
+}
 
 /** One line per record archived, carrying what it took down with it. */
 export const ARCHIVED_MARKER = "hf-records: archived";

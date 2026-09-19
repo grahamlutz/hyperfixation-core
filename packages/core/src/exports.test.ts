@@ -11,12 +11,12 @@ const packageRoot = fileURLToPath(new URL("..", import.meta.url));
  * the process attached, so this package never builds a handle of its own to publish.
  */
 describe("the exports map", () => {
-  it("publishes exactly one public entry", async () => {
+  it("publishes exactly the two public entries", async () => {
     const manifest = JSON.parse(
       await readFile(path.join(packageRoot, "package.json"), "utf8"),
     ) as { exports: Record<string, unknown> };
 
-    expect(Object.keys(manifest.exports)).toEqual(["."]);
+    expect(Object.keys(manifest.exports)).toEqual([".", "./workspace"]);
   });
 
   it("builds no pool of its own", async () => {
