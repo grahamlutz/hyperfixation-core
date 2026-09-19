@@ -28,11 +28,12 @@ running the suite: "Done" means built with its gate case committed, not observed
 | Minimum ledger and actions slices (`@hyperfixation/ai`, `actions.perform`) | ✅ Done |
 | Minimum approvals slice (`waitForApproval`, `decide()`) | ✅ Done (deviated — call shape, a new error, `hf_activity`) |
 | `@hyperfixation/core` — `defineApp`, registries, `/api/status`, pause/resume, `records.archive` | ✅ Done (deviated — `defineApp` holds rather than builds the control plane; one known liveness gap) |
-| `@hyperfixation/auth`, `@hyperfixation/admin`, `@hyperfixation/cli`, the ESLint config, API Extractor | ⬜ Not started |
-| `hyperfixation-template` and `compose-envs.test.ts` | ⬜ Not started |
-| `redeploy.test.ts` | 🚧 11 of 12 written, committed and observed green together; only case 5 (lint, track A) is unwritten. Case 7 landed at e6bde42 with three deviations — see chunk 14 in the ordering doc |
+| `@hyperfixation/auth`, `@hyperfixation/admin`, `@hyperfixation/cli`, the ESLint config, API Extractor | ✅ Done |
+| `hyperfixation-template` and `compose-envs.test.ts` | ✅ Done |
+| `redeploy.test.ts` | ✅ Done — all twelve cases (case 5 at 51bc37e; case 7 with three deviations — see chunk 14 in the ordering doc) |
 | `fence.test.ts` | ✅ Done (deviated — case (vii)'s `records.archive()` half is in `@hyperfixation/core`'s tests, because `db` cannot import `core`) |
-| Phases 2–7 | ⬜ Not started |
+| Phase 2 | 🚧 In progress — chunks 0, L1, L2, P1, C1 landed; per-chunk status in [hyperfixation-phase2-order-2026-09-18.md](hyperfixation-phase2-order-2026-09-18.md) |
+| Phases 3–7 | ⬜ Not started |
 
 ## Adversary findings: disposition
 
