@@ -1,7 +1,16 @@
 {
   "name": "@hyperfixation/core",
-  "version": "0.0.0",
+  "version": "0.1.0",
+  "license": "MIT",
   "description": "defineApp, registries, resolution, records, activity, tasks, labels, outcomes, and the status endpoint",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/grahamlutz/hyperfixation-core.git",
+    "directory": "packages/core"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -15,7 +24,8 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "!dist/**/*.test.*"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
