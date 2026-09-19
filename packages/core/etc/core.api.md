@@ -5,6 +5,7 @@
 ```ts
 
 import { ActionChannel } from '@hyperfixation/workflows';
+import type { ClientBase } from 'pg';
 import type { DBOSClient } from '@dbos-inc/dbos-sdk';
 import { DecideOptions } from '@hyperfixation/workflows';
 import { DecideResult } from '@hyperfixation/workflows';
@@ -17,9 +18,22 @@ import { RecordTable } from '@hyperfixation/db';
 import { RunsStartOptions } from '@hyperfixation/workflows';
 import type { RunStatus } from '@hyperfixation/db';
 import { StartedRun } from '@hyperfixation/workflows';
+import type { StepDatabase } from '@hyperfixation/db';
 
 // @public
 export type AnyFlow = Flow<never, unknown>;
+
+// @public
+export interface AnySchedule {
+    // (undocumented)
+    readonly every: number;
+    // (undocumented)
+    readonly flow: Flow<never, unknown>;
+    // (undocumented)
+    input?(): unknown;
+    // (undocumented)
+    readonly name: string;
+}
 
 // @public (undocumented)
 export interface App {
@@ -41,6 +55,7 @@ export interface App {
     readonly flows: Registry<AnyFlow>;
     // (undocumented)
     readonly name: string;
+    readonly pages: Registry<PageDefinition>;
     // (undocumented)
     pause(options?: PauseOptions): Promise<PauseResult>;
     // (undocumented)
@@ -56,9 +71,13 @@ export interface App {
         start<I>(flow: Flow<I, unknown>, input: I, options?: RunsStartOptions): Promise<StartedRun>;
     };
     // (undocumented)
+    readonly schedules: AppSchedules;
+    // (undocumented)
     readonly scorers: Registry<ScorerDefinition>;
     // (undocumented)
     readonly sources: Registry<SourceDefinition>;
+    // (undocumented)
+    readonly specs: Registry<SpecDefinition>;
     // (undocumented)
     status(): Promise<StatusReport>;
     statusHandler(request: Request): Promise<Response>;
@@ -83,6 +102,13 @@ export interface ApprovalTypeDefinition {
     // (undocumented)
     readonly name: string;
     readonly schema?: unknown;
+}
+
+// @public (undocumented)
+export interface AppSchedules extends Registry<AnySchedule> {
+    // (undocumented)
+    due(now: Date, lastFired: ReadonlyMap<string, Date>): string[];
+    fire(name: string): Promise<ScheduleFired>;
 }
 
 // @public
@@ -157,14 +183,35 @@ export interface DefineAppOptions {
     // (undocumented)
     name: string;
     // (undocumented)
+    pages?: readonly PageDefinition[];
+    // (undocumented)
     records?: readonly RecordTable[];
     // (undocumented)
     resolvers?: readonly ResolverDefinition[];
     // (undocumented)
+    schedules?: readonly AnySchedule[];
+    // (undocumented)
     scorers?: readonly ScorerDefinition[];
     // (undocumented)
     sources?: readonly SourceDefinition[];
+    // (undocumented)
+    specs?: readonly SpecDefinition[];
 }
+
+// @public (undocumented)
+export function defineResolver<P>(definition: ResolverDefinition<P>): ResolverDefinition<P>;
+
+// @public (undocumented)
+export function defineSchedule<I>(definition: ScheduleDefinition<I>): ScheduleDefinition<I>;
+
+// @public (undocumented)
+export function defineScorer<R, C>(definition: ScorerDefinition<R, C>): ScorerDefinition<R, C>;
+
+// @public (undocumented)
+export function defineSource<P>(definition: SourceDefinition<P>): SourceDefinition<P>;
+
+// @public (undocumented)
+export function defineSpec<C>(definition: SpecDefinition<C>): SpecDefinition<C>;
 
 // @public
 export class DuplicateRegistration extends Error {
@@ -175,11 +222,32 @@ export class DuplicateRegistration extends Error {
 }
 
 // @public
+export function fireSchedule(pool: Pool, schedule: AnySchedule, start: (flow: Flow<unknown, unknown>, input: unknown) => Promise<StartedRun>): Promise<ScheduleFired>;
+
+// @public
 export function hashStatusToken(token: string): string;
+
+// @public
+export class InvalidDefinition extends Error {
+    constructor(kind: string, definitionName: string, problem: string);
+    // (undocumented)
+    readonly definitionName: string;
+    // (undocumented)
+    readonly kind: string;
+}
 
 // @public (undocumented)
 export class NoApplicationVersion extends Error {
     constructor(operation: string);
+}
+
+// @public
+export interface PageDefinition {
+    readonly nav?: boolean;
+    // (undocumented)
+    readonly path: string;
+    // (undocumented)
+    readonly title: string;
 }
 
 // @public (undocumented)
@@ -249,11 +317,27 @@ export interface Registry<T> {
 }
 
 // @public (undocumented)
-export interface ResolverDefinition {
+export interface ResolverDefinition<P = unknown> {
+    // (undocumented)
+    create(payload: P, db: StepDatabase): Promise<{
+        id: string;
+    }>;
+    readonly exactKeys: readonly string[];
+    // (undocumented)
+    readonly fuzzy?: ResolverFuzzy;
     // (undocumented)
     readonly name: string;
     // (undocumented)
-    readonly recordType?: string;
+    readonly recordType: string;
+    review?(similarity: number): boolean;
+    // (undocumented)
+    update(id: string, payload: P, db: StepDatabase): Promise<void>;
+}
+
+// @public (undocumented)
+export interface ResolverFuzzy {
+    readonly field: string;
+    readonly threshold: number;
 }
 
 // @public (undocumented)
@@ -280,18 +364,71 @@ export interface ResumeResult {
 }
 
 // @public (undocumented)
-export interface ScorerDefinition {
+export interface ScheduleDefinition<I = unknown> {
+    readonly every: number;
+    // (undocumented)
+    readonly flow: Flow<I, unknown>;
+    input?(): I;
     // (undocumented)
     readonly name: string;
-    // (undocumented)
-    readonly recordType?: string;
 }
 
 // @public (undocumented)
-export interface SourceDefinition {
+export type ScheduleFired = {
+    started: false;
+    reason: "paused";
+} | {
+    started: true;
+    run: StartedRun;
+};
+
+// @public
+export function schedulesDue(schedules: readonly AnySchedule[], now: Date, lastFired: ReadonlyMap<string, Date>): string[];
+
+// @public
+export interface Scored {
+    // (undocumented)
+    readonly explanation?: string;
+    readonly llmCallId?: number;
+    // (undocumented)
+    readonly score: number;
+}
+
+// @public (undocumented)
+export interface ScorerDefinition<R = unknown, C = unknown> {
     // (undocumented)
     readonly name: string;
-    readonly recordType?: string;
+    // (undocumented)
+    readonly recordType: string;
+    // (undocumented)
+    score(record: R, criteria: C): Promise<Scored>;
+    // (undocumented)
+    readonly spec: SpecDefinition<C>;
+}
+
+// @public (undocumented)
+export interface SourceDefinition<P = unknown> {
+    fetch(): AsyncIterable<SourceRow<P>>;
+    // (undocumented)
+    readonly name: string;
+    readonly recordType: string;
+}
+
+// @public
+export interface SourceRow<P> {
+    // (undocumented)
+    readonly externalId: string;
+    // (undocumented)
+    readonly payload: P;
+}
+
+// @public
+export interface SpecDefinition<C = unknown> {
+    // (undocumented)
+    readonly criteria: C;
+    // (undocumented)
+    readonly name: string;
+    readonly version: number;
 }
 
 // @public
@@ -376,6 +513,30 @@ export class UnknownRegistration extends Error {
     readonly kind: string;
     // (undocumented)
     readonly known: readonly string[];
+}
+
+// @public (undocumented)
+export const WRITE_SCORE_STATEMENT: string;
+
+// @public
+export function writeScore(queryable: Pool | ClientBase, options: WriteScoreOptions): Promise<{
+    id: number;
+}>;
+
+// @public (undocumented)
+export interface WriteScoreOptions {
+    // (undocumented)
+    explanation?: string;
+    // (undocumented)
+    llmCallId?: number;
+    // (undocumented)
+    recordId: string | number;
+    // (undocumented)
+    recordType: string;
+    // (undocumented)
+    score: number;
+    // (undocumented)
+    spec: SpecDefinition;
 }
 
 // (No @packageDocumentation comment for this package)

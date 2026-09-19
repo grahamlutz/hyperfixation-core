@@ -5,19 +5,32 @@ export {
   type AnyFlow,
   type App,
   type AppRecords,
+  type AppSchedules,
   type ApprovalTypeDefinition,
   type ControlPlane,
   type DefineAppOptions,
-  type ResolverDefinition,
-  type ScorerDefinition,
-  type SourceDefinition,
 } from "./define-app.js";
 export {
   createRegistry,
   DuplicateRegistration,
+  InvalidDefinition,
   UnknownRegistration,
   type Registry,
 } from "./registry.js";
+export { defineSource, type SourceDefinition, type SourceRow } from "./sources.js";
+export { defineResolver, type ResolverDefinition, type ResolverFuzzy } from "./resolvers.js";
+export { defineSpec, type SpecDefinition } from "./specs.js";
+export { defineScorer, type Scored, type ScorerDefinition } from "./scorers.js";
+export type { PageDefinition } from "./pages.js";
+export {
+  defineSchedule,
+  fireSchedule,
+  schedulesDue,
+  type AnySchedule,
+  type ScheduleDefinition,
+  type ScheduleFired,
+} from "./schedules.js";
+export { writeScore, WRITE_SCORE_STATEMENT, type WriteScoreOptions } from "./scores.js";
 export {
   pauseApp,
   resumeApp,
