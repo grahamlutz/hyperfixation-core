@@ -48,10 +48,14 @@ export {
   type ScheduleFired,
 } from "./schedules.js";
 export {
+  latestScores,
   writeScore,
   writeStepScore,
   EXISTING_SCORE_STATEMENT,
+  LATEST_SCORES_STATEMENT,
   WRITE_SCORE_STATEMENT,
+  type LatestScoreRow,
+  type LatestScoresOptions,
   type ScoreWritten,
   type StepWriteScoreOptions,
   type WriteScoreOptions,

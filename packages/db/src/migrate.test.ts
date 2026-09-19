@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { readMigrationFiles } from "drizzle-orm/migrator";
@@ -232,5 +232,70 @@ describe("the five-step migrator", () => {
       });
       expect(result.grantRo.applied).toBe(false);
     });
+  });
+});
+
+describe("0007_score_spec_name", () => {
+  let db: TestDatabase;
+  let migrator: Client;
+  let dir: string;
+
+  /** The committed migrations up to, but not including, the one under test. */
+  async function migrationsThrough(tag: string): Promise<string> {
+    const target = await mkdtemp(path.join(tmpdir(), "hf-core-migrations-"));
+    await mkdir(path.join(target, "meta"), { recursive: true });
+    const journal = JSON.parse(
+      await readFile(path.join(CORE_MIGRATIONS_DIR, "meta", "_journal.json"), "utf8"),
+    ) as { entries: { tag: string }[] };
+    const entries = journal.entries.slice(0, journal.entries.findIndex((e) => e.tag === tag) + 1);
+    for (const entry of entries) {
+      await copyFile(
+        path.join(CORE_MIGRATIONS_DIR, `${entry.tag}.sql`),
+        path.join(target, `${entry.tag}.sql`),
+      );
+    }
+    await writeFile(
+      path.join(target, "meta", "_journal.json"),
+      JSON.stringify({ ...journal, entries }),
+    );
+    return target;
+  }
+
+  beforeAll(async () => {
+    db = await createTestDatabase();
+    migrator = new Client({ connectionString: db.migratorUrl });
+    await migrator.connect();
+    dir = await migrationsThrough("0006_activity_score_key");
+    await migrate(db.migratorUrl, { appName: db.appName, coreMigrationsDir: dir });
+  }, 90_000);
+
+  afterAll(async () => {
+    await migrator?.end();
+    await db?.drop();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("applies over rows written before the column existed and leaves them standing", async () => {
+    await migrator.query(
+      "INSERT INTO hf_score (record_type, record_id, spec_version, score, run_id, key) " +
+        "VALUES ('business', '1', 1, 0.5, 'old-run', 'score')",
+    );
+
+    await migrate(db.migratorUrl, { appName: db.appName });
+
+    const { rows } = await migrator.query<{ spec_name: string | null; score: number }>(
+      "SELECT spec_name, score FROM hf_score WHERE run_id = 'old-run'",
+    );
+    expect(rows).toEqual([{ spec_name: null, score: 0.5 }]);
+
+    const { rows: indexes } = await migrator.query<{ indexname: string; indexdef: string }>(
+      "SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'hf_score' ORDER BY indexname",
+    );
+    expect(indexes.map((i) => i.indexname)).toEqual([
+      "hf_score_pkey",
+      "hf_score_record_idx",
+      "hf_score_run_key_spec_uq",
+    ]);
+    expect(indexes[2]?.indexdef).toContain("spec_name");
   });
 });

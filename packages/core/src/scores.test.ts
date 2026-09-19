@@ -4,7 +4,7 @@ import type { StepContext } from "@hyperfixation/workflows";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createRegistry, UnknownRegistration, type Registry } from "./registry.js";
-import { writeScore, writeStepScore } from "./scores.js";
+import { latestScores, writeScore, writeStepScore } from "./scores.js";
 import { defineSpec } from "./specs.js";
 
 const RECORD_TYPE = "business";
@@ -98,6 +98,32 @@ describe("writeScore()", () => {
       llm_call_id: null,
     });
   });
+
+  it("keeps two specs' scores of one record apart, and latest per spec", async () => {
+    const buyBox = defineSpec({ name: "buy-box", version: 1, criteria: {} });
+    const risk = defineSpec({ name: "risk", version: 4, criteria: {} });
+
+    await writeScore(pool, { recordType: "business", recordId: 77, spec: buyBox, score: 0.1 });
+    await writeScore(pool, { recordType: "business", recordId: 77, spec: risk, score: 0.2 });
+    await writeScore(pool, { recordType: "business", recordId: 77, spec: buyBox, score: 0.9 });
+
+    const { rows } = await pool.query<{ spec_name: string; score: number }>(
+      "SELECT spec_name, score FROM hf_score WHERE record_id = $1 ORDER BY id",
+      ["77"],
+    );
+    expect(rows).toEqual([
+      { spec_name: "buy-box", score: 0.1 },
+      { spec_name: "risk", score: 0.2 },
+      { spec_name: "buy-box", score: 0.9 },
+    ]);
+
+    // `risk`'s answer is its own: `buy-box` scoring again does not supersede it.
+    const latest = await latestScores(pool, { recordType: "business", recordId: 77 });
+    expect(latest.map((row) => [row.specName, row.specVersion, row.score])).toEqual([
+      ["buy-box", 1, 0.9],
+      ["risk", 4, 0.2],
+    ]);
+  });
 });
 
 describe("scores.write (step-side)", () => {
@@ -165,7 +191,9 @@ describe("scores.write (step-side)", () => {
       "SELECT kind, key FROM hf_activity WHERE run_id = $1 ORDER BY id",
       ["score-replay"],
     );
-    expect(activity.rows).toEqual([{ kind: "score.written", key: "score:score.written" }]);
+    expect(activity.rows).toEqual([
+      { kind: "score.written", key: "score:score.written:buy-box" },
+    ]);
     await expect(checkE002(pool, REGISTERED)).resolves.toBeUndefined();
   });
 
@@ -201,6 +229,43 @@ describe("scores.write (step-side)", () => {
       [recordId],
     );
     expect(record.rows[0]).toEqual({ score: 0.7, spec_version: 2 });
+  });
+
+  it("writes both specs one step scores under the same key, and neither twice on a replay", async () => {
+    const buyBox = defineSpec({ name: "buy-box", version: 1, criteria: {} });
+    const risk = defineSpec({ name: "risk", version: 2, criteria: {} });
+    const recordId = await insertRecord("two specs");
+
+    const both = async (attempt: number): Promise<void> => {
+      for (const spec of [buyBox, risk]) {
+        await writeStepScore(await context("score-two-specs", "score", attempt), records, {
+          recordType: RECORD_TYPE,
+          recordId,
+          spec,
+          score: spec === buyBox ? 0.6 : 0.4,
+        });
+      }
+    };
+    await both(1);
+    await both(2);
+
+    const { rows } = await pool.query<{ spec_name: string; score: number; key: string }>(
+      "SELECT spec_name, score, key FROM hf_score WHERE record_id = $1 ORDER BY id",
+      [recordId],
+    );
+    expect(rows).toEqual([
+      { spec_name: "buy-box", score: 0.6, key: "score" },
+      { spec_name: "risk", score: 0.4, key: "score" },
+    ]);
+
+    const activity = await pool.query<{ key: string }>(
+      "SELECT key FROM hf_activity WHERE run_id = $1 ORDER BY id",
+      ["score-two-specs"],
+    );
+    expect(activity.rows.map((row) => row.key)).toEqual([
+      "score:score.written:buy-box",
+      "score:score.written:risk",
+    ]);
   });
 
   it("refuses a record type this app never registered", async () => {
