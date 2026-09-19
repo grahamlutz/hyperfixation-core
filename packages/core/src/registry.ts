@@ -38,6 +38,22 @@ export class UnknownRegistration extends Error {
   }
 }
 
+/**
+ * A definition that is malformed on its face — refused by its `defineX` before any registry
+ * sees it, so a typo in a threshold or a version costs a boot and not a run.
+ */
+export class InvalidDefinition extends Error {
+  readonly kind: string;
+  readonly definitionName: string;
+
+  constructor(kind: string, definitionName: string, problem: string) {
+    super(`InvalidDefinition: the ${kind} named ${JSON.stringify(definitionName)} ${problem}`);
+    this.name = "InvalidDefinition";
+    this.kind = kind;
+    this.definitionName = definitionName;
+  }
+}
+
 export interface Registry<T> {
   /** The registered thing, back, so a registration can be an expression. */
   register(entry: T): T;

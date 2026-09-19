@@ -86,12 +86,31 @@ export const ABANDON_LLM_CALLS_STATEMENT =
   "AND (r.status IN ('done', 'failed', 'waiting', 'paused') " +
   "OR l.workflow_id <> r.current_workflow_id)";
 
-/** Step (4), actions half: the same predicate, into the status that already means this. */
+/**
+ * Step (4), actions half: the same predicate, into the status that already means this. The
+ * `RETURNING` is what makes "one task per uncertain row, once" fall out of the status predicate —
+ * a row this pass moved is never returned by the next one.
+ */
 export const UNCERTAIN_ACTIONS_STATEMENT =
   "UPDATE hf_action_log a SET status = 'uncertain', finished_at = now() FROM hf_run r " +
   "WHERE a.run_id = r.run_id AND a.status = 'started' " +
   "AND (r.status IN ('done', 'failed', 'waiting', 'paused') " +
-  "OR a.workflow_id <> r.current_workflow_id)";
+  "OR a.workflow_id <> r.current_workflow_id) " +
+  "RETURNING a.id::text AS id, a.run_id, a.key, a.channel, a.record_type, a.record_id";
+
+/** The partial unique index is the backstop; the predicate above is the actual guarantee. */
+const UNCERTAIN_TASK_STATEMENT =
+  "INSERT INTO hf_task (record_type, record_id, title, origin, origin_ref) " +
+  "VALUES ($1, $2, $3, 'sweep', $4) " +
+  "ON CONFLICT (origin, origin_ref) WHERE origin_ref IS NOT NULL DO NOTHING RETURNING id";
+
+const UNCERTAIN_TASK_LOOKUP_STATEMENT =
+  "SELECT id FROM hf_task WHERE origin_ref = $1 AND origin IN ('flow', 'sweep') " +
+  "ORDER BY id LIMIT 1";
+
+const UNCERTAIN_ACTIVITY_STATEMENT =
+  "INSERT INTO hf_activity (record_type, record_id, kind, run_id, meta) " +
+  "VALUES ($1, $2, 'action.uncertain', $3, $4::jsonb)";
 
 /**
  * Step (5)'s scan. A plain `SELECT`: `decide()` locks what it decides, and an approval this
@@ -178,6 +197,15 @@ export interface ReconcileReport {
   failures: ReconcileFailure[];
 }
 
+interface UncertainActionRow extends Record<string, unknown> {
+  id: string;
+  run_id: string;
+  key: string;
+  channel: string;
+  record_type: string | null;
+  record_id: string | null;
+}
+
 interface RunningRunRow {
   run_id: string;
   attempt: number;
@@ -242,7 +270,8 @@ export async function reconcile(
     { operation: "reconcile.hygiene", ...lockTimeoutOf(options) },
     async (client) => {
       const calls = await client.query(ABANDON_LLM_CALLS_STATEMENT);
-      const actions = await client.query(UNCERTAIN_ACTIONS_STATEMENT);
+      const actions = await client.query<UncertainActionRow>(UNCERTAIN_ACTIONS_STATEMENT);
+      for (const row of actions.rows) await openUncertainTask(client, row);
       return { calls: calls.rowCount ?? 0, actions: actions.rowCount ?? 0 };
     },
   );
@@ -265,6 +294,42 @@ export async function reconcile(
 
   console.info(RECONCILE_PASS_MARKER, JSON.stringify(summaryOf(report)));
   return report;
+}
+
+/**
+ * Step (4)'s other half: the row went `uncertain` with nobody told, which is what this fixes. The
+ * tier is the last one, after the `hf_action_log` update the same transaction just made.
+ */
+async function openUncertainTask(client: PoolClient, row: UncertainActionRow): Promise<void> {
+  // `hf_task`'s target columns are NOT NULL; the action row's are not, so the row itself stands in.
+  const target =
+    row.record_type !== null && row.record_id !== null
+      ? { recordType: row.record_type, recordId: row.record_id }
+      : { recordType: "hf_action_log", recordId: row.id };
+  const title = `Confirm ${row.channel} send ${row.key} for run ${row.run_id}`;
+
+  const inserted = await client.query<{ id: string }>(UNCERTAIN_TASK_STATEMENT, [
+    target.recordType,
+    target.recordId,
+    title,
+    row.id,
+  ]);
+  const existing =
+    inserted.rows[0] ??
+    (await client.query<{ id: string }>(UNCERTAIN_TASK_LOOKUP_STATEMENT, [row.id])).rows[0];
+  const taskId = existing === undefined ? null : Number(existing.id);
+
+  await client.query(UNCERTAIN_ACTIVITY_STATEMENT, [
+    target.recordType,
+    target.recordId,
+    row.run_id,
+    JSON.stringify({
+      actionLogId: Number(row.id),
+      key: row.key,
+      channel: row.channel,
+      taskId,
+    }),
+  ]);
 }
 
 /**

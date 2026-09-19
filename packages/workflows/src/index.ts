@@ -44,6 +44,7 @@ export {
   perform,
   idempotencyKey,
   stubChannel,
+  ActionUncertain,
   type ActionChannel,
   type ActionDispatch,
   type ActionResult,

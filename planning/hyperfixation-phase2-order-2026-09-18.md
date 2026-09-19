@@ -274,7 +274,7 @@ expression changed under them).
 
 ## Track P — approvals and actions completion (`@hyperfixation/workflows`)
 
-### P1 — `ActionUncertain`, the task, `reconcile()` step (4)'s task — ⬜ Not started
+### P1 — `ActionUncertain`, the task, `reconcile()` step (4)'s task — ✅ Done (deviated — see note)
 
 `ActionChannel` gains the declaration of whether it dedupes on `idempotencyKey`. `actions.perform`: on
 re-entry of a `started` row (the branch `actions.test.ts` calls "takes a started row left by a dead attempt
@@ -283,6 +283,15 @@ insert one `hf_task` (`origin = 'flow'`) and one `hf_activity` row, all inside t
 re-send. `reconcile()` step (4)'s action half gains its task (`origin = 'sweep'`), **exactly once per row
 across passes**, which needs an idempotency key on `hf_task` that v1's columns do not give it (open
 question 6). The lock-order tier for `hf_task`/`hf_activity` is under "Readings taken".
+
+> **Built, and where it differs from the wording above:** `ActionChannel.dedupes` is a **required** boolean (`stubChannel` is
+> `true`). A non-deduping channel treats a `failed` row like a `started` one on re-entry — a channel that throws after
+> delivering (SMTP accepted, socket timed out) must not be re-sent either. A row already `uncertain` makes **any** channel
+> throw `ActionUncertain` on re-entry, deduping ones included: a human has been asked, and a send behind them is what the
+> task exists to prevent. `ActionUncertain.taskId` is `number | null` (a row that went `uncertain` before this chunk has
+> none). The activity row is written even when the task insert conflicts — exactly-once comes from the
+> `started -> uncertain` transition, not the task insert. A task's `record_type`/`record_id` fall back to
+> `('hf_action_log', id)` when the action carried none.
 
 **Done:** `actions.test.ts` extended — a non-deduping channel re-entered yields `uncertain` + one task + no
 second `send`; a deduping channel re-entered re-sends with the same `idempotencyKey` (today's behaviour,
@@ -350,7 +359,7 @@ an approval that is no longer pending returns `ApprovalBatchRefused`, not a 500.
 
 ## Track C — registries, loader, resolution, the workspace (`@hyperfixation/core`, `db`, `admin`)
 
-### C1 — Registries with behaviour, `pages`, `schedules`, the outcome spec — ⬜ Not started
+### C1 — Registries with behaviour, `pages`, `schedules`, the outcome spec — ✅ Done (deviated — see note)
 
 `defineSource`, `defineResolver`, `defineScorer` (today's `{ name, recordType? }` definitions grow the
 function they name); `pages` and `schedules` registries (a schedule starts a run — "scheduled flows check
@@ -358,6 +367,15 @@ function they name); `pages` and `schedules` registries (a schedule starts a run
 criteria definition, `spec_version` on `hf_score` and on the mixin. "`actions`" in the plan's registry list
 is read as the existing `channels` registry (open question 4). Every registry keeps `createRegistry`'s
 duplicate/unknown errors. `core.api.md` will grow a great deal here; regenerate it in the same PR.
+
+> **Built, and where it differs from the wording above:** schedules are **interval** (`every` ms), not cron, and C1 ships
+> `schedules.fire(name)` (pause-checked, then `runs.start`) and `schedules.due(now, lastFired)` but **no timer loop** — the
+> caller owns the `lastFired` map, and the loop is T2's wiring in the template's `worker.ts`, mirroring `startReconciler`
+> (`runs.start` is control-plane, so it cannot be a DBOS scheduled workflow). `App.schedules` is typed over an erased
+> `AnySchedule` (as `AnyFlow` is for flows) because `ScheduleDefinition<I>` is contravariant in `I`. `defineSpec` is one live
+> version per `name`; `pages` are keyed by `path` with no render field (C6 adds the descriptor). `writeScore(queryable, …)`
+> INSERTs into `hf_score` and never updates; C4's `scores.write` wraps it in `ctx.tx` and owns the record's mixin columns.
+> New `InvalidDefinition` error beside `DuplicateRegistration`/`UnknownRegistration`.
 
 **Done:** `registry.test.ts` extended for the new kinds; a spec test — scoring against version 2 leaves
 version 1's `hf_score` rows and writes new ones; a schedule under a paused app starts no run.
