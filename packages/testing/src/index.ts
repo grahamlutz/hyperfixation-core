@@ -15,6 +15,20 @@ export {
   type SpawnWorkerOptions,
   type WorkerExit,
 } from "./spawn-worker.js";
+export {
+  runFlowSync,
+  RestartChangedCounts,
+  DEFAULT_ATTEMPT_TIMEOUT_MS,
+  DOUBLE_CHARGE_COUNT_KEY,
+  RESTART_COUNTED_TABLES,
+  RESTART_SKIPPED_MARKER,
+  type FlowRef,
+  type FlowSyncHarness,
+  type FlowSyncResult,
+  type RunFlowSyncOptions,
+  type SettledRunStatus,
+  type StartedRunRef,
+} from "./run-flow-sync.js";
 export { killAt, killWhenParked } from "./kill-at.js";
 export {
   parkedMarker,
