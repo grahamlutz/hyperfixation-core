@@ -4,16 +4,78 @@
 
 ```ts
 
+import type { ApprovalDecisionKind } from '@hyperfixation/workflows';
+import type { DecideResult } from '@hyperfixation/workflows';
+import { LabelTarget } from '@hyperfixation/db';
+import { LabelValue } from '@hyperfixation/db';
 import { RecordTable } from '@hyperfixation/db';
+
+// @public (undocumented)
+export interface ActivityRow {
+    // (undocumented)
+    actorId: string | null;
+    // (undocumented)
+    at: Date;
+    // (undocumented)
+    body: string | null;
+    // (undocumented)
+    id: number;
+    // (undocumented)
+    kind: string;
+    // (undocumented)
+    meta: unknown;
+    // (undocumented)
+    recordId: string | null;
+    // (undocumented)
+    recordType: string | null;
+    runId: string | null;
+}
 
 // @public (undocumented)
 export function approvalPath(id: number): string;
 
 // @public (undocumented)
-export interface AppWorkspace {
+export interface AppWorkspace extends WorkspaceViews {
     // (undocumented)
     nav(): WorkspaceNavItem[];
     route(path?: string | readonly string[]): WorkspaceRoute | undefined;
+}
+
+// @public (undocumented)
+export interface BoardCard {
+    // (undocumented)
+    id: string;
+    // (undocumented)
+    score: number | null;
+    // (undocumented)
+    stage: string | null;
+    // (undocumented)
+    title: string | null;
+    // (undocumented)
+    updatedAt: Date | null;
+}
+
+// @public (undocumented)
+export interface BoardColumn {
+    // (undocumented)
+    cards: BoardCard[];
+    // (undocumented)
+    stage: StageDefinition;
+}
+
+// @public (undocumented)
+export interface BoardOptions {
+    // (undocumented)
+    limit?: number;
+}
+
+// @public (undocumented)
+export interface BoardView {
+    // (undocumented)
+    columns: BoardColumn[];
+    other: BoardCard[];
+    // (undocumented)
+    record: RecordDefinition;
 }
 
 // @public
@@ -27,6 +89,105 @@ export interface DraftField {
 
 // @public
 export function draftFields(draft: unknown): DraftField[];
+
+// @public (undocumented)
+export interface HomeOptions {
+    // (undocumented)
+    userId: string;
+}
+
+// @public (undocumented)
+export interface HomeView {
+    approvals: InboxItem[];
+    // (undocumented)
+    reviewQueue: ReviewQueueCount[];
+    // (undocumented)
+    tasks: TaskRow[];
+}
+
+// @public
+export interface InboxItem {
+    // (undocumented)
+    approvalId: number;
+    // (undocumented)
+    assigneeId: string | null;
+    // (undocumented)
+    createdAt: Date;
+    // (undocumented)
+    draft: unknown;
+    editable: boolean;
+    // (undocumented)
+    expiresAt: Date | null;
+    // (undocumented)
+    fields: DraftField[];
+    // (undocumented)
+    flow: string;
+    // (undocumented)
+    key: string;
+    // (undocumented)
+    recordId: string | null;
+    recordTitle: string | null;
+    // (undocumented)
+    recordType: string | null;
+    // (undocumented)
+    runId: string;
+    // (undocumented)
+    type: string;
+}
+
+// @public (undocumented)
+export interface InboxOptions {
+    admin?: boolean;
+    // (undocumented)
+    userId: string;
+}
+
+// @public (undocumented)
+export interface InboxView {
+    // (undocumented)
+    items: InboxItem[];
+    mine: number;
+    // (undocumented)
+    unassigned: number;
+}
+
+// @public (undocumented)
+export interface LabelRow {
+    // (undocumented)
+    correction: unknown;
+    // (undocumented)
+    createdAt: Date;
+    // (undocumented)
+    id: number;
+    // (undocumented)
+    recordId: string;
+    // (undocumented)
+    recordType: string;
+    // (undocumented)
+    target: LabelTarget;
+    // (undocumented)
+    targetId: string | null;
+    // (undocumented)
+    userId: string | null;
+    // (undocumented)
+    value: LabelValue;
+}
+
+// @public (undocumented)
+export interface OutcomeRow {
+    // (undocumented)
+    at: Date;
+    // (undocumented)
+    id: number;
+    // (undocumented)
+    notes: string | null;
+    // (undocumented)
+    outcome: string;
+    // (undocumented)
+    recordId: string;
+    // (undocumented)
+    recordType: string;
+}
 
 // @public
 export interface PageDefinition {
@@ -42,6 +203,29 @@ export interface RecordDefinition extends RecordTable {
     readonly displayColumn?: string;
     readonly stages?: readonly StageDefinition[];
     readonly title?: string;
+}
+
+// @public (undocumented)
+export interface RecordView {
+    // (undocumented)
+    archivedAt: Date | null;
+    // (undocumented)
+    id: string;
+    // (undocumented)
+    labels: LabelRow[];
+    // (undocumented)
+    outcomes: OutcomeRow[];
+    // (undocumented)
+    pendingApprovals: InboxItem[];
+    // (undocumented)
+    record: RecordDefinition;
+    row: Record<string, unknown>;
+    // (undocumented)
+    tasks: TaskRow[];
+    // (undocumented)
+    timeline: TimelineGroup[];
+    // (undocumented)
+    title: string | null;
 }
 
 // @public (undocumented)
@@ -62,6 +246,14 @@ export interface Registry<T> {
     readonly size: number;
 }
 
+// @public (undocumented)
+export interface ReviewQueueCount {
+    // (undocumented)
+    count: number;
+    // (undocumented)
+    source: string;
+}
+
 // @public
 export interface StageDefinition {
     // (undocumented)
@@ -70,8 +262,57 @@ export interface StageDefinition {
     readonly title: string;
 }
 
+// @public (undocumented)
+export interface TaskRow {
+    // (undocumented)
+    cancelledAt: Date | null;
+    // (undocumented)
+    createdAt: Date;
+    // (undocumented)
+    doneAt: Date | null;
+    // (undocumented)
+    dueAt: Date | null;
+    // (undocumented)
+    id: number;
+    // (undocumented)
+    origin: string;
+    // (undocumented)
+    ownerId: string | null;
+    // (undocumented)
+    recordId: string | null;
+    // (undocumented)
+    recordType: string | null;
+    // (undocumented)
+    title: string;
+}
+
+// @public
+export interface TimelineGroup {
+    // (undocumented)
+    entries: ActivityRow[];
+    // (undocumented)
+    flow: string | null;
+    // (undocumented)
+    runId: string | null;
+    // (undocumented)
+    startedAt: Date | null;
+}
+
 // @public
 export const WORKSPACE_BASE_PATH = "/w";
+
+// @public
+export interface WorkspaceDecideOptions {
+    admin?: boolean;
+    // (undocumented)
+    decision: ApprovalDecisionKind;
+    decisionKey: string;
+    edits?: Record<number, unknown>;
+    // (undocumented)
+    ids: number[];
+    // (undocumented)
+    userId?: string | null;
+}
 
 // @public (undocumented)
 export function workspaceNav(registries: WorkspaceRegistries): WorkspaceNavItem[];
@@ -114,6 +355,19 @@ export type WorkspaceRoute = {
 
 // @public (undocumented)
 export function workspaceRoute(registries: WorkspaceRegistries, path?: string | readonly string[]): WorkspaceRoute | undefined;
+
+// @public
+export interface WorkspaceViews {
+    // (undocumented)
+    board(recordType: string, options?: BoardOptions): Promise<BoardView>;
+    // (undocumented)
+    decide(options: WorkspaceDecideOptions): Promise<DecideResult>;
+    // (undocumented)
+    home(options: HomeOptions): Promise<HomeView>;
+    // (undocumented)
+    inbox(options: InboxOptions): Promise<InboxView>;
+    record(recordType: string, id: string | number): Promise<RecordView | undefined>;
+}
 
 // (No @packageDocumentation comment for this package)
 

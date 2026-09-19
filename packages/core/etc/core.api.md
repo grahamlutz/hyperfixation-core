@@ -5,6 +5,7 @@
 ```ts
 
 import { ActionChannel } from '@hyperfixation/workflows';
+import type { ApprovalDecisionKind } from '@hyperfixation/workflows';
 import { ApprovalDraftSchema } from '@hyperfixation/workflows';
 import type { ClientBase } from 'pg';
 import type { DBOSClient } from '@dbos-inc/dbos-sdk';
@@ -279,7 +280,7 @@ export interface AppTasks {
 }
 
 // @public (undocumented)
-export interface AppWorkspace {
+export interface AppWorkspace extends WorkspaceViews {
     // (undocumented)
     nav(): WorkspaceNavItem[];
     route(path?: string | readonly string[]): WorkspaceRoute | undefined;
@@ -332,6 +333,43 @@ export function bearerToken(request: Request): string | null;
 // @public
 export function bigramDice(a: string, b: string): number;
 
+// @public (undocumented)
+export interface BoardCard {
+    // (undocumented)
+    id: string;
+    // (undocumented)
+    score: number | null;
+    // (undocumented)
+    stage: string | null;
+    // (undocumented)
+    title: string | null;
+    // (undocumented)
+    updatedAt: Date | null;
+}
+
+// @public (undocumented)
+export interface BoardColumn {
+    // (undocumented)
+    cards: BoardCard[];
+    // (undocumented)
+    stage: StageDefinition;
+}
+
+// @public (undocumented)
+export interface BoardOptions {
+    // (undocumented)
+    limit?: number;
+}
+
+// @public (undocumented)
+export interface BoardView {
+    // (undocumented)
+    columns: BoardColumn[];
+    other: BoardCard[];
+    // (undocumented)
+    record: RecordDefinition;
+}
+
 // @public
 export function cancelOpenTasksForRecord(queryable: Pool | ClientBase, recordType: string, recordId: string): Promise<number[]>;
 
@@ -363,6 +401,9 @@ export function createStatusHandler(options: StatusHandlerOptions): (request: Re
 
 // @public
 export function createTask(ctx: StepContext, records: Registry<RecordTable>, options: TaskCreateOptions): Promise<TaskCreated>;
+
+// @public
+export const DEFAULT_BOARD_LIMIT = 500;
 
 // @public
 export const DEFAULT_DISPLAY_COLUMN = "normalized_name";
@@ -457,6 +498,67 @@ export function fuzzyCandidateStatement(table: string, field: string): string;
 
 // @public
 export function hashStatusToken(token: string): string;
+
+// @public (undocumented)
+export interface HomeOptions {
+    // (undocumented)
+    userId: string;
+}
+
+// @public (undocumented)
+export interface HomeView {
+    approvals: InboxItem[];
+    // (undocumented)
+    reviewQueue: ReviewQueueCount[];
+    // (undocumented)
+    tasks: TaskRow[];
+}
+
+// @public
+export interface InboxItem {
+    // (undocumented)
+    approvalId: number;
+    // (undocumented)
+    assigneeId: string | null;
+    // (undocumented)
+    createdAt: Date;
+    // (undocumented)
+    draft: unknown;
+    editable: boolean;
+    // (undocumented)
+    expiresAt: Date | null;
+    // (undocumented)
+    fields: DraftField[];
+    // (undocumented)
+    flow: string;
+    // (undocumented)
+    key: string;
+    // (undocumented)
+    recordId: string | null;
+    recordTitle: string | null;
+    // (undocumented)
+    recordType: string | null;
+    // (undocumented)
+    runId: string;
+    // (undocumented)
+    type: string;
+}
+
+// @public (undocumented)
+export interface InboxOptions {
+    admin?: boolean;
+    // (undocumented)
+    userId: string;
+}
+
+// @public (undocumented)
+export interface InboxView {
+    // (undocumented)
+    items: InboxItem[];
+    mine: number;
+    // (undocumented)
+    unassigned: number;
+}
 
 // @public
 export const INSERT_ACTIVITY_STATEMENT: string;
@@ -667,6 +769,29 @@ export function recordOutcome(pool: Pool, records: Registry<RecordTable>, option
 }>;
 
 // @public (undocumented)
+export interface RecordView {
+    // (undocumented)
+    archivedAt: Date | null;
+    // (undocumented)
+    id: string;
+    // (undocumented)
+    labels: LabelRow[];
+    // (undocumented)
+    outcomes: OutcomeRow[];
+    // (undocumented)
+    pendingApprovals: InboxItem[];
+    // (undocumented)
+    record: RecordDefinition;
+    row: Record<string, unknown>;
+    // (undocumented)
+    tasks: TaskRow[];
+    // (undocumented)
+    timeline: TimelineGroup[];
+    // (undocumented)
+    title: string | null;
+}
+
+// @public (undocumented)
 export interface Registry<T> {
     // (undocumented)
     all(): T[];
@@ -763,6 +888,14 @@ export interface ResumeResult {
     // (undocumented)
     queues: QueueConcurrency[];
     reconciled: ReconcileReport;
+}
+
+// @public (undocumented)
+export interface ReviewQueueCount {
+    // (undocumented)
+    count: number;
+    // (undocumented)
+    source: string;
 }
 
 // @public (undocumented)
@@ -1039,6 +1172,18 @@ export interface TaskTarget {
     recordType?: string;
 }
 
+// @public
+export interface TimelineGroup {
+    // (undocumented)
+    entries: ActivityRow[];
+    // (undocumented)
+    flow: string | null;
+    // (undocumented)
+    runId: string | null;
+    // (undocumented)
+    startedAt: Date | null;
+}
+
 // @public (undocumented)
 export class UnknownRegistration extends Error {
     constructor(kind: string, name: string, known: readonly string[]);
@@ -1049,12 +1194,49 @@ export class UnknownRegistration extends Error {
 }
 
 // @public (undocumented)
+export const WORKSPACE_BOARD_OPERATION = "workspace.board";
+
+// @public (undocumented)
+export const WORKSPACE_HOME_OPERATION = "workspace.home";
+
+// @public (undocumented)
+export const WORKSPACE_INBOX_OPERATION = "workspace.inbox";
+
+// @public (undocumented)
+export const WORKSPACE_RECORD_OPERATION = "workspace.record";
+
+// @public (undocumented)
+export function workspaceBoard(deps: WorkspaceViewDeps, recordType: string, options?: BoardOptions): Promise<BoardView>;
+
+// @public
+export interface WorkspaceDecideOptions {
+    admin?: boolean;
+    // (undocumented)
+    decision: ApprovalDecisionKind;
+    decisionKey: string;
+    edits?: Record<number, unknown>;
+    // (undocumented)
+    ids: number[];
+    // (undocumented)
+    userId?: string | null;
+}
+
+// @public (undocumented)
+export function workspaceHome(deps: WorkspaceViewDeps, options: HomeOptions): Promise<HomeView>;
+
+// @public (undocumented)
+export function workspaceInbox(deps: WorkspaceViewDeps, options: InboxOptions): Promise<InboxView>;
+
+// @public (undocumented)
 export interface WorkspaceNavItem {
     // (undocumented)
     readonly path: string;
     // (undocumented)
     readonly title: string;
 }
+
+// @public (undocumented)
+export function workspaceRecord(deps: WorkspaceViewDeps, recordType: string, id: string | number): Promise<RecordView | undefined>;
 
 // @public
 export interface WorkspaceRegistries {
@@ -1083,6 +1265,28 @@ export type WorkspaceRoute = {
     kind: "page";
     page: PageDefinition;
 };
+
+// @public
+export interface WorkspaceViewDeps {
+    hasSchema(type: string): boolean;
+    // (undocumented)
+    pool: Pool;
+    // (undocumented)
+    records: Registry<RecordDefinition>;
+}
+
+// @public
+export interface WorkspaceViews {
+    // (undocumented)
+    board(recordType: string, options?: BoardOptions): Promise<BoardView>;
+    // (undocumented)
+    decide(options: WorkspaceDecideOptions): Promise<DecideResult>;
+    // (undocumented)
+    home(options: HomeOptions): Promise<HomeView>;
+    // (undocumented)
+    inbox(options: InboxOptions): Promise<InboxView>;
+    record(recordType: string, id: string | number): Promise<RecordView | undefined>;
+}
 
 // @public
 export const WRITE_SCORE_STATEMENT: string;
