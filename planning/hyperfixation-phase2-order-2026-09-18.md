@@ -1019,7 +1019,7 @@ prerenders.
 
 ---
 
-## Exit — Phase 2 exit assembly — 🚧 Built (template #24 open); one bar wording to settle
+## Exit — Phase 2 exit assembly — ✅ Done (template #24 merged; the bar's "flat" is read as "bounded", to be confirmed)
 
 The bar, from the plan: *the demo run approves two drafts with one edit, mailpit receives the send, a
 follow-up task appears, a label is recorded; pausing mid-run stops the next flow at its next step and resuming
@@ -1041,7 +1041,7 @@ number here.
 **Done:** `pnpm test:e2e` green in a generated app for both e2e files; the soak's numbers in this document;
 `pnpm -w typecheck lint test api-extractor` green in core with the new file and test counts recorded.
 
-> **Built (template #24; CI green, not yet merged), 2026-09-19.** `tests/e2e/demo-loop.e2e.ts` and a shared
+> **Built (template #24, merged), 2026-09-19.** `tests/e2e/demo-loop.e2e.ts` and a shared
 > `tests/e2e/harness.ts` (used by both e2e files). Run in a generated app on the dev cluster (`hf new` from the worktree,
 > mailpit :1025/:8025): `pnpm test:e2e`, 2 files, 11 tests, green twice (~60 s); `typecheck`, `lint`, `pnpm test` (13 files,
 > 72 tests) and `next build --webpack` green.
@@ -1066,6 +1066,18 @@ number here.
 > takes the best-scoring unarchived row on every attempt, so two distinct records cannot both survive to their sends.
 > (3) The paused flow is a `resolve`-queue flow started into the paused app — deterministic, since a pause deliberately
 > leaves that queue alone. Core findings: none new.
+
+**Phase 2 is complete (2026-09-19).** Every chunk in the tracks above has landed and the exit bar's assertions run in
+the template's e2e suite. What is still open, none of it blocking:
+- **Decide:** whether the bar's "flat connection count" is restated as "bounded: no upward drift and a peak under the
+  limit" (the soak measured a peak of 9 against a budget of 24 and a limit of 25, and cannot be flat because `pg.Pool`
+  closes idle clients after 10 s); and whether the notifier's recipient read should exclude **banned** admins.
+- **Core, small:** `draftFields` should emit unambiguous paths (an additive `segments` on `DraftField`) so a draft key
+  containing `.` can be edited; `BoardView` should report the limit and whether it was hit, and `DEFAULT_BOARD_LIMIT`
+  should be exported from the `/workspace` subpath; `hf_score` has `spec_version` but no spec name; `@hyperfixation/testing`
+  has no `waitForRun`-style helper; `bootstrapAdmin` ignores `designatedEmail`; `migrate()` assumes provisioned roles and a
+  migrator-owned `public`.
+- **Template, small:** the C5 budget form; the template's own unrelated open PR #11 (the $10 dev budget note).
 
 ---
 
