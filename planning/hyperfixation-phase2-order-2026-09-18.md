@@ -23,7 +23,8 @@ Phase 1 actually built; this document assumes it and does not restate it.
 | 🚧 In progress | partially built |
 | ⬜ Not started | nothing built yet |
 
-**Landed so far (main at `c242a86`, 2026-09-19):** chunk 0 (#8), L1 (#10), C1 (#11), P1 (#13), L2 (#14). Their
+**Landed so far (main at `efcfdeb`, 2026-09-19):** chunk 0 (#8), L1 (#10), C1 (#11), P1 (#13), L2 (#14), L3 (#17),
+C2 (#18), P2 (#19). Their
 "Built, and where it differs" notes below record every place the build departed from this document's wording;
 the markers on the remaining chunks are unchanged.
 
@@ -112,8 +113,9 @@ because of it.
 the timeline column the plan adds over v1), `hf_task`, `hf_label`, `hf_outcome`, with v1's columns and the
 `(record_type, record_id)` composite index on each polymorphic one. `hfRecordColumns()` — `created_at`,
 `updated_at`, `archived_at`, `stage`, `score`, `score_explanation`, `spec_version`, `normalized_name`; every
-column nullable or defaulted, none unique — plus the snapshot test that pins it. `migrate.test.ts`'s three
-literals go `"4"` → `"5"`; the journal baseline grows.
+column nullable or defaulted, none unique — plus the snapshot test that pins it. The journal baseline grows.
+(The plan here also had `migrate.test.ts`'s three count literals go `"4"` → `"5"`; #5 replaced them with a set
+derived from the journal, so a new migration no longer touches that file.)
 
 Two things that are only *testable* now: the delete guard over the three referencing tables it already names
 (a real `hf_label` row must make `DELETE` on its record raise `restrict_violation`), and E002 over the new
@@ -362,15 +364,15 @@ The plan's list, mapped against what `approvals.test.ts` and `wait-for-approval.
 
 | Case | At `4d08ac2` | Lands at |
 |---|---|---|
-| batch with one edit | edit stored, unvalidated | P2 |
+| batch with one edit | edit stored, unvalidated | ✅ P2 (#19): parsed against the type's Zod schema, the parsed value stored |
 | stale row refuses the whole batch with per-row reasons | ✅ | — |
-| assignee mismatch refused | ⬜ | P2 |
+| assignee mismatch refused | ⬜ | ✅ P2 (#19) |
 | replayed `decisionKey` returns the first result, writes nothing | ✅ | — |
 | crash inside `waitForApproval` creates no second row | ⬜ (`killAt('approval', 'in-tx')` on the step, then a second attempt) | P3 |
 | two pending approvals on one run; deciding the second resumes with the second's decision, leaves the first pending (3b) | ⬜ | P3 |
 | `dbos workflow delete` on the run's rows before deciding loses nothing (3c) | ⬜ | P3 |
 | resume workflow runs under the current version and is enqueued exactly once when `decide()` is called twice concurrently | ⬜ | P3 |
-| `hf_audit` insert made to fail → throw, `pending`, no DBOS row, retry succeeds | ⬜ | P3 |
+| `hf_audit` insert made to fail → throw, `pending`, no DBOS row, retry succeeds | ⬜ (P2 wrote the `BEFORE INSERT` trigger technique for `hf_activity` in `approvals.test.ts`; reuse it) | P3 |
 | `decide()` on X while a step holds `ctx.tx` inside `waitForApproval`'s `INSERT … ON CONFLICT` on X: no `40P01` | ⬜ | P3 |
 
 The last one has no `killAt` park point: `'in-tx'` parks after the fence statement, before the `INSERT`.
@@ -578,9 +580,9 @@ number here.
 
 | Track | Package(s) | Can start | Must land by | Status |
 |---|---|---|---|---|
-| **L — ledger** (L1–L5b) | `ai` (+ one `startWorker` hook in `workflows` for L2) | chunk 0 | T2 needs L1; Exit needs all | 🚧 L1, L2 done |
-| **P — approvals and actions** (P1–P4) | `workflows` | chunk 0 | T2 needs P1, P2; Exit needs all | 🚧 P1 done |
-| **C — core** (C1–C6) | `core`, `db` (C2), `admin` (C5) | chunk 0 | T2 needs C1–C4; Exit needs C6 | 🚧 C1 done |
+| **L — ledger** (L1–L5b) | `ai` (+ one `startWorker` hook in `workflows` for L2) | chunk 0 | T2 needs L1; Exit needs all | 🚧 L1–L3 done |
+| **P — approvals and actions** (P1–P4) | `workflows` | chunk 0 | T2 needs P1, P2; Exit needs all | 🚧 P1, P2 done |
+| **C — core** (C1–C6) | `core`, `db` (C2), `admin` (C5) | chunk 0 | T2 needs C1–C4; Exit needs C6 | 🚧 C1, C2 done |
 | **T — testing and template** (T1–T3) | `testing`, `hyperfixation-template` | chunk 0 for T1; the others as listed | Exit | ⬜ |
 
 **Execution model.** Chunk 0 is one PR by one head, first. After it the three tracks are genuinely
@@ -697,13 +699,13 @@ orders against, to be overturned cheaply if wrong.
 
 ## Carried from Phase 1's "Still open"
 
-- **3 — `hf_activity`'s insert in `decide()`** → P2, fatal, same rule as `hf_audit`.
-- **5 — migration-count literals** → chunk 0 takes them to `"5"`; any later Phase 2 column takes them further.
+- **3 — `hf_activity`'s insert in `decide()`** → ✅ closed by P2 (#19): fatal, same rule as `hf_audit`.
+- **5 — migration-count literals** → obsolete: #5 derives the expected set from the journal, so a new migration never edits `migrate.test.ts`; only `migrations-journal.baseline.json` grows.
 - **7 — API-report churn** → every track; `core.api.md` most. Undecided as before whether `auth.api.md`'s
   surface should be narrowed; nothing in Phase 2 makes it worse.
 - **8 — `hf_invitation`** untouched by Phase 2.
 - **New, from this pass — `records.archive()` on a mixin-less record table fails with `42703`** in a
-  generated app today. Closed by chunk 0/T0; worth a test in the template that archives a demo record.
+  generated app today. Closed on the `db` side by chunk 0; the template half (T0: `demo_note` adopting the mixin) is still open, and a template test that archives a demo record is still worth writing.
 
 ## Verification
 
