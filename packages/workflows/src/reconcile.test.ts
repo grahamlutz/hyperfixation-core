@@ -77,6 +77,37 @@ async function insertLedgerRow(runId: string, key: string, workflowId: string): 
   );
 }
 
+interface TaskRow extends Record<string, unknown> {
+  id: string;
+  record_type: string;
+  record_id: string;
+  title: string;
+  origin: string;
+  origin_ref: string;
+}
+
+async function insertActionRow(
+  runId: string,
+  recordType: string | null = null,
+  recordId: string | null = null,
+): Promise<string> {
+  const rows = await query<{ id: string }>(
+    "INSERT INTO hf_action_log (run_id, key, workflow_id, channel, idempotency_key, status, " +
+      "record_type, record_id) VALUES ($1, 'send', $1, 'stub', $2, 'started', $3, $4) " +
+      "RETURNING id::text AS id",
+    [runId, `${runId}:send`, recordType, recordId],
+  );
+  return rows[0]!.id;
+}
+
+async function tasksFor(actionLogId: string): Promise<TaskRow[]> {
+  return query<TaskRow>(
+    "SELECT id::text AS id, record_type, record_id, title, origin, origin_ref FROM hf_task " +
+      "WHERE origin_ref = $1 ORDER BY id",
+    [actionLogId],
+  );
+}
+
 async function ledgerRow(runId: string): Promise<Record<string, unknown> | undefined> {
   return (
     await query("SELECT status, finished_at FROM hf_llm_call WHERE run_id = $1", [runId])
@@ -114,6 +145,8 @@ beforeEach(async () => {
   await query("DELETE FROM hf_audit");
   await query("DELETE FROM hf_llm_call");
   await query("DELETE FROM hf_action_log");
+  await query("DELETE FROM hf_task");
+  await query("DELETE FROM hf_activity");
   await query("DELETE FROM hf_run");
   await query("DELETE FROM hf_budget_period");
   await query("UPDATE hf_app_state SET paused = false WHERE id = 1");
@@ -340,17 +373,67 @@ describe("reconcile() step (4) — ledger hygiene", () => {
     const runId = runIdFor("action");
     await startRun(runId);
     await query("UPDATE hf_run SET status = 'failed' WHERE run_id = $1", [runId]);
-    await query(
-      "INSERT INTO hf_action_log (run_id, key, workflow_id, channel, idempotency_key, status) " +
-        "VALUES ($1, 'send', $1, 'stub', $2, 'started')",
-      [runId, `${runId}:send`],
-    );
+    await insertActionRow(runId);
 
     expect((await pass()).uncertainActions).toBe(1);
     expect(
       await query("SELECT status FROM hf_action_log WHERE run_id = $1", [runId]),
     ).toEqual([{ status: "uncertain" }]);
     expect((await pass()).uncertainActions).toBe(0);
+  });
+
+  it("opens one task and one activity row per uncertain action, across three passes", async () => {
+    const runId = runIdFor("action-task");
+    await startRun(runId);
+    await query("UPDATE hf_run SET status = 'failed' WHERE run_id = $1", [runId]);
+    const actionLogId = await insertActionRow(runId, "business", "biz-3");
+
+    await pass();
+    const tasks = await tasksFor(actionLogId);
+    await pass();
+    await pass();
+
+    expect(tasks).toEqual([
+      {
+        id: expect.any(String),
+        record_type: "business",
+        record_id: "biz-3",
+        title: `Confirm stub send send for run ${runId}`,
+        origin: "sweep",
+        origin_ref: actionLogId,
+      },
+    ]);
+    expect(await tasksFor(actionLogId)).toEqual(tasks);
+    expect(
+      await query("SELECT kind, record_type, record_id, meta FROM hf_activity WHERE run_id = $1", [
+        runId,
+      ]),
+    ).toEqual([
+      {
+        kind: "action.uncertain",
+        record_type: "business",
+        record_id: "biz-3",
+        meta: {
+          actionLogId: Number(actionLogId),
+          key: "send",
+          channel: "stub",
+          taskId: Number(tasks[0]!.id),
+        },
+      },
+    ]);
+  });
+
+  it("targets the action row itself when it carries no record", async () => {
+    const runId = runIdFor("action-no-record");
+    await startRun(runId);
+    await query("UPDATE hf_run SET status = 'failed' WHERE run_id = $1", [runId]);
+    const actionLogId = await insertActionRow(runId);
+
+    await pass();
+
+    expect(await tasksFor(actionLogId)).toMatchObject([
+      { record_type: "hf_action_log", record_id: actionLogId, origin: "sweep" },
+    ]);
   });
 });
 
