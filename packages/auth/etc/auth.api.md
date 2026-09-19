@@ -1381,8 +1381,7 @@ export function bootstrapAdmin(pool: Pool, options: BootstrapAdminOptions): Prom
 // @public (undocumented)
 export interface BootstrapAdminOptions {
     designatedEmail?: string | null;
-    // (undocumented)
-    email: string;
+    email?: string;
     // (undocumented)
     name?: string;
 }
