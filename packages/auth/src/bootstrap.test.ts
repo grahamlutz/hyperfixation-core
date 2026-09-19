@@ -55,6 +55,28 @@ describe("the bootstrap user", () => {
     expect(await roleOf("crystal@app.test")).toBe("admin");
   });
 
+  it("bootstraps the designated address when that is the only one given", async () => {
+    const result = await bootstrapAdmin(pool, { designatedEmail: "crystal@app.test" });
+
+    expect(result).toEqual({ userId: expect.any(String), email: "crystal@app.test", created: true });
+    expect(await roleOf("crystal@app.test")).toBe("admin");
+  });
+
+  it("prefers the email over the designation, which then has to match", async () => {
+    await expect(
+      bootstrapAdmin(pool, { email: "someone@app.test", designatedEmail: "owner@app.test" }),
+    ).rejects.toMatchObject({ reason: "not-designated" });
+  });
+
+  it("refuses with a reason rather than crashing when neither names an address", async () => {
+    const refusal = await bootstrapAdmin(pool, { designatedEmail: null }).catch(
+      (error: unknown) => error,
+    );
+
+    expect(refusal).toBeInstanceOf(BootstrapRefused);
+    expect((refusal as BootstrapRefused).reason).toBe("no-designation");
+  });
+
   it("writes one audit row naming who it made", async () => {
     const { userId } = await bootstrapAdmin(pool, {
       email: "owner@app.test",
