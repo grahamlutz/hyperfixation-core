@@ -1,4 +1,4 @@
-import { createStepPool, type StepPool } from "@hyperfixation/db";
+import { checkE002, createStepPool, type StepPool } from "@hyperfixation/db";
 import { asRole, createTestDatabase, type TestDatabase } from "@hyperfixation/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -20,8 +20,8 @@ interface ActionLogRow {
 
 interface TaskRow {
   id: string;
-  record_type: string;
-  record_id: string;
+  record_type: string | null;
+  record_id: string | null;
   title: string;
   origin: string;
   origin_ref: string;
@@ -170,8 +170,9 @@ describe("actions.perform", () => {
     expect(await tasksOf(row.id)).toEqual([
       {
         id: expect.any(String),
-        record_type: "hf_action_log",
-        record_id: row.id,
+        // Null, not a stand-in record type: E002 would fail on one at the next boot.
+        record_type: null,
+        record_id: null,
         title: "Confirm counting send send for run action-uncertain",
         origin: "flow",
         origin_ref: row.id,
@@ -181,8 +182,13 @@ describe("actions.perform", () => {
     expect(activities).toHaveLength(1);
     expect(activities[0]).toMatchObject({
       kind: "action.uncertain",
+      record_type: null,
+      record_id: null,
       meta: { actionLogId: Number(row.id), key: "send", channel: "counting" },
     });
+    await expect(
+      asRole(database.applicationUrl, (pg) => checkE002(pg, [])),
+    ).resolves.toBeUndefined();
 
     // A retry of the step reports the same thing and never opens a second task.
     await expect(actions.perform(ctx, { key: ctx.key, channel })).rejects.toThrow(ActionUncertain);
@@ -237,7 +243,7 @@ describe("actions.perform", () => {
       await pg.query("UPDATE hf_action_log SET status = 'uncertain' WHERE id = $1", [row.id]);
       await pg.query(
         "INSERT INTO hf_task (record_type, record_id, title, origin, origin_ref) " +
-          "VALUES ('hf_action_log', $1, 'swept', 'sweep', $1)",
+          "VALUES (NULL, NULL, 'swept', 'sweep', $1)",
         [row.id],
       );
     });

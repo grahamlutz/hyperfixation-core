@@ -5,6 +5,7 @@
 ```ts
 
 import { ActionChannel } from '@hyperfixation/workflows';
+import { ApprovalDraftSchema } from '@hyperfixation/workflows';
 import type { ClientBase } from 'pg';
 import type { DBOSClient } from '@dbos-inc/dbos-sdk';
 import { DecideOptions } from '@hyperfixation/workflows';
@@ -101,7 +102,7 @@ export interface AppRecords {
 export interface ApprovalTypeDefinition {
     // (undocumented)
     readonly name: string;
-    readonly schema?: unknown;
+    readonly schema?: ApprovalDraftSchema;
 }
 
 // @public (undocumented)

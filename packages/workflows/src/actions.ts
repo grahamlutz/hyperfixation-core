@@ -72,13 +72,6 @@ export function idempotencyKey(runId: string, key: string): string {
   return `${runId}:${key}`;
 }
 
-/** `hf_task`'s target columns are NOT NULL and the action row's are not, so the row stands in. */
-function taskTargetOf(row: ActionRow): { recordType: string; recordId: string } {
-  return row.record_type !== null && row.record_id !== null
-    ? { recordType: row.record_type, recordId: row.record_id }
-    : { recordType: "hf_action_log", recordId: row.id };
-}
-
 type Taken =
   | { result: ActionResult; uncertain?: undefined }
   | { uncertain: ActionUncertain; result?: undefined }
@@ -91,21 +84,23 @@ function titleOf(ctx: StepContext, options: ActionsPerformOptions): string {
 /**
  * The task for one uncertain action row. `DO NOTHING` on the partial unique index rather than an
  * upsert: whoever asked first owns the wording, and the id is looked up so the error can name it.
+ *
+ * The target columns follow the action row's, NULL included — a stand-in record type would fail
+ * E002 at the next boot, and `origin_ref` is what points the task back at the row.
  */
 async function openTask(
   db: StepDatabase,
-  target: { recordType: string; recordId: string },
-  actionLogId: string,
+  row: ActionRow,
   title: string,
 ): Promise<number | null> {
   const inserted = await db.execute<{ id: string }>(sql`
     INSERT INTO hf_task (record_type, record_id, title, origin, origin_ref)
-    VALUES (${target.recordType}, ${target.recordId}, ${title}, 'flow', ${actionLogId})
+    VALUES (${row.record_type}, ${row.record_id}, ${title}, 'flow', ${row.id})
     ON CONFLICT (origin, origin_ref) WHERE origin_ref IS NOT NULL DO NOTHING
     RETURNING id
   `);
   if (inserted.rows[0] !== undefined) return Number(inserted.rows[0].id);
-  return existingTaskId(db, actionLogId);
+  return existingTaskId(db, row.id);
 }
 
 /** Either writer may own it, so the lookup is not predicated on `origin`. */
@@ -184,11 +179,10 @@ export async function perform(
       // The transition is the serialization point: a pass that moved the row first owns the task.
       if (moved.rowCount !== 1) return { uncertain: await uncertainOf(db, ctx, options, row) };
 
-      const target = taskTargetOf(row);
-      const taskId = await openTask(db, target, row.id, titleOf(ctx, options));
+      const taskId = await openTask(db, row, titleOf(ctx, options));
       await db.execute(sql`
         INSERT INTO hf_activity (record_type, record_id, kind, run_id, meta)
-        VALUES (${target.recordType}, ${target.recordId}, 'action.uncertain', ${ctx.runId},
+        VALUES (${row.record_type}, ${row.record_id}, 'action.uncertain', ${ctx.runId},
                 ${JSON.stringify({
                   actionLogId: Number(row.id),
                   key: options.key,

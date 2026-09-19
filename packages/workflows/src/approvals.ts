@@ -6,7 +6,9 @@ import {
   type ApprovalVia,
 } from "@hyperfixation/db";
 import { sql } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
+import { prettifyError, type ZodType } from "zod";
 import { bumpAndEnqueueOn } from "./bump.js";
 import { currentRun } from "./run-context.js";
 import { concludeRun } from "./run-status.js";
@@ -152,6 +154,9 @@ function decisionOf(row: ApprovalRow, key: string): ApprovalDecision {
   };
 }
 
+/** What an approval type's `schema` has to be: anything zod can `safeParse` an edit with. */
+export type ApprovalDraftSchema = ZodType;
+
 export interface DecideOptions {
   ids: number[];
   decision: ApprovalDecisionKind;
@@ -159,8 +164,19 @@ export interface DecideOptions {
   /** The replay token: a second call carrying one already on a row writes nothing. */
   decisionKey: string;
   userId?: string | null;
-  /** Per-approval replacement drafts; validating them against the type is Phase 2. */
+  /** Per-approval replacement drafts, each parsed against its type's schema before any write. */
   edits?: Record<number, unknown>;
+  /**
+   * True when the decider holds the admin role, which lets them decide a row assigned to
+   * someone else. The caller's session decides that; `decide()` has no idea who is an admin.
+   */
+  admin?: boolean;
+  /**
+   * An approval `type` to the schema its edited draft must parse against. Sync and pure — it
+   * runs inside the locked transaction. Required whenever `edits` is non-empty; the schemas
+   * live in `core`'s registry, which `workflows` cannot import.
+   */
+  schemaFor?: (type: string) => ApprovalDraftSchema | undefined;
   lockTimeout?: string;
 }
 
@@ -178,6 +194,8 @@ export interface DecideResult {
   replayed: boolean;
   decided: DecidedApproval[];
   reattempted: { runId: string; attempt: number; workflowId: string }[];
+  /** Stamped on every row of a batch of more than one; null for a batch of one. */
+  batchId: string | null;
 }
 
 export class ApprovalBatchRefused extends Error {
@@ -226,12 +244,12 @@ const LOCK_RUNS_STATEMENT =
   "ORDER BY run_id FOR UPDATE";
 
 const LOCK_APPROVALS_STATEMENT =
-  "SELECT id, run_id, key, status, decision_key FROM hf_approval WHERE id = ANY($1::bigint[]) " +
-  "ORDER BY id FOR UPDATE";
+  "SELECT id, run_id, key, status, decision_key, type, assignee_id, record_type, record_id " +
+  "FROM hf_approval WHERE id = ANY($1::bigint[]) ORDER BY id FOR UPDATE";
 
 const DECIDE_STATEMENT =
   "UPDATE hf_approval SET status = $2, decided_by = $3, decided_at = now(), decided_via = $4, " +
-  "edited_draft = COALESCE($5::jsonb, edited_draft), decision_key = $6 " +
+  "edited_draft = COALESCE($5::jsonb, edited_draft), decision_key = $6, batch_id = $7 " +
   "WHERE id = $1 AND status = 'pending'";
 
 const RESUME_WORKFLOW_STATEMENT =
@@ -241,12 +259,20 @@ const AUDIT_STATEMENT =
   "INSERT INTO hf_audit (actor_id, action, target_type, target_id, meta) " +
   "VALUES ($1, $2, 'hf_approval', $3, $4::jsonb)";
 
+const ACTIVITY_STATEMENT =
+  "INSERT INTO hf_activity (record_type, record_id, kind, actor_id, run_id, meta) " +
+  "VALUES ($1, $2, $3, $4, NULL, $5::jsonb)";
+
 interface LockedApproval {
   id: string | number;
   run_id: string;
   key: string;
   status: ApprovalStatus;
   decision_key: string | null;
+  type: string;
+  assignee_id: string | null;
+  record_type: string | null;
+  record_id: string | null;
 }
 
 interface LockedRun {
@@ -272,6 +298,13 @@ export async function decide(
   options: DecideOptions,
 ): Promise<DecideResult> {
   assertNotInWorkflow(DECIDE_OPERATION);
+  // A caller that hands edits with no way to validate them is a wiring bug, not a refused row.
+  if (Object.keys(options.edits ?? {}).length > 0 && options.schemaFor === undefined) {
+    throw new TypeError(
+      `${DECIDE_OPERATION}: edits were given with no schemaFor; an edited draft is only written ` +
+        "once it parses against its approval type's schema",
+    );
+  }
   try {
     return await decideOnce(pool, dbosClient, options);
   } catch (error) {
@@ -299,6 +332,7 @@ async function decideOnce(
     for (const row of locked.rows) {
       if (!runIds.includes(row.run_id)) throw new ApprovalRunMoved(Number(row.id));
     }
+    const byId = new Map(locked.rows.map((row) => [Number(row.id), row]));
 
     const replay = locked.rows.filter((row) => row.decision_key === options.decisionKey);
     if (replay.length > 0) {
@@ -315,17 +349,20 @@ async function decideOnce(
       return replayed(client, locked.rows, runs.rows);
     }
 
-    assertDecidable(ids, locked.rows);
+    const parsed = assertDecidable(ids, locked.rows, options);
+    // One id is one row; a batch id would only name a batch of it.
+    const batchId = ids.length > 1 ? randomUUID() : null;
 
     for (const row of locked.rows) {
-      const edit = options.edits?.[Number(row.id)];
+      const id = Number(row.id);
       const written = await client.query(DECIDE_STATEMENT, [
         row.id,
         options.decision,
         options.userId ?? null,
         options.via,
-        edit === undefined ? null : JSON.stringify(edit),
+        parsed.has(id) ? JSON.stringify(parsed.get(id)) : null,
         options.decisionKey,
+        batchId,
       ]);
       if (written.rowCount !== 1) throw new ApprovalWriteLost(Number(row.id), written.rowCount ?? 0);
     }
@@ -358,37 +395,90 @@ async function decideOnce(
     // Fatal by construction: an audit row this transaction could not write is a decision with
     // no record of who made it, and there is no catch anywhere for it to be demoted by.
     for (const row of decided) {
+      const meta = JSON.stringify({
+        runId: row.runId,
+        key: row.key,
+        via: options.via,
+        decisionKey: options.decisionKey,
+        batchId,
+        resumeWorkflowId: row.resumeWorkflowId,
+      });
       await client.query(AUDIT_STATEMENT, [
         options.userId ?? null,
         `approval.${options.decision}`,
         String(row.approvalId),
-        JSON.stringify({
-          runId: row.runId,
-          key: row.key,
-          via: options.via,
-          decisionKey: options.decisionKey,
-          resumeWorkflowId: row.resumeWorkflowId,
-        }),
+        meta,
+      ]);
+      // Last, because `hf_activity` is in the last lock tier and every `hf_approval` write is
+      // already behind us. Fatal under the same rule as the audit row above. The record columns
+      // follow the approval's, NULL included — a stand-in type would fail E002 at the next boot.
+      const target = byId.get(row.approvalId)!;
+      await client.query(ACTIVITY_STATEMENT, [
+        target.record_type,
+        target.record_id,
+        `approval.${options.decision}`,
+        options.userId ?? null,
+        meta,
       ]);
     }
 
-    return { replayed: false, decided, reattempted };
+    return { replayed: false, decided, reattempted, batchId };
   });
 }
 
-/** Every reason the batch is refused, gathered before anything is written. */
-function assertDecidable(ids: number[], locked: LockedApproval[]): void {
+/**
+ * Every reason the batch is refused, gathered in one pass before anything is written, and the
+ * parsed edits the write then stores — what the schema returned, not what the caller sent.
+ */
+function assertDecidable(
+  ids: number[],
+  locked: LockedApproval[],
+  options: DecideOptions,
+): Map<number, unknown> {
   const reasons: { approvalId: number; reason: string }[] = [];
+  const parsed = new Map<number, unknown>();
   const found = new Set(locked.map((row) => Number(row.id)));
   for (const id of ids) {
     if (!found.has(id)) reasons.push({ approvalId: id, reason: "has no hf_approval row" });
   }
+  // `archive` and `sweep` carry no human decider — the record went, or the row timed out — so
+  // the assignee rule would only stop an assigned row from ever being cancelled or expired.
+  const humanDecision = options.via !== "archive" && options.via !== "sweep";
   for (const row of locked) {
+    const id = Number(row.id);
     if (row.status !== "pending") {
-      reasons.push({ approvalId: Number(row.id), reason: `is already ${row.status}` });
+      reasons.push({ approvalId: id, reason: `is already ${row.status}` });
     }
+    if (
+      humanDecision &&
+      row.assignee_id !== null &&
+      row.assignee_id !== options.userId &&
+      options.admin !== true
+    ) {
+      reasons.push({ approvalId: id, reason: `is assigned to ${row.assignee_id}` });
+    }
+    const edit = options.edits?.[id];
+    if (edit === undefined) continue;
+    const schema = options.schemaFor?.(row.type);
+    if (schema === undefined) {
+      reasons.push({
+        approvalId: id,
+        reason: `has an edit but type ${row.type} has no registered schema`,
+      });
+      continue;
+    }
+    const result = schema.safeParse(edit);
+    if (!result.success) {
+      reasons.push({
+        approvalId: id,
+        reason: `has an edit that does not match schema for type ${row.type}: ${prettifyError(result.error)}`,
+      });
+      continue;
+    }
+    parsed.set(id, result.data);
   }
   if (reasons.length > 0) throw new ApprovalBatchRefused(reasons);
+  return parsed;
 }
 
 /**
@@ -406,12 +496,14 @@ async function replayed(
     key: string;
     status: ApprovalDecisionKind;
     resume_workflow_id: string | null;
+    batch_id: string | null;
   }>(
-    "SELECT id, run_id, key, status, resume_workflow_id FROM hf_approval WHERE id = ANY($1::bigint[]) ORDER BY id",
+    "SELECT id, run_id, key, status, resume_workflow_id, batch_id FROM hf_approval WHERE id = ANY($1::bigint[]) ORDER BY id",
     [locked.map((row) => row.id)],
   );
   return {
     replayed: true,
+    batchId: rows[0]?.batch_id ?? null,
     decided: rows.map((row) => ({
       approvalId: Number(row.id),
       runId: row.run_id,

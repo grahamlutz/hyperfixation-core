@@ -1,7 +1,8 @@
 import { DBOS, type DBOSClient } from "@dbos-inc/dbos-sdk";
-import { ControlPlaneInWorkflow } from "@hyperfixation/db";
+import { checkE002, ControlPlaneInWorkflow } from "@hyperfixation/db";
 import { asRole, createTestDatabase, testBuildSha, type TestDatabase } from "@hyperfixation/testing";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import * as z from "zod";
 import {
   ApprovalBatchRefused,
   decide,
@@ -37,11 +38,17 @@ async function startRun(runId: string): Promise<void> {
 }
 
 /** A pending approval, the shape `waitForApproval` leaves behind before it suspends. */
-async function pending(runId: string, key = "send", expiresAt: string | null = null): Promise<number> {
+async function pending(
+  runId: string,
+  key = "send",
+  expiresAt: string | null = null,
+  assigneeId: string | null = null,
+): Promise<number> {
   const rows = await query<{ id: string }>(
-    "INSERT INTO hf_approval (run_id, key, workflow_id, type, draft, status, expires_at) " +
-      "VALUES ($1, $2, $3, 'send-email', '{\"body\":\"draft\"}'::jsonb, 'pending', $4) RETURNING id",
-    [runId, key, runId, expiresAt],
+    "INSERT INTO hf_approval (run_id, key, workflow_id, type, draft, status, expires_at, " +
+      "assignee_id) VALUES ($1, $2, $3, 'send-email', '{\"body\":\"draft\"}'::jsonb, 'pending', " +
+      "$4, $5) RETURNING id",
+    [runId, key, runId, expiresAt, assigneeId],
   );
   return Number(rows[0]!.id);
 }
@@ -70,12 +77,18 @@ async function workflow(workflowId: string): Promise<Record<string, unknown> | u
   )[0];
 }
 
+/** What the app's registry would hand `decide()`: `send-email` is the only type here. */
+const DRAFT_SCHEMA = z.object({ body: z.string() });
+const schemaFor = (type: string): z.ZodType | undefined =>
+  type === "send-email" ? DRAFT_SCHEMA : undefined;
+
 function decision(options: Partial<DecideOptions> & Pick<DecideOptions, "ids">): Promise<DecideResult> {
   return decide(control.pool, client, {
     decision: "approved",
     via: "web",
     decisionKey: `key-${options.ids.join(",")}`,
     userId: "crystal",
+    schemaFor,
     ...options,
   });
 }
@@ -103,6 +116,7 @@ afterAll(async () => {
 beforeEach(async () => {
   await query("DELETE FROM hf_approval");
   await query("DELETE FROM hf_audit");
+  await query("DELETE FROM hf_activity");
   await query("DELETE FROM hf_run");
 });
 
@@ -241,5 +255,277 @@ describe("approvals.decide", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+});
+
+describe("approvals.decide — validating the edited drafts", () => {
+  it("writes what the schema parsed, not what the caller sent", async () => {
+    const runId = runIdFor("parsed");
+    await startRun(runId);
+    const id = await pending(runId);
+
+    await decision({ ids: [id], edits: { [id]: { body: "kept", smuggled: "dropped" } } });
+
+    expect(await approval(id)).toMatchObject({ edited_draft: { body: "kept" } });
+  });
+
+  it("refuses the whole batch when one edit does not match its type's schema", async () => {
+    const first = runIdFor("schema-a");
+    const second = runIdFor("schema-b");
+    await startRun(first);
+    await startRun(second);
+    const good = await pending(first);
+    const bad = await pending(second);
+
+    await expect(
+      decision({ ids: [good, bad], edits: { [good]: { body: "fine" }, [bad]: { body: 7 } } }),
+    ).rejects.toThrow(new RegExp(`${bad} has an edit that does not match schema for type send-email`));
+
+    expect(await approval(good)).toMatchObject({ status: "pending", edited_draft: null });
+    expect(await approval(bad)).toMatchObject({ status: "pending" });
+    expect(await run(first)).toMatchObject({ attempt: 1 });
+    expect(await run(second)).toMatchObject({ attempt: 1 });
+  });
+
+  it("refuses an edit on a type no schema is registered for", async () => {
+    const runId = runIdFor("no-schema");
+    await startRun(runId);
+    const id = await pending(runId);
+    await query("UPDATE hf_approval SET type = 'send-letter' WHERE id = $1", [id]);
+
+    await expect(decision({ ids: [id], edits: { [id]: { body: "x" } } })).rejects.toThrow(
+      /has an edit but type send-letter has no registered schema/,
+    );
+    expect(await approval(id)).toMatchObject({ status: "pending" });
+  });
+
+  it("refuses edits with no schemaFor before it touches the database", async () => {
+    const connect = vi.spyOn(control.pool, "connect");
+
+    await expect(
+      decide(control.pool, client, {
+        ids: [1],
+        decision: "approved",
+        via: "web",
+        decisionKey: "no-lookup",
+        edits: { 1: { body: "x" } },
+      }),
+    ).rejects.toBeInstanceOf(TypeError);
+
+    expect(connect).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Adversary target (c). The lookup runs inside `controlPlaneTx`'s `work`, and nothing in
+   * `decideOnce` catches — so a throw from it has to leave through `ROLLBACK`, not a half-write.
+   */
+  it("rolls the whole transaction back when schemaFor itself throws", async () => {
+    const runId = runIdFor("throwing-lookup");
+    await startRun(runId);
+    const id = await pending(runId);
+    const boom = new Error("the registry exploded");
+
+    await expect(
+      decision({
+        ids: [id],
+        edits: { [id]: { body: "x" } },
+        schemaFor: () => {
+          throw boom;
+        },
+      }),
+    ).rejects.toBe(boom);
+
+    expect(await approval(id)).toMatchObject({ status: "pending", decision_key: null });
+    expect(await run(runId)).toMatchObject({ attempt: 1 });
+    expect(await workflow(`${runId}:2`)).toBeUndefined();
+    expect(await query("SELECT id FROM hf_audit")).toHaveLength(0);
+    expect(await query("SELECT id FROM hf_activity")).toHaveLength(0);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+});
+
+describe("approvals.decide — the assignee rule", () => {
+  it("refuses a row assigned to someone else", async () => {
+    const runId = runIdFor("assigned");
+    await startRun(runId);
+    const id = await pending(runId, "send", null, "dana");
+
+    await expect(decision({ ids: [id] })).rejects.toThrow(
+      new RegExp(`${id} is assigned to dana`),
+    );
+    expect(await approval(id)).toMatchObject({ status: "pending" });
+    expect(await run(runId)).toMatchObject({ attempt: 1 });
+  });
+
+  it("lets the assignee decide their own row", async () => {
+    const runId = runIdFor("assignee-self");
+    await startRun(runId);
+    const id = await pending(runId, "send", null, "crystal");
+
+    await decision({ ids: [id] });
+
+    expect(await approval(id)).toMatchObject({ status: "approved", decided_by: "crystal" });
+  });
+
+  it("lets an admin decide a row assigned to someone else", async () => {
+    const runId = runIdFor("assignee-admin");
+    await startRun(runId);
+    const id = await pending(runId, "send", null, "dana");
+
+    await decision({ ids: [id], admin: true, via: "admin" });
+
+    expect(await approval(id)).toMatchObject({ status: "approved", decided_via: "admin" });
+  });
+
+  it("still refuses via 'admin' without the admin flag — the flag is the authority", async () => {
+    const runId = runIdFor("admin-via-only");
+    await startRun(runId);
+    const id = await pending(runId, "send", null, "dana");
+
+    await expect(decision({ ids: [id], via: "admin" })).rejects.toBeInstanceOf(
+      ApprovalBatchRefused,
+    );
+  });
+
+  it("exempts archive and sweep, which carry no human decider", async () => {
+    const archived = runIdFor("assignee-archive");
+    const swept = runIdFor("assignee-sweep");
+    await startRun(archived);
+    await startRun(swept);
+    const byArchive = await pending(archived, "send", null, "dana");
+    const bySweep = await pending(swept, "send", null, "dana");
+
+    await decision({ ids: [byArchive], decision: "cancelled", via: "archive", userId: null });
+    await decision({ ids: [bySweep], decision: "expired", via: "sweep", userId: null });
+
+    expect(await approval(byArchive)).toMatchObject({ status: "cancelled" });
+    expect(await approval(bySweep)).toMatchObject({ status: "expired" });
+  });
+});
+
+describe("approvals.decide — hf_activity", () => {
+  it("writes one row per decided approval, against the record the approval names", async () => {
+    const runId = runIdFor("activity");
+    await startRun(runId);
+    const id = await pending(runId);
+    await query("UPDATE hf_approval SET record_type = 'business', record_id = '42' WHERE id = $1", [
+      id,
+    ]);
+
+    const result = await decision({ ids: [id] });
+
+    expect(
+      await query("SELECT record_type, record_id, kind, actor_id, run_id, meta FROM hf_activity"),
+    ).toEqual([
+      {
+        record_type: "business",
+        record_id: "42",
+        kind: "approval.approved",
+        actor_id: "crystal",
+        // Reading 4: a decision is a web-side write, so the timeline groups it under "manual".
+        run_id: null,
+        meta: {
+          runId,
+          key: "send",
+          via: "web",
+          decisionKey: `key-${id}`,
+          batchId: null,
+          resumeWorkflowId: result.decided[0]!.resumeWorkflowId,
+        },
+      },
+    ]);
+  });
+
+  it("leaves the record columns null when the approval names no record, so E002 passes", async () => {
+    const runId = runIdFor("activity-no-record");
+    await startRun(runId);
+    const id = await pending(runId);
+
+    await decision({ ids: [id] });
+
+    // A stand-in such as `'hf_approval'` would fail E002 at the next worker boot; the audit
+    // row's `target_id` is where the approval id is already recorded.
+    expect(await query("SELECT record_type, record_id FROM hf_activity")).toEqual([
+      { record_type: null, record_id: null },
+    ]);
+    await expect(checkE002(control.pool, [])).resolves.toBeUndefined();
+  });
+
+  it("writes nothing on a replay", async () => {
+    const runId = runIdFor("activity-replay");
+    await startRun(runId);
+    const id = await pending(runId);
+
+    await decision({ ids: [id] });
+    await decision({ ids: [id] });
+
+    expect(await query("SELECT id FROM hf_activity")).toHaveLength(1);
+  });
+
+  it("is fatal: a failed insert leaves the approval pending and a retry succeeds", async () => {
+    const runId = runIdFor("activity-fatal");
+    await startRun(runId);
+    const id = await pending(runId);
+
+    await asRole(database.migratorUrl, async (pg) => {
+      await pg.query(
+        "CREATE FUNCTION refuse_activity() RETURNS trigger AS $$ BEGIN " +
+          "RAISE EXCEPTION 'hf_activity is closed'; END; $$ LANGUAGE plpgsql",
+      );
+      await pg.query(
+        "CREATE TRIGGER refuse_activity BEFORE INSERT ON hf_activity " +
+          "FOR EACH ROW EXECUTE FUNCTION refuse_activity()",
+      );
+    });
+
+    await expect(decision({ ids: [id] })).rejects.toThrow(/hf_activity is closed/);
+
+    expect(await approval(id)).toMatchObject({ status: "pending", decision_key: null });
+    expect(await run(runId)).toMatchObject({ attempt: 1 });
+    expect(await workflow(`${runId}:2`)).toBeUndefined();
+    expect(await query("SELECT id FROM hf_audit")).toHaveLength(0);
+
+    await asRole(database.migratorUrl, async (pg) => {
+      await pg.query("DROP TRIGGER refuse_activity ON hf_activity");
+      await pg.query("DROP FUNCTION refuse_activity()");
+    });
+
+    await decision({ ids: [id] });
+
+    expect(await approval(id)).toMatchObject({ status: "approved", decision_key: `key-${id}` });
+    expect(await query("SELECT id FROM hf_activity")).toHaveLength(1);
+  });
+});
+
+describe("approvals.decide — batch_id", () => {
+  it("stamps one id on every row of a multi-row batch and returns it", async () => {
+    const first = runIdFor("batch-id-a");
+    const second = runIdFor("batch-id-b");
+    await startRun(first);
+    await startRun(second);
+    const ids = [await pending(first), await pending(second)];
+
+    const result = await decision({ ids });
+
+    expect(result.batchId).toEqual(expect.any(String));
+    const rows = await query<{ batch_id: string | null }>(
+      "SELECT batch_id FROM hf_approval ORDER BY id",
+    );
+    expect(rows).toEqual([{ batch_id: result.batchId }, { batch_id: result.batchId }]);
+
+    // A replay reads the stored id back rather than minting a second one.
+    expect((await decision({ ids })).batchId).toBe(result.batchId);
+  });
+
+  it("leaves batch_id null for a batch of one", async () => {
+    const runId = runIdFor("batch-id-single");
+    await startRun(runId);
+    const id = await pending(runId);
+
+    expect((await decision({ ids: [id] })).batchId).toBeNull();
+    expect(await query("SELECT batch_id FROM hf_approval")).toEqual([{ batch_id: null }]);
   });
 });

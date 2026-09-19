@@ -8,6 +8,7 @@ import {
   type TestDatabase,
 } from "@hyperfixation/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import * as z from "zod";
 import { decide } from "./approvals.js";
 import { getClient, resetClient } from "./client.js";
 import { createControlPool, type ControlPool } from "./control-pool.js";
@@ -117,6 +118,7 @@ describe("waitForApproval — the gate, the suspend, and the attempt decide() en
         userId: "crystal",
         decisionKey: `web-${runId}`,
         edits: { [Number(pending!.id)]: { body: "crystal's words" } },
+        schemaFor: () => z.object({ body: z.string() }),
       });
 
       await waitForStatus(runId, "done");
