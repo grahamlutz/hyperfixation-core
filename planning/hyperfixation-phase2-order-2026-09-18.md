@@ -223,7 +223,7 @@ Phase 2 verification names it, and it should **reuse** case 3's fixture rather t
 > finishes at `attempt = 1`. Whole file: 4 tests in ~14 s (the loop ~4 s), stable over three runs; the loop's
 > timeout is 60 s, the crash cases' 240 s as in case 3.
 
-### L4 — `kill-switch.test.ts` — ⬜ Not started
+### L4 — `kill-switch.test.ts` — ✅ Done (deviated — see note)
 
 100 runs each orphaning one `started` row by failing, then 100 `reconcile()` passes: 100 `abandoned` rows,
 derived reservation 0, the period's `spent_usd` unchanged, `BudgetExceeded` still fires at the budget. Then
@@ -236,6 +236,23 @@ Lives in `ai` — it drives `llm.run` — though the plan's verification line li
 
 **Done:** `pnpm --filter @hyperfixation/ai test kill-switch`. Budget the runtime: 100 passes each scanning
 `hf_run` is seconds, not minutes, but say so in the file's timeout.
+
+> **Built, and where it differs from the wording above:** no worker is spawned — both halves run in-process
+> against a `createStepPool` `ctx.tx`, with `getClient()` and the probe pool handed to `reconcile()` and
+> `decide()` as the control plane, which works with no `DBOS.launch()` because `migrate()`'s
+> `dbos schema -s dbos -r <role>` step already created the system schema. Half (1)'s 100 orphans are inserted
+> directly (two `generate_series` statements: a `failed` run and a `started` row on the attempt that was
+> current), since redeploy case 9 already proves a real kill leaves exactly that row and 100 killed workers
+> would cost minutes; the `spent_usd` the passes must not move is made non-zero first by one real `llm.run`,
+> so "unchanged" is a claim about a figure that is not zero. Half (2) needs the reservation read *mid-flight*,
+> which no cassette can do, so the file carries a 40-line `ParkedCall` `LanguageModelV4` whose `doGenerate`
+> parks until the test releases it — attempt 1 parks forever (the answer a dead process never gets), and
+> attempt 2 is released to carry the row to `ok`. Two databases, one per `describe`, because half (1) asserts
+> absolute `spent_usd`. Two assertions beyond the wording: every pass reports `anomalies: []` and
+> `failures: []` (a pass that was quietly failing would otherwise still "abandon 100"), and a call that *does*
+> fit still passes after the 100 orphans — round-3 finding 6's lesson is that a spurious refusal is the worse
+> failure. Whole file: 2 tests in ~1.4 s, the 100 passes ~0.5 s of that, stable over three runs; both timeouts
+> are 60 s, which is two orders of magnitude of headroom on a shared Postgres.
 
 ### L5a — `budget.test.ts` (b), (c), (d) — ✅ Done
 
@@ -390,27 +407,42 @@ that throws rolls the whole transaction back and the throw leaves `decide()` una
 green after a decision and after an uncertain action on rows that carry no record, in `approvals.test.ts`,
 `actions.test.ts` and `reconcile.test.ts` — the regression `redeploy-case-1` caught.
 
-### P3 — The approvals negative suite — ⬜ Not started
+### P3 — The approvals negative suite — ✅ Done (deviated — see note)
 
 The plan's list, mapped against what `approvals.test.ts` and `wait-for-approval.test.ts` already prove:
 
 | Case | At `4d08ac2` | Lands at |
 |---|---|---|
 | batch with one edit | edit stored, unvalidated | ✅ P2 (#19): parsed against the type's Zod schema, the parsed value stored |
-| stale row refuses the whole batch with per-row reasons | ✅ | — |
+| stale row refuses the whole batch with per-row reasons | ✅ | — (`approvals.test.ts` "refuses the whole batch, writing nothing, when one row is not pending") |
 | assignee mismatch refused | ⬜ | ✅ P2 (#19) |
-| replayed `decisionKey` returns the first result, writes nothing | ✅ | — |
-| crash inside `waitForApproval` creates no second row | ⬜ (`killAt('approval', 'in-tx')` on the step, then a second attempt) | P3 |
-| two pending approvals on one run; deciding the second resumes with the second's decision, leaves the first pending (3b) | ⬜ | P3 |
-| `dbos workflow delete` on the run's rows before deciding loses nothing (3c) | ⬜ | P3 |
-| resume workflow runs under the current version and is enqueued exactly once when `decide()` is called twice concurrently | ⬜ | P3 |
-| `hf_audit` insert made to fail → throw, `pending`, no DBOS row, retry succeeds | ⬜ (P2 wrote the `BEFORE INSERT` trigger technique for `hf_activity` in `approvals.test.ts`; reuse it) | P3 |
-| `decide()` on X while a step holds `ctx.tx` inside `waitForApproval`'s `INSERT … ON CONFLICT` on X: no `40P01` | ⬜ | P3 |
+| replayed `decisionKey` returns the first result, writes nothing | ✅ | — (`approvals.test.ts` "returns the earlier result and writes nothing when the decisionKey replays") |
+| crash inside `waitForApproval` creates no second row | ⬜ (`killAt('approval', 'in-tx')` on the step, then a second attempt) | ✅ P3: `wait-for-approval.test.ts` "creates no second row when the gate is re-entered, and resumes under the live version" |
+| two pending approvals on one run; deciding the second resumes with the second's decision, leaves the first pending (3b) | ⬜ | ✅ P3: `wait-for-approval.test.ts` "resumes with the decided row's own decision and leaves the run's other approval pending"; `approvals.test.ts` "decides the second of a run's two pending approvals and leaves the first pending" |
+| `dbos workflow delete` on the run's rows before deciding loses nothing (3c) | ⬜ | ✅ P3: `wait-for-approval.test.ts` "loses nothing when the run's DBOS workflow rows are deleted before the decision" |
+| resume workflow runs under the current version and is enqueued exactly once when `decide()` is called twice concurrently | ⬜ | ✅ P3: the version half in `wait-for-approval.test.ts` "creates no second row …"; the concurrency half in `approvals.test.ts` "enqueues the resume workflow exactly once when the same decisionKey arrives twice" and "refuses the second of two concurrent decisions carrying different decisionKeys" |
+| `hf_audit` insert made to fail → throw, `pending`, no DBOS row, retry succeeds | ⬜ (P2 wrote the `BEFORE INSERT` trigger technique for `hf_activity` in `approvals.test.ts`; reuse it) | ✅ P3: `approvals.test.ts` "hf_audit > is fatal: a failed insert leaves the approval pending and a retry succeeds" |
+| `decide()` on X while a step holds `ctx.tx` inside `waitForApproval`'s `INSERT … ON CONFLICT` on X: no `40P01` | ⬜ | ✅ P3: `approvals.test.ts` "the run-first lock order > waits out the held ctx.tx instead of deadlocking on the approval it is deciding" |
 
 The last one has no `killAt` park point: `'in-tx'` parks after the fence statement, before the `INSERT`.
 Either add a park point after the insert, or write it in `fence.test.ts`'s style — two raw connections issuing
 the real statements in the real order, no DBOS — which is what that case is actually about. Prefer the
 latter; it lives in `workflows` (it needs `decide()`), not in `db`.
+
+> **Built, and where it differs from the wording above:** P3 is test-only — no production file changed.
+> `killAt('approval', 'in-tx')` is **not reachable**: `parkFor()` is honoured only where a fixture calls it, and
+> both of `waitForApproval`'s steps are production code that parks nowhere, so a test-only chunk cannot hold the
+> gate inside `createOrRead`. The crash is arranged from the one point inside the gate a fixture owns — the
+> `notify` callback, which runs in the `approval:notify` step — reached with the approval row **committed** and
+> `notified_at` still NULL. That is the stronger half of the negative anyway: it is the state in which a
+> re-entry without `ON CONFLICT DO NOTHING` would open the second row. Worker A (parked there, then `SIGKILL`ed)
+> and worker B (a fresh `HF_BUILD_SHA`, whose boot `reconcile()` bumps to `:2`) also give the "current version"
+> row for free: `dbos.workflow_status.application_version` is A's on `:1` and B's on `:2` and `:3`.
+> The `40P01` case took the `fence.test.ts` route as the document prefers, on a `createStepPool` connection
+> inside `approvals.test.ts` rather than a file of its own. Two rows were already green and are cited above
+> rather than duplicated. `test-support/approval-flow.ts` grew an optional `extraKey` input (a second pending
+> row on the run, opened by a step before the gate, for 3b), the `NOTIFY_PARK_KEY` park point, and a decision
+> marker that now carries `runId` and `key` so one worker's log can serve several runs.
 
 **Done:** `pnpm --filter @hyperfixation/workflows test approvals` — every row of the table green.
 
@@ -612,7 +644,7 @@ number here.
 
 | Track | Package(s) | Can start | Must land by | Status |
 |---|---|---|---|---|
-| **L — ledger** (L1–L5b) | `ai` (+ one `startWorker` hook in `workflows` for L2) | chunk 0 | T2 needs L1; Exit needs all | 🚧 L1–L3 done |
+| **L — ledger** (L1–L5b) | `ai` (+ one `startWorker` hook in `workflows` for L2) | chunk 0 | T2 needs L1; Exit needs all | 🚧 L1–L4 done |
 | **P — approvals and actions** (P1–P4) | `workflows` | chunk 0 | T2 needs P1, P2; Exit needs all | 🚧 P1, P2 done |
 | **C — core** (C1–C6) | `core`, `db` (C2), `admin` (C5) | chunk 0 | T2 needs C1–C4; Exit needs C6 | 🚧 C1, C2 done |
 | **T — testing and template** (T1–T3) | `testing`, `hyperfixation-template` | chunk 0 for T1; the others as listed | Exit | ⬜ |
@@ -726,8 +758,8 @@ orders against, to be overturned cheaply if wrong.
 7. **Defaulted — Sentry is not Phase 2's.** The template's `instrumentation.ts` says `TODO(phase 2)` for
    both Sentry and Langfuse; the plan's Phase 2 text names only Langfuse, and Phase 3's `hf new` provisions
    the DSN. Change the TODO's label, not the phase.
-8. **Defaulted — `kill-switch.test.ts` lives in `ai`**, where `llm.run` is; the plan's verification line
-   lists it under the `workflows` filter. Update the plan's line when the file lands.
+8. **Closed by L4 — `kill-switch.test.ts` lives in `ai`**, where `llm.run` is; the plan's verification line
+   now names it under the `ai` filter and no longer under `workflows`.
 
 ## Carried from Phase 1's "Still open"
 
