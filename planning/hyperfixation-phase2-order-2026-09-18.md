@@ -712,20 +712,21 @@ The gate assertion is end-to-end: a gate at the app default opens the month's ro
 is refused with `BudgetExceeded`, the admin raises the period's budget, and **the same call then goes
 through** — then a budget of 0, below what the period spent, refuses the one after it.
 
-### C6 — The workspace — ⬜ Not started, **open question 2 decided: descriptors, template renders**
+### C6 — The workspace — 🚧 Planned (2026-09-19), split into C6.1–C6.7; **descriptors, template renders**
 
 **Decided (Graham, 2026-09-19):** (1) scope is the **full spec** — home, approval inbox with batch approve and
 inline edit, pipeline board, record page with timeline — **split into PRs**: the core descriptors first, then the
 template rendering in pieces. (2) The board's **stage list is registered by the app, ordered, per record type**
 (a small registry, e.g. `stages` on the record definition, which nothing defines yet); a `stage` value outside the
-list shows in an "other" column. The default approval notifier (P4) lands here with the URL it needed.
+list shows in an "other" column. The default approval notifier lands here with the URL it needed (P4 is only the
+Telegram callback handler; the notifier is the sending side and is C6.3/C6.7).
 
 Graham confirmed (2026-09-18) the recommended shape: `@hyperfixation/core/workspace` exports descriptors, not
 React components. `core` stays framework-light — no `react` peer, no `core`-owned server actions to bind — and
 `hyperfixation-template` renders them, matching every other Phase 1 package's boundary. The plan's routing
 arrow (which reads as components) does not win here; the precedent every other package already set does. UI
-pieces the descriptors need come from `registry/` (the shadcn registry), pulled into the template the way any
-shadcn item is.
+is **plain React server components** in the style of the admin pages: `registry/registry.json` has no items and
+the template has no Tailwind, so adopting shadcn is a separate later template PR (decided 2026-09-19).
 
 Home (what needs the user: pending approvals assigned to them, open tasks, review-queue count); the approval
 inbox with batch approve and inline edit — one `app.approvals.decide` call per submission with `via: 'web'`,
@@ -733,7 +734,33 @@ inbox with batch approve and inline edit — one `app.approvals.decide` call per
 refuses; the pipeline board over the mixin's `stage`; the record page with the timeline **grouped by
 `run_id`**, labels, outcomes, tasks and the one-click archive (a control-plane call from the web, which is
 where it is allowed). Model output is escaped; the plan's own test is a draft containing `<img>` rendered as
-text. The default approval notifier (P4) lands here with the URL it needed.
+text.
+
+**PR breakdown (planner, 2026-09-19; no schema change, no new lock sequence).**
+
+| PR | Repo | Scope | Depends on |
+|---|---|---|---|
+| C6.1 | core | `RecordDefinition` (`stages`, `title`, `displayColumn`; duplicate stage → `InvalidDefinition`), `@hyperfixation/core/workspace` subpath, `route()`, `nav()`, `approvalPath()`, `draftFields()` | — |
+| C6.2 | core | `app.workspace.{home,inbox,board,record,decide}` (control-plane reads; `decide` = `approvals.decide` with `via: 'web'`) | C6.1 |
+| C6.3 | workflows + core | `ApprovalNotifier`, `StartWorkerOptions.approvalNotifier` (used by `waitForApproval` when the call passes no `notify`), `ApprovalNotice` gains `assigneeId/recordType/recordId/expiresAt`, `createApprovalNotifier({ appUrl, recipients, send })` | — |
+| C6.4 | template | shell, home, record page (timeline by run, labels, outcomes, tasks, archive); keeps the `Signed in as <email>` string the e2e asserts | C6.2 |
+| C6.5 | template | inbox: batch approve/reject, inline edit, client `decisionKey` (`crypto.randomUUID()` once per mount) | C6.4, T2c |
+| C6.6 | template | read-only board per record type, "Other" column | C6.4 |
+| C6.7 | template | `src/notify.ts`, `worker.ts`, `tests/worker-fixture.ts`; e2e: mailpit receives a link | C6.3, C6.4, T2c |
+
+C6.1 ∥ C6.3; C6.5 ∥ C6.6. If T2c slips, C6.5/C6.7 land with a tests-only draft flow. The C5 budget form is
+independent of all of these.
+
+**Decisions from the plan (2026-09-19).** The notifier is injected through `startWorker({ approvalNotifier })`
+and read from `workerRuntime()` in `waitForApproval` (`defineApp({ notify })` was rejected: flows call
+`waitForApproval` from `workflows` and cannot reach the app). **Recipients:** the assignee's `hf_user.email`, else
+every `role = 'admin'` user; none → one `console.warn`, no send, `notified_at` still stamped. Messages are text
+only. `@hyperfixation/core/workspace` is a second subpath, so `exports.test.ts:27` (asserts exports are exactly
+`["."]`), a second api-extractor config and `etc/core-workspace.api.md` follow the `db` migrator precedent
+(`packages/db/package.json:25`). Scope fence: no shadcn/Tailwind, no drag-to-stage, no Telegram sending, no
+`records.setStage`, no change to `decide()` semantics. **Adversary targets:** the notifier's read inside `ctx.tx`
+under a bump race (does a stale attempt get `StaleAttempt` before sending?) and `workspace.decide` with
+`admin: false` on an assigned row (assignee rule).
 
 **Done:** `pnpm --filter @hyperfixation/core test workspace` (escaping; a batch decision with one edit reaches
 `decide()` with that edit and one `decisionKey`); the template's e2e extended — sign in, see the inbox, approve
@@ -896,7 +923,7 @@ number here.
 |---|---|---|---|---|
 | **L — ledger** (L1–L5b) | `ai` (+ one `startWorker` hook in `workflows` for L2) | chunk 0 | T2 needs L1; Exit needs all | ✅ L1–L5b done |
 | **P — approvals and actions** (P1–P4) | `workflows` | chunk 0 | T2 needs P1, P2; Exit needs all | 🚧 P1–P3 done; P4 open (decided: callback handler only) |
-| **C — core** (C1–C6) | `core`, `db` (C2), `admin` (C5) | chunk 0 | T2 needs C1–C4; Exit needs C6 | 🚧 C1–C5 done; C6 open (decided: full spec, split; app-registered stages) |
+| **C — core** (C1–C6) | `core`, `db` (C2), `admin` (C5) | chunk 0 | T2 needs C1–C4; Exit needs C6 | 🚧 C1–C5 done; C6 planned as C6.1–C6.7 (C6.1 ∥ C6.3 next) |
 | **T — testing and template** (T1–T3) | `testing`, `hyperfixation-template` | chunk 0 for T1; the others as listed | Exit | 🚧 T1, T0, T2a, T2b done; T2c, T2d, T3 open |
 
 **Execution model.** Chunk 0 is one PR by one head, first. After it the three tracks are genuinely
@@ -1049,7 +1076,7 @@ hand, against each configured provider so the cost table's numbers are checked a
 - **The `workflows` ↔ `core` cycle constrains P2.** `decide()` cannot import the registry; the schema lookup
   is a parameter. An implementer who reaches for the import will get a build error, which is the cheap
   failure; the expensive one is duplicating the registry in `workflows`.
-- **C6 is the largest chunk and its shape is undecided.** Ordered last in its track for that reason; T2 does
+- **C6 is the largest chunk.** Its shape is now decided and split into C6.1–C6.7. Ordered last in its track for that reason; T2 does
   not depend on it, so the loop can be proven from the harness before the UI exists.
 - **Suite runtime.** Phase 1's 3m16s is about to double or worse. The 200k `EXPLAIN` case and the 100×100
   kill switch are the ones to measure first; if either is over a minute, gate it behind a `describe.skipIf`
