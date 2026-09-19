@@ -1019,7 +1019,7 @@ prerenders.
 
 ---
 
-## Exit — Phase 2 exit assembly — 🚧 In progress
+## Exit — Phase 2 exit assembly — 🚧 Built (template #24 open); one bar wording to settle
 
 The bar, from the plan: *the demo run approves two drafts with one edit, mailpit receives the send, a
 follow-up task appears, a label is recorded; pausing mid-run stops the next flow at its next step and resuming
@@ -1040,6 +1040,32 @@ number here.
 
 **Done:** `pnpm test:e2e` green in a generated app for both e2e files; the soak's numbers in this document;
 `pnpm -w typecheck lint test api-extractor` green in core with the new file and test counts recorded.
+
+> **Built (template #24; CI green, not yet merged), 2026-09-19.** `tests/e2e/demo-loop.e2e.ts` and a shared
+> `tests/e2e/harness.ts` (used by both e2e files). Run in a generated app on the dev cluster (`hf new` from the worktree,
+> mailpit :1025/:8025): `pnpm test:e2e`, 2 files, 11 tests, green twice (~60 s); `typecheck`, `lint`, `pnpm test` (13 files,
+> 72 tests) and `next build --webpack` green.
+>
+> **Core**, clean clone of `origin/main` at `4c1cb4a`: `pnpm -w typecheck lint test api-extractor` green, 44 tasks;
+> **91 test files, 596 tests (595 passed, 1 skipped)** — admin 7/44, ai 19/50, auth 5/38, cli 11/66 (1 skipped), core 15/124,
+> db 12/129, testing 3/16, workflows 19/129.
+>
+> **Soak (manual, 30 min):** `pnpm dev` + `pnpm worker`, 30 s tick against the three 10-minute schedules. The draft
+> flow was **not** fired, so the loop churned collect/resolve/score; every fifth minute the two records' scores were nulled
+> as `postgres` so score had real work (collect 5→7, resolve 8→10, score 4→6, `hf_llm_call` 28→32, 0 failed runs, clean
+> SIGTERM). Per-minute `hf_<app>` connection counts: `8 3 3 3 3 3 3 3 3 3 4 4 3 4 3 3 3 3 3 3 4 4 4 4 3 3 3 3 3 3`.
+> **Not flat, and it cannot be**: `pg.Pool` closes idle clients after 10 s, so the count tracks activity rather than holding
+> the budget. A parallel 5 s sampler (320 samples) gives the real peak: **max 9** (3×135, 4×74, 5×32, 6×26, 8×33, 9×20),
+> no upward drift, under the budgeted 24 and the role's `CONNECTION LIMIT 25`. **The bar's word "flat" should be restated
+> as "bounded: no upward drift and a peak under the limit"**, which is what this run shows.
+>
+> **Where it differs from the plan:** (1) **`instrumentation.ts` needed `/* webpackIgnore: true */` on the dynamic import
+> (a T3 bug):** `serverExternalPackages` does not reach the instrumentation hook, so webpack followed
+> `@hyperfixation/workflows` into `pg` and 500'd every page under `pnpm dev`; CI's `next build` had not caught it.
+> Registration still runs with `LANGFUSE_*` set. (2) Both approvals are on **the same record**: the draft flow's select
+> takes the best-scoring unarchived row on every attempt, so two distinct records cannot both survive to their sends.
+> (3) The paused flow is a `resolve`-queue flow started into the paused app — deterministic, since a pause deliberately
+> leaves that queue alone. Core findings: none new.
 
 ---
 
