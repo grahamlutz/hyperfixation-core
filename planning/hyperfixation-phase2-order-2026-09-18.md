@@ -724,7 +724,7 @@ The gate assertion is end-to-end: a gate at the app default opens the month's ro
 is refused with `BudgetExceeded`, the admin raises the period's budget, and **the same call then goes
 through** — then a budget of 0, below what the period spent, refuses the one after it.
 
-### C6 — The workspace — 🚧 Planned (2026-09-19), split into C6.1–C6.7; **descriptors, template renders**
+### C6 — The workspace — 🚧 In progress (C6.1–C6.3 landed; C6.4–C6.7 open), **descriptors, template renders**
 
 **Decided (Graham, 2026-09-19):** (1) scope is the **full spec** — home, approval inbox with batch approve and
 inline edit, pipeline board, record page with timeline — **split into PRs**: the core descriptors first, then the
@@ -773,6 +773,34 @@ only. `@hyperfixation/core/workspace` is a second subpath, so `exports.test.ts:2
 `records.setStage`, no change to `decide()` semantics. **Adversary targets:** the notifier's read inside `ctx.tx`
 under a bump race (does a stale attempt get `StaleAttempt` before sending?) and `workspace.decide` with
 `admin: false` on an assigned row (assignee rule).
+
+> **C6.1 built (#35), and where it differs from the plan:** `RecordDefinition`/`StageDefinition` are in
+> `records.ts`; duplicate stages are refused in `defineApp` at registration (no `defineRecord` exists). The
+> `./workspace` subpath carries the functions, but `.` also exports the workspace **types** (`AppWorkspace`,
+> `WorkspaceRoute`, `DraftField`, `WorkspaceNavItem`, `WorkspaceRegistries`), because `App.workspace` names them and
+> api-extractor errors on a forgotten export. `route()` takes the two registries; a record type beats a page
+> registered at the same path, pages match on their whole registered path (also `nav()`'s `href`), and a non-numeric
+> or `0` approval id is not a route. `draftFields`: `null`/`undefined` → `""`, `Date` → ISO, containers add no row, a
+> bare scalar is `path: "value"`, array paths are `a[0].b`, labels are humanised keys (`contactEmail` → "Contact
+> email"; array items suffixed `1`, `2`).
+>
+> **C6.3 built (#36), and where it differs from the plan:** the notifier and `createApprovalNotifier` live in
+> **`@hyperfixation/workflows`** (`approval-notifier.ts`), not `core/workspace`, because C6.3 was built before the
+> subpath existed; the URL is an inline `/w/approvals/<id>` and it can re-export from `core/workspace` later.
+> `ApprovalNotice` gained `assigneeId`, `recordType`, `recordId` and `expiresAt` (a real `Date`: `db.execute` returns
+> timestamps as strings, so the read selects ISO 8601 and converts). The assignee-else-admins recipient query is
+> **not** in core; it is C6.7's. **Adversary question answered:** a stale attempt never sends — `step()` throws
+> `StaleAttempt` before the notify body runs, and a bump after that read is caught by `ctx.tx`'s `FOR SHARE` on
+> `hf_run`, which the recipient read is the first statement of. What remains is a bump after that transaction commits:
+> a duplicate message, never a lost one, the same at-least-once trade `notified_at` already carries (tested: a worker
+> killed inside `send` leaves one message; the re-entry sends a second and keeps one approval row).
+>
+> **C6.2 built (#37), and what its adversary found:** `app.workspace.{inbox,home,board,record,decide}` in
+> `workspace-views.ts` (plain unlocked SELECTs; the `./workspace` subpath stays pure and synchronous). Two low breaks
+> were fixed before merge: a run whose id is the empty string shared a timeline group with the manual writes, and
+> `inbox({ userId: null })` counted every unassigned row as `mine`. Everything else held: `decide` with `via` smuggled in
+> the options, a truthy non-boolean `admin`, a leaked `decisionKey` and a mixed batch all refuse; identifiers go
+> through `quoteIdent`; `record()` deliberately shows every pending approval on the record regardless of assignee.
 
 **Done:** `pnpm --filter @hyperfixation/core test workspace` (escaping; a batch decision with one edit reaches
 `decide()` with that edit and one `decisionKey`); the template's e2e extended — sign in, see the inbox, approve
@@ -832,7 +860,7 @@ with `attempts: 2`; a fixture flow with a plain `INSERT` rejects with `RestartCh
 (`UnfencedWrite`) in ~1 s, not a timeout; `restart: { skip }` runs one attempt. `flow-restart.test.ts` in the
 template green over it — T2's half, the template being a separate repo.
 
-### T2 — The demo registrations and `tests/contract.test.ts` — 🚧 In progress (C0, T0, T2a, T2b, T2c landed; T2d open)
+### T2 — The demo registrations and `tests/contract.test.ts` — ✅ Done (C0, T0, T2a–T2d landed)
 
 **Split, as planned 2026-09-19 (each its own PR, across two repos):** C0 (core: the fixture provider, `score()` with a
 step context — landed, #30) and T0 (template: `demo_note` adopts the mixin — landed, template #12) first; **T2a**
@@ -852,7 +880,7 @@ OpenAI key must not silently produce fake drafts); the email channel uses nodema
 > `contact_email` (template migration `0002`); the schedule tick is 30 s against three 10-minute schedules and is
 > per-process (`lastFired` is not persisted; every flow it starts is keyed); the test worker does not run it; the
 > test seeds `hf_app_state.budget_usd` because a fresh database has no row and the gate refuses outright.
-> Findings for core, none fixed yet: (1) `hf_source_run` grows on every restart by design (`loadSource` books each
+> Findings for core (2)–(4) closed by core #38; (1) `hf_source_run` grows on every restart by design (`loadSource` books each
 > call), so keep it out of `runFlowSync`'s counted tables; (2) `llm.run` returns only the output, so
 > `hf_score.llm_call_id` stays null for LLM-assigned scores; (3) `LlmRunOptions.schema`'s `JSONSchema7` is not
 > re-exported from `@hyperfixation/ai`, so a template cannot type a hoisted schema constant without deriving it;
@@ -865,10 +893,24 @@ OpenAI key must not silently produce fake drafts); the email channel uses nodema
 > at or above `minScore` (defaults 10 / 0.5), picked by score, not one named record; it has **no schedule** (a second
 > run over the same record drafts a second email, so nothing fires it on a clock); a draft that fails the approval
 > schema writes a `draft.refused` activity row and skips the record. `zod` 4.6.5 is added with a workspace override
-> that also collapses better-auth's zod onto core's copy. Findings for core, none fixed yet: (5) `ActionChannel.send`
+> that also collapses better-auth's zod onto core's copy. Findings for core, closed by core #38: (5) `ActionChannel.send`
 > receives `dispatch.request: unknown` (`actions.ts:8`), so every channel casts — an `ActionChannel<Request>` generic
 > would remove it; (6) `JSONSchema7` still not re-exported (same as (3)); (7) `assertDecidable` reports "has no
 > hf_approval row" when an id is a numeric string, a misleading message for a type mismatch.
+
+> **T2d built (template #17, #18):** `tests/contract.test.ts` runs collect → resolve → score → draft → approve →
+> send → task → activity on the fixtures with `runFlowSync` and its restart opted out (`flow-restart.test.ts` is
+> that assertion over the same flows); "no real provider" is asserted as nothing billed (every `hf_llm_call` at 0
+> tokens and cost, `spent_usd` 0), because `hf_llm_call` has no provider column. A provider key or `SMTP_URL` in the
+> environment **fails the suite under `CI` and skips it with a warning elsewhere** (#18). `CLAUDE.md` and the
+> replace-demo skill name every demo file. Findings for core, open: `hf_score` has `spec_version` but no spec name,
+> so two specs on one record type are indistinguishable in that table; `@hyperfixation/testing` has no
+> `waitForRun`-style helper (two template tests each hand-roll the same ~15-line poll).
+>
+> **Core #38 closed findings (2)–(7):** an optional `onCall` on `LlmRunOptions` hands the caller the `hf_llm_call` id
+> (a scorer returns `llmCallId` and `scores.write` fills `hf_score.llm_call_id`); `JSONSchema7` is re-exported;
+> `ActionChannel<Req>` is generic; `resolveBatch`'s `done` is `rows.length < limit` or nothing moved out of the scan
+> (`review` does not count as movement); `assertDecidable` names a type mismatch. Finding (1) stays by design.
 
 The shape doc's loop, one registered example per file: a sample **source** (fixture JSON → the COPY loader),
 the **resolver** on `normalized_name`, a sample **spec** and a **scorer** (`llm.run`, `score:<record_id>`),
@@ -946,8 +988,8 @@ number here.
 |---|---|---|---|---|
 | **L — ledger** (L1–L5b) | `ai` (+ one `startWorker` hook in `workflows` for L2) | chunk 0 | T2 needs L1; Exit needs all | ✅ L1–L5b done |
 | **P — approvals and actions** (P1–P4) | `workflows` | chunk 0 | T2 needs P1, P2; Exit needs all | ✅ P1–P4 done |
-| **C — core** (C1–C6) | `core`, `db` (C2), `admin` (C5) | chunk 0 | T2 needs C1–C4; Exit needs C6 | 🚧 C1–C5 done; C6 planned as C6.1–C6.7 (C6.1 ∥ C6.3 next) |
-| **T — testing and template** (T1–T3) | `testing`, `hyperfixation-template` | chunk 0 for T1; the others as listed | Exit | 🚧 T1, T0, T2a–T2c done; T2d, T3 open |
+| **C — core** (C1–C6) | `core`, `db` (C2), `admin` (C5) | chunk 0 | T2 needs C1–C4; Exit needs C6 | 🚧 C1–C5 and C6.1–C6.3 done; C6.4–C6.7 open (template) |
+| **T — testing and template** (T1–T3) | `testing`, `hyperfixation-template` | chunk 0 for T1; the others as listed | Exit | 🚧 T1, T0, T2 done; T3 open |
 
 **Execution model.** Chunk 0 is one PR by one head, first. After it the three tracks are genuinely
 independent — they touch disjoint packages, and the one shared file each will touch is its own package's
