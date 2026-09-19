@@ -1,3 +1,9 @@
 {
-  "tags": ["0000_core_schema", "0001_llm_call_reservation_index", "0002_approvals"]
+  "tags": [
+    "0000_core_schema",
+    "0001_llm_call_reservation_index",
+    "0002_approvals",
+    "0003_auth_invitation",
+    "0004_machinery"
+  ]
 }

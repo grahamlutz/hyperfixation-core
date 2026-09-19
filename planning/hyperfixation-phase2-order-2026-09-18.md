@@ -104,7 +104,7 @@ registry hands it out like any provider), a real Langfuse endpoint, a real Teleg
 Only one chunk is truly serial. Each chunk is one PR; the done-check is the named test that first passes
 because of it.
 
-### 0 — The eight tables, the mixin, one migration — ⬜ Not started
+### 0 — The eight tables, the mixin, one migration — ✅ Done (db half; T0 template half not started)
 
 `@hyperfixation/db`: Drizzle definitions and `0004_machinery.sql` (one migration, every table) for
 `hf_source_run`, `hf_source_record`, `hf_record_link`, `hf_score`, `hf_activity` (**with `run_id text null`**,
@@ -118,6 +118,11 @@ Two things that are only *testable* now: the delete guard over the three referen
 (a real `hf_label` row must make `DELETE` on its record raise `restrict_violation`), and E002 over the new
 tables (it scans `pg_attribute` for every table with a `record_type` column, so they join automatically —
 assert that they do).
+
+> **Built:** `0004_machinery.sql`, `schema/machinery.ts`, `schema/records.ts`. `hf_task` carries `origin_ref text null` with a
+> partial unique index `(origin, origin_ref) WHERE origin_ref IS NOT NULL` (open question 6's default). `hf_source_record`
+> has a unique `(source, external_id)`; `hf_record_link.source_record_id` is unique; `record_id` is `text` throughout.
+> `core`'s `records.test.ts` fixture now carries the mixin's full column set.
 
 Template half (**T0**, same PR or the next): `demo_note` adopts the mixin — which is what closes the
 `records.archive()` `42703` — and the `record.ts.hbs` generator emits it. The `_trgm` index stays the app's.

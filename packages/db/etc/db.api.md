@@ -5,9 +5,14 @@
 ```ts
 
 import type { ClientBase } from 'pg';
+import { HasDefault } from 'drizzle-orm';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { PgColumn } from 'drizzle-orm/pg-core';
+import { PgDoublePrecisionBuilderInitial } from 'drizzle-orm/pg-core';
+import { PgIntegerBuilderInitial } from 'drizzle-orm/pg-core';
 import { PgTableWithColumns } from 'drizzle-orm/pg-core';
+import { PgTextBuilderInitial } from 'drizzle-orm/pg-core';
+import { PgTimestampBuilderInitial } from 'drizzle-orm/pg-core';
 import { Pool } from 'pg';
 import type { PoolClient } from 'pg';
 import { PoolConfig } from 'pg';
@@ -649,6 +654,168 @@ dialect: "pg";
 }>;
 
 // @public (undocumented)
+export const hfActivity: PgTableWithColumns<    {
+name: "hf_activity";
+schema: undefined;
+columns: {
+id: PgColumn<    {
+name: "id";
+tableName: "hf_activity";
+dataType: "number";
+columnType: "PgBigInt53";
+data: number;
+driverParam: string | number;
+notNull: true;
+hasDefault: true;
+isPrimaryKey: true;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: undefined;
+baseColumn: never;
+identity: "always";
+generated: undefined;
+}, {}, {}>;
+recordType: PgColumn<    {
+name: "record_type";
+tableName: "hf_activity";
+dataType: "string";
+columnType: "PgText";
+data: string;
+driverParam: string;
+notNull: true;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: [string, ...string[]];
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+recordId: PgColumn<    {
+name: "record_id";
+tableName: "hf_activity";
+dataType: "string";
+columnType: "PgText";
+data: string;
+driverParam: string;
+notNull: true;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: [string, ...string[]];
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+kind: PgColumn<    {
+name: "kind";
+tableName: "hf_activity";
+dataType: "string";
+columnType: "PgText";
+data: string;
+driverParam: string;
+notNull: true;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: [string, ...string[]];
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+actorId: PgColumn<    {
+name: "actor_id";
+tableName: "hf_activity";
+dataType: "string";
+columnType: "PgText";
+data: string;
+driverParam: string;
+notNull: false;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: [string, ...string[]];
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+body: PgColumn<    {
+name: "body";
+tableName: "hf_activity";
+dataType: "string";
+columnType: "PgText";
+data: string;
+driverParam: string;
+notNull: false;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: [string, ...string[]];
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+meta: PgColumn<    {
+name: "meta";
+tableName: "hf_activity";
+dataType: "json";
+columnType: "PgJsonb";
+data: unknown;
+driverParam: unknown;
+notNull: false;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: undefined;
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+runId: PgColumn<    {
+name: "run_id";
+tableName: "hf_activity";
+dataType: "string";
+columnType: "PgText";
+data: string;
+driverParam: string;
+notNull: false;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: [string, ...string[]];
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+at: PgColumn<    {
+name: string;
+tableName: "hf_activity";
+dataType: "date";
+columnType: "PgTimestamp";
+data: Date;
+driverParam: string;
+notNull: true;
+hasDefault: true;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: undefined;
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+};
+dialect: "pg";
+}>;
+
+// @public (undocumented)
 export const hfApproval: PgTableWithColumns<    {
 name: "hf_approval";
 schema: undefined;
@@ -811,7 +978,7 @@ name: "status";
 tableName: "hf_approval";
 dataType: "string";
 columnType: "PgText";
-data: "pending" | "approved" | "rejected" | "expired" | "cancelled";
+data: "rejected" | "pending" | "approved" | "expired" | "cancelled";
 driverParam: string;
 notNull: true;
 hasDefault: false;
@@ -1459,6 +1626,168 @@ dialect: "pg";
 }>;
 
 // @public (undocumented)
+export const hfLabel: PgTableWithColumns<    {
+name: "hf_label";
+schema: undefined;
+columns: {
+id: PgColumn<    {
+name: "id";
+tableName: "hf_label";
+dataType: "number";
+columnType: "PgBigInt53";
+data: number;
+driverParam: string | number;
+notNull: true;
+hasDefault: true;
+isPrimaryKey: true;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: undefined;
+baseColumn: never;
+identity: "always";
+generated: undefined;
+}, {}, {}>;
+recordType: PgColumn<    {
+name: "record_type";
+tableName: "hf_label";
+dataType: "string";
+columnType: "PgText";
+data: string;
+driverParam: string;
+notNull: true;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: [string, ...string[]];
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+recordId: PgColumn<    {
+name: "record_id";
+tableName: "hf_label";
+dataType: "string";
+columnType: "PgText";
+data: string;
+driverParam: string;
+notNull: true;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: [string, ...string[]];
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+target: PgColumn<    {
+name: "target";
+tableName: "hf_label";
+dataType: "string";
+columnType: "PgText";
+data: "draft" | "score" | "record";
+driverParam: string;
+notNull: true;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: ["score", "draft", "record"];
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+targetId: PgColumn<    {
+name: "target_id";
+tableName: "hf_label";
+dataType: "string";
+columnType: "PgText";
+data: string;
+driverParam: string;
+notNull: false;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: [string, ...string[]];
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+value: PgColumn<    {
+name: "value";
+tableName: "hf_label";
+dataType: "string";
+columnType: "PgText";
+data: "up" | "down" | "correction";
+driverParam: string;
+notNull: true;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: ["up", "down", "correction"];
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+correction: PgColumn<    {
+name: "correction";
+tableName: "hf_label";
+dataType: "json";
+columnType: "PgJsonb";
+data: unknown;
+driverParam: unknown;
+notNull: false;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: undefined;
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+userId: PgColumn<    {
+name: "user_id";
+tableName: "hf_label";
+dataType: "string";
+columnType: "PgText";
+data: string;
+driverParam: string;
+notNull: false;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: [string, ...string[]];
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+createdAt: PgColumn<    {
+name: string;
+tableName: "hf_label";
+dataType: "date";
+columnType: "PgTimestamp";
+data: Date;
+driverParam: string;
+notNull: true;
+hasDefault: true;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: undefined;
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+};
+dialect: "pg";
+}>;
+
+// @public (undocumented)
 export const hfLlmCall: PgTableWithColumns<    {
 name: "hf_llm_call";
 schema: undefined;
@@ -1638,7 +1967,7 @@ name: "status";
 tableName: "hf_llm_call";
 dataType: "string";
 columnType: "PgText";
-data: "ok" | "started" | "error" | "abandoned";
+data: "ok" | "error" | "started" | "abandoned";
 driverParam: string;
 notNull: true;
 hasDefault: false;
@@ -2047,6 +2376,117 @@ dialect: "pg";
 }>;
 
 // @public (undocumented)
+export const hfOutcome: PgTableWithColumns<    {
+name: "hf_outcome";
+schema: undefined;
+columns: {
+id: PgColumn<    {
+name: "id";
+tableName: "hf_outcome";
+dataType: "number";
+columnType: "PgBigInt53";
+data: number;
+driverParam: string | number;
+notNull: true;
+hasDefault: true;
+isPrimaryKey: true;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: undefined;
+baseColumn: never;
+identity: "always";
+generated: undefined;
+}, {}, {}>;
+recordType: PgColumn<    {
+name: "record_type";
+tableName: "hf_outcome";
+dataType: "string";
+columnType: "PgText";
+data: string;
+driverParam: string;
+notNull: true;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: [string, ...string[]];
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+recordId: PgColumn<    {
+name: "record_id";
+tableName: "hf_outcome";
+dataType: "string";
+columnType: "PgText";
+data: string;
+driverParam: string;
+notNull: true;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: [string, ...string[]];
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+outcome: PgColumn<    {
+name: "outcome";
+tableName: "hf_outcome";
+dataType: "string";
+columnType: "PgText";
+data: string;
+driverParam: string;
+notNull: true;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: [string, ...string[]];
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+at: PgColumn<    {
+name: string;
+tableName: "hf_outcome";
+dataType: "date";
+columnType: "PgTimestamp";
+data: Date;
+driverParam: string;
+notNull: true;
+hasDefault: true;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: undefined;
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+notes: PgColumn<    {
+name: "notes";
+tableName: "hf_outcome";
+dataType: "string";
+columnType: "PgText";
+data: string;
+driverParam: string;
+notNull: false;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: [string, ...string[]];
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+};
+dialect: "pg";
+}>;
+
+// @public (undocumented)
 export const hfPasskey: PgTableWithColumns<    {
 name: "hf_passkey";
 schema: undefined;
@@ -2242,6 +2682,163 @@ generated: undefined;
 dialect: "pg";
 }>;
 
+// @public
+export const hfRecordColumns: () => {
+    createdAt: HasDefault<PgTimestampBuilderInitial<"created_at">>;
+    updatedAt: HasDefault<PgTimestampBuilderInitial<"updated_at">>;
+    archivedAt: PgTimestampBuilderInitial<"archived_at">;
+    stage: PgTextBuilderInitial<"stage", [string, ...string[]]>;
+    score: PgDoublePrecisionBuilderInitial<"score">;
+    scoreExplanation: PgTextBuilderInitial<"score_explanation", [string, ...string[]]>;
+    specVersion: PgIntegerBuilderInitial<"spec_version">;
+    normalizedName: PgTextBuilderInitial<"normalized_name", [string, ...string[]]>;
+};
+
+// @public (undocumented)
+export const hfRecordLink: PgTableWithColumns<    {
+name: "hf_record_link";
+schema: undefined;
+columns: {
+id: PgColumn<    {
+name: "id";
+tableName: "hf_record_link";
+dataType: "number";
+columnType: "PgBigInt53";
+data: number;
+driverParam: string | number;
+notNull: true;
+hasDefault: true;
+isPrimaryKey: true;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: undefined;
+baseColumn: never;
+identity: "always";
+generated: undefined;
+}, {}, {}>;
+sourceRecordId: PgColumn<    {
+name: "source_record_id";
+tableName: "hf_record_link";
+dataType: "number";
+columnType: "PgBigInt53";
+data: number;
+driverParam: string | number;
+notNull: true;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: undefined;
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+recordType: PgColumn<    {
+name: "record_type";
+tableName: "hf_record_link";
+dataType: "string";
+columnType: "PgText";
+data: string;
+driverParam: string;
+notNull: true;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: [string, ...string[]];
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+recordId: PgColumn<    {
+name: "record_id";
+tableName: "hf_record_link";
+dataType: "string";
+columnType: "PgText";
+data: string;
+driverParam: string;
+notNull: true;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: [string, ...string[]];
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+confidence: PgColumn<    {
+name: "confidence";
+tableName: "hf_record_link";
+dataType: "number";
+columnType: "PgDoublePrecision";
+data: number;
+driverParam: string | number;
+notNull: false;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: undefined;
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+method: PgColumn<    {
+name: "method";
+tableName: "hf_record_link";
+dataType: "string";
+columnType: "PgText";
+data: "exact" | "fuzzy" | "manual" | "human_confirmed";
+driverParam: string;
+notNull: true;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: ["exact", "fuzzy", "manual", "human_confirmed"];
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+decidedBy: PgColumn<    {
+name: "decided_by";
+tableName: "hf_record_link";
+dataType: "string";
+columnType: "PgText";
+data: string;
+driverParam: string;
+notNull: false;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: [string, ...string[]];
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+decidedAt: PgColumn<    {
+name: string;
+tableName: "hf_record_link";
+dataType: "date";
+columnType: "PgTimestamp";
+data: Date;
+driverParam: string;
+notNull: false;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: undefined;
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+};
+dialect: "pg";
+}>;
+
 // @public (undocumented)
 export const hfRun: PgTableWithColumns<    {
 name: "hf_run";
@@ -2303,7 +2900,7 @@ name: "status";
 tableName: "hf_run";
 dataType: "string";
 columnType: "PgText";
-data: "paused" | "failed" | "running" | "waiting" | "done";
+data: "running" | "paused" | "done" | "failed" | "waiting";
 driverParam: string;
 notNull: true;
 hasDefault: false;
@@ -2443,6 +3040,151 @@ data: Date;
 driverParam: string;
 notNull: false;
 hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: undefined;
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+};
+dialect: "pg";
+}>;
+
+// @public (undocumented)
+export const hfScore: PgTableWithColumns<    {
+name: "hf_score";
+schema: undefined;
+columns: {
+id: PgColumn<    {
+name: "id";
+tableName: "hf_score";
+dataType: "number";
+columnType: "PgBigInt53";
+data: number;
+driverParam: string | number;
+notNull: true;
+hasDefault: true;
+isPrimaryKey: true;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: undefined;
+baseColumn: never;
+identity: "always";
+generated: undefined;
+}, {}, {}>;
+recordType: PgColumn<    {
+name: "record_type";
+tableName: "hf_score";
+dataType: "string";
+columnType: "PgText";
+data: string;
+driverParam: string;
+notNull: true;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: [string, ...string[]];
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+recordId: PgColumn<    {
+name: "record_id";
+tableName: "hf_score";
+dataType: "string";
+columnType: "PgText";
+data: string;
+driverParam: string;
+notNull: true;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: [string, ...string[]];
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+specVersion: PgColumn<    {
+name: "spec_version";
+tableName: "hf_score";
+dataType: "number";
+columnType: "PgInteger";
+data: number;
+driverParam: string | number;
+notNull: true;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: undefined;
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+score: PgColumn<    {
+name: "score";
+tableName: "hf_score";
+dataType: "number";
+columnType: "PgDoublePrecision";
+data: number;
+driverParam: string | number;
+notNull: true;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: undefined;
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+explanation: PgColumn<    {
+name: "explanation";
+tableName: "hf_score";
+dataType: "string";
+columnType: "PgText";
+data: string;
+driverParam: string;
+notNull: false;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: [string, ...string[]];
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+llmCallId: PgColumn<    {
+name: "llm_call_id";
+tableName: "hf_score";
+dataType: "number";
+columnType: "PgBigInt53";
+data: number;
+driverParam: string | number;
+notNull: false;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: undefined;
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+createdAt: PgColumn<    {
+name: string;
+tableName: "hf_score";
+dataType: "date";
+columnType: "PgTimestamp";
+data: Date;
+driverParam: string;
+notNull: true;
+hasDefault: true;
 isPrimaryKey: false;
 isAutoincrement: false;
 hasRuntimeDefault: false;
@@ -2643,6 +3385,560 @@ isPrimaryKey: false;
 isAutoincrement: false;
 hasRuntimeDefault: false;
 enumValues: ["code", "passkey"];
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+};
+dialect: "pg";
+}>;
+
+// @public (undocumented)
+export const hfSourceRecord: PgTableWithColumns<    {
+name: "hf_source_record";
+schema: undefined;
+columns: {
+id: PgColumn<    {
+name: "id";
+tableName: "hf_source_record";
+dataType: "number";
+columnType: "PgBigInt53";
+data: number;
+driverParam: string | number;
+notNull: true;
+hasDefault: true;
+isPrimaryKey: true;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: undefined;
+baseColumn: never;
+identity: "always";
+generated: undefined;
+}, {}, {}>;
+source: PgColumn<    {
+name: "source";
+tableName: "hf_source_record";
+dataType: "string";
+columnType: "PgText";
+data: string;
+driverParam: string;
+notNull: true;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: [string, ...string[]];
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+externalId: PgColumn<    {
+name: "external_id";
+tableName: "hf_source_record";
+dataType: "string";
+columnType: "PgText";
+data: string;
+driverParam: string;
+notNull: true;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: [string, ...string[]];
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+payload: PgColumn<    {
+name: "payload";
+tableName: "hf_source_record";
+dataType: "json";
+columnType: "PgJsonb";
+data: unknown;
+driverParam: unknown;
+notNull: true;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: undefined;
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+payloadHash: PgColumn<    {
+name: "payload_hash";
+tableName: "hf_source_record";
+dataType: "string";
+columnType: "PgText";
+data: string;
+driverParam: string;
+notNull: true;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: [string, ...string[]];
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+status: PgColumn<    {
+name: "status";
+tableName: "hf_source_record";
+dataType: "string";
+columnType: "PgText";
+data: "error" | "new" | "linked" | "review";
+driverParam: string;
+notNull: true;
+hasDefault: true;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: ["new", "linked", "review", "error"];
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+attempts: PgColumn<    {
+name: "attempts";
+tableName: "hf_source_record";
+dataType: "number";
+columnType: "PgInteger";
+data: number;
+driverParam: string | number;
+notNull: true;
+hasDefault: true;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: undefined;
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+error: PgColumn<    {
+name: "error";
+tableName: "hf_source_record";
+dataType: "string";
+columnType: "PgText";
+data: string;
+driverParam: string;
+notNull: false;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: [string, ...string[]];
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+runId: PgColumn<    {
+name: "run_id";
+tableName: "hf_source_record";
+dataType: "number";
+columnType: "PgBigInt53";
+data: number;
+driverParam: string | number;
+notNull: false;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: undefined;
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+firstSeen: PgColumn<    {
+name: string;
+tableName: "hf_source_record";
+dataType: "date";
+columnType: "PgTimestamp";
+data: Date;
+driverParam: string;
+notNull: true;
+hasDefault: true;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: undefined;
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+lastSeen: PgColumn<    {
+name: string;
+tableName: "hf_source_record";
+dataType: "date";
+columnType: "PgTimestamp";
+data: Date;
+driverParam: string;
+notNull: true;
+hasDefault: true;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: undefined;
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+};
+dialect: "pg";
+}>;
+
+// @public (undocumented)
+export const hfSourceRun: PgTableWithColumns<    {
+name: "hf_source_run";
+schema: undefined;
+columns: {
+id: PgColumn<    {
+name: "id";
+tableName: "hf_source_run";
+dataType: "number";
+columnType: "PgBigInt53";
+data: number;
+driverParam: string | number;
+notNull: true;
+hasDefault: true;
+isPrimaryKey: true;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: undefined;
+baseColumn: never;
+identity: "always";
+generated: undefined;
+}, {}, {}>;
+source: PgColumn<    {
+name: "source";
+tableName: "hf_source_run";
+dataType: "string";
+columnType: "PgText";
+data: string;
+driverParam: string;
+notNull: true;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: [string, ...string[]];
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+startedAt: PgColumn<    {
+name: string;
+tableName: "hf_source_run";
+dataType: "date";
+columnType: "PgTimestamp";
+data: Date;
+driverParam: string;
+notNull: true;
+hasDefault: true;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: undefined;
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+finishedAt: PgColumn<    {
+name: string;
+tableName: "hf_source_run";
+dataType: "date";
+columnType: "PgTimestamp";
+data: Date;
+driverParam: string;
+notNull: false;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: undefined;
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+status: PgColumn<    {
+name: "status";
+tableName: "hf_source_run";
+dataType: "string";
+columnType: "PgText";
+data: "ok" | "error" | "running";
+driverParam: string;
+notNull: true;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: ["running", "ok", "error"];
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+rowsIn: PgColumn<    {
+name: "rows_in";
+tableName: "hf_source_run";
+dataType: "number";
+columnType: "PgInteger";
+data: number;
+driverParam: string | number;
+notNull: true;
+hasDefault: true;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: undefined;
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+rowsNew: PgColumn<    {
+name: "rows_new";
+tableName: "hf_source_run";
+dataType: "number";
+columnType: "PgInteger";
+data: number;
+driverParam: string | number;
+notNull: true;
+hasDefault: true;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: undefined;
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+rowsChanged: PgColumn<    {
+name: "rows_changed";
+tableName: "hf_source_run";
+dataType: "number";
+columnType: "PgInteger";
+data: number;
+driverParam: string | number;
+notNull: true;
+hasDefault: true;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: undefined;
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+error: PgColumn<    {
+name: "error";
+tableName: "hf_source_run";
+dataType: "string";
+columnType: "PgText";
+data: string;
+driverParam: string;
+notNull: false;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: [string, ...string[]];
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+};
+dialect: "pg";
+}>;
+
+// @public (undocumented)
+export const hfTask: PgTableWithColumns<    {
+name: "hf_task";
+schema: undefined;
+columns: {
+id: PgColumn<    {
+name: "id";
+tableName: "hf_task";
+dataType: "number";
+columnType: "PgBigInt53";
+data: number;
+driverParam: string | number;
+notNull: true;
+hasDefault: true;
+isPrimaryKey: true;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: undefined;
+baseColumn: never;
+identity: "always";
+generated: undefined;
+}, {}, {}>;
+recordType: PgColumn<    {
+name: "record_type";
+tableName: "hf_task";
+dataType: "string";
+columnType: "PgText";
+data: string;
+driverParam: string;
+notNull: true;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: [string, ...string[]];
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+recordId: PgColumn<    {
+name: "record_id";
+tableName: "hf_task";
+dataType: "string";
+columnType: "PgText";
+data: string;
+driverParam: string;
+notNull: true;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: [string, ...string[]];
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+title: PgColumn<    {
+name: "title";
+tableName: "hf_task";
+dataType: "string";
+columnType: "PgText";
+data: string;
+driverParam: string;
+notNull: true;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: [string, ...string[]];
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+dueAt: PgColumn<    {
+name: string;
+tableName: "hf_task";
+dataType: "date";
+columnType: "PgTimestamp";
+data: Date;
+driverParam: string;
+notNull: false;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: undefined;
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+ownerId: PgColumn<    {
+name: "owner_id";
+tableName: "hf_task";
+dataType: "string";
+columnType: "PgText";
+data: string;
+driverParam: string;
+notNull: false;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: [string, ...string[]];
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+doneAt: PgColumn<    {
+name: string;
+tableName: "hf_task";
+dataType: "date";
+columnType: "PgTimestamp";
+data: Date;
+driverParam: string;
+notNull: false;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: undefined;
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+cancelledAt: PgColumn<    {
+name: string;
+tableName: "hf_task";
+dataType: "date";
+columnType: "PgTimestamp";
+data: Date;
+driverParam: string;
+notNull: false;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: undefined;
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+origin: PgColumn<    {
+name: "origin";
+tableName: "hf_task";
+dataType: "string";
+columnType: "PgText";
+data: "flow" | "sweep" | "manual";
+driverParam: string;
+notNull: true;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: ["flow", "manual", "sweep"];
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+originRef: PgColumn<    {
+name: "origin_ref";
+tableName: "hf_task";
+dataType: "string";
+columnType: "PgText";
+data: string;
+driverParam: string;
+notNull: false;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: [string, ...string[]];
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+createdAt: PgColumn<    {
+name: string;
+tableName: "hf_task";
+dataType: "date";
+columnType: "PgTimestamp";
+data: Date;
+driverParam: string;
+notNull: true;
+hasDefault: true;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: undefined;
 baseColumn: never;
 identity: undefined;
 generated: undefined;
@@ -2959,6 +4255,18 @@ dialect: "pg";
 }>;
 
 // @public (undocumented)
+export type LabelTarget = (typeof labelTargets)[number];
+
+// @public (undocumented)
+export const labelTargets: readonly ["score", "draft", "record"];
+
+// @public (undocumented)
+export type LabelValue = (typeof labelValues)[number];
+
+// @public (undocumented)
+export const labelValues: readonly ["up", "down", "correction"];
+
+// @public (undocumented)
 export type LlmCallStatus = (typeof llmCallStatuses)[number];
 
 // @public (undocumented)
@@ -2980,6 +4288,12 @@ export interface Queryable {
 
 // @public (undocumented)
 export function quoteIdent(name: string): string;
+
+// @public (undocumented)
+export type RecordLinkMethod = (typeof recordLinkMethods)[number];
+
+// @public (undocumented)
+export const recordLinkMethods: readonly ["exact", "fuzzy", "manual", "human_confirmed"];
 
 // @public (undocumented)
 export interface RecordTable {
@@ -3022,6 +4336,18 @@ export const sessionFactors: readonly ["code", "passkey"];
 export const SET_APP_PAUSED_STATEMENT = "UPDATE hf_app_state SET paused = $1, paused_by = $2 WHERE id = 1";
 
 // @public (undocumented)
+export type SourceRecordStatus = (typeof sourceRecordStatuses)[number];
+
+// @public (undocumented)
+export const sourceRecordStatuses: readonly ["new", "linked", "review", "error"];
+
+// @public (undocumented)
+export type SourceRunStatus = (typeof sourceRunStatuses)[number];
+
+// @public (undocumented)
+export const sourceRunStatuses: readonly ["running", "ok", "error"];
+
+// @public (undocumented)
 export class StaleAttempt extends Error {
     constructor(runId: string, workflowId: string);
     // (undocumented)
@@ -3053,6 +4379,12 @@ export interface StepPool {
 
 // @public (undocumented)
 export type StepPoolOptions = PoolConfig;
+
+// @public (undocumented)
+export type TaskOrigin = (typeof taskOrigins)[number];
+
+// @public (undocumented)
+export const taskOrigins: readonly ["flow", "manual", "sweep"];
 
 // @public (undocumented)
 export class UnfencedWrite extends Error {
