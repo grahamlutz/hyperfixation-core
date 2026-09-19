@@ -1,10 +1,14 @@
+import type { LanguageModelV4 } from "@ai-sdk/provider";
 import type { DBOSClient } from "@dbos-inc/dbos-sdk";
 import { createStepPool, LOCK_NOT_AVAILABLE, type StepDatabase, type StepPool } from "@hyperfixation/db";
 import {
+  asRole,
   createTestDatabase,
   MockLanguageModel,
   MOCK_MODEL_ID,
   testBuildSha,
+  withClock,
+  type TestClock,
   type TestDatabase,
 } from "@hyperfixation/testing";
 import { decide, defineFlow, getClient, reconcile, resetClient, type Flow } from "@hyperfixation/workflows";
@@ -17,12 +21,14 @@ import { createProviders, fixedCost } from "./providers.js";
 import {
   budgetPeriod,
   currentPeriod,
+  derivedReservation,
   ledgerRows,
   runRow,
   seedAppState,
   startRun,
   type LedgerProbe,
 } from "./test-support/ledger-harness.js";
+import { ParkedCall } from "./test-support/parked-call.js";
 import { PROMPTS_DIR } from "./test-support/prompts-dir.js";
 
 /** Postgres `deadlock_detected`: the one error the lock order exists to make impossible. */
@@ -43,13 +49,19 @@ let flow: Flow<{ n: number }, void>;
 let period: string;
 
 /** The registry the cassette needs: one named model, one flat price, one prompt directory. */
-function ledger(model: MockLanguageModel, estimatedCostUsd: number, costUsd = estimatedCostUsd): Llm {
+function ledger(
+  model: LanguageModelV4,
+  estimatedCostUsd: number,
+  costUsd = estimatedCostUsd,
+  clock?: () => Date,
+): Llm {
   return createLlm({
     providers: createProviders({
       models: { [MOCK_MODEL_ID]: model },
       costs: { [MOCK_MODEL_ID]: fixedCost(estimatedCostUsd, costUsd) },
     }),
     promptsDir: PROMPTS_DIR,
+    clock,
   });
 }
 
@@ -177,12 +189,122 @@ afterAll(async () => {
   await database?.drop();
 });
 
+/**
+ * (a) The period boundary. The clock is injected into the gate — `createLlm({ clock })`, the one
+ * seam that takes one — not overridden in the database, so `finished_at`, `reconcile()` and
+ * `status.ts` all still read real time and only the billing stamp moves.
+ *
+ * The dates are a century out on purpose: under today's real period the two months this case
+ * arranges would be indistinguishable from what SQL `now()` used to return, and the test would
+ * pass whether or not the injected clock was ever consulted.
+ */
 describe("budget.test.ts (a) — the period boundary", () => {
-  // L5b, open question 1: the clock is injected, not overridden in the database —
-  // `ControlPlane.attach({ pool, client, clock? })` plus `WorkerControl.clockOffsetMs` and a
-  // `clock <iso>` stdin line for the live mid-run advance this case needs. Nothing here can move
-  // the clock until that seam exists.
-  it.todo("attributes a midnight-straddling call to the period it reserved in (needs withClock)");
+  const DECEMBER = "2099-12";
+  const JANUARY = "2100-01";
+  const PERIOD_BUDGET_USD = "1.00";
+  const ESTIMATE_USD = 0.9;
+  const COST_USD = 0.6;
+
+  let clock: TestClock;
+
+  async function setAppBudget(budgetUsd: string): Promise<void> {
+    await asRole(database.migratorUrl, async (pg) => {
+      await pg.query("UPDATE hf_app_state SET budget_usd = $1 WHERE id = 1", [budgetUsd]);
+    });
+  }
+
+  /** The workflow the run is actually on: a reservation only counts under that one. */
+  async function liveContext(runId: string): Promise<LedgerContext> {
+    return stepContext(runId, (await runRow(probe, runId))!.current_workflow_id);
+  }
+
+  async function spentIn(billed: string): Promise<number> {
+    return Number((await budgetPeriod(probe, billed))?.spent_usd);
+  }
+
+  /** `spent_usd` minus what the period's `ok` rows say it should be. */
+  async function driftIn(billed: string): Promise<number> {
+    const { rows } = await probe.pool.query<{ drift: string }>(
+      `SELECT (b.spent_usd - (SELECT COALESCE(SUM(cost_usd), 0) FROM hf_llm_call
+                              WHERE period = $1 AND status = 'ok'))::text AS drift
+       FROM hf_budget_period b WHERE b.period = $1`,
+      [billed],
+    );
+    return Number(rows[0]!.drift);
+  }
+
+  beforeAll(async () => {
+    clock = withClock("2099-12-31T23:59:58Z");
+    // January's row is copied from `hf_app_state` by the gate that first needs it, so the copy
+    // has to be small enough that December's reservation would refuse B if it counted.
+    await setAppBudget(PERIOD_BUDGET_USD);
+    await probe.pool.query(
+      "INSERT INTO hf_budget_period (period, budget_usd, spent_usd) VALUES ($1, $2, 0)",
+      [DECEMBER, PERIOD_BUDGET_USD],
+    );
+  });
+
+  afterAll(async () => {
+    await setAppBudget(BUDGET_USD);
+  });
+
+  it("bills each call to the period it reserved in, across a year rollover", async () => {
+    const runA = runIdFor("budget-december");
+    const runB = runIdFor("budget-january");
+    await startRun(probe, flow, { n: 1 }, runA);
+    await startRun(probe, flow, { n: 1 }, runB);
+
+    const parkedA = new ParkedCall();
+    const callA = ledger(parkedA, ESTIMATE_USD, COST_USD, clock)
+      .run(await liveContext(runA), { key: "x", model: MOCK_MODEL_ID, prompt: "draft", input: { a: 1 } });
+    await parkedA.entered;
+
+    expect((await ledgerRows(probe, runA))[0]).toMatchObject({
+      status: "started",
+      period: DECEMBER,
+    });
+    expect(Number(await derivedReservation(probe, DECEMBER))).toBeCloseTo(ESTIMATE_USD, 6);
+
+    // Midnight passes with A's answer still in flight.
+    clock.set("2100-01-01T00:00:02Z");
+
+    const parkedB = new ParkedCall();
+    const callB = ledger(parkedB, ESTIMATE_USD, COST_USD, clock)
+      .run(await liveContext(runB), { key: "x", model: MOCK_MODEL_ID, prompt: "draft", input: { b: 1 } });
+    await parkedB.entered;
+
+    // B's gate passed at all only because A's live December reservation counts nothing against
+    // January: 0.9 + 0.9 does not fit the 1.00 January copied out of `hf_app_state`.
+    expect((await ledgerRows(probe, runB))[0]).toMatchObject({
+      status: "started",
+      period: JANUARY,
+    });
+    expect(Number((await budgetPeriod(probe, JANUARY))?.budget_usd)).toBe(1);
+    expect(await spentIn(JANUARY)).toBe(0);
+    expect(Number(await derivedReservation(probe, JANUARY))).toBeCloseTo(ESTIMATE_USD, 6);
+
+    parkedA.release("december");
+    await callA;
+
+    // A completed in January and was billed to December, which is the whole case.
+    expect((await ledgerRows(probe, runA))[0]).toMatchObject({
+      status: "ok",
+      period: DECEMBER,
+      possible_double_charge: false,
+    });
+    expect(await spentIn(DECEMBER)).toBeCloseTo(COST_USD, 6);
+    expect(await spentIn(JANUARY)).toBe(0);
+
+    parkedB.release("january");
+    await callB;
+
+    expect(await spentIn(JANUARY)).toBeCloseTo(COST_USD, 6);
+    expect(await spentIn(DECEMBER)).toBeCloseTo(COST_USD, 6);
+    expect(parkedA.calls).toBe(1);
+    expect(parkedB.calls).toBe(1);
+    expect(await driftIn(DECEMBER)).toBe(0);
+    expect(await driftIn(JANUARY)).toBe(0);
+  }, 120_000);
 });
 
 describe("budget.test.ts (b) — re-entry through the gate at the budget", () => {

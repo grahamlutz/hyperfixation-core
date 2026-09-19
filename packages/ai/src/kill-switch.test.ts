@@ -1,11 +1,10 @@
-import type { LanguageModelV4, LanguageModelV4GenerateResult } from "@ai-sdk/provider";
+import type { LanguageModelV4 } from "@ai-sdk/provider";
 import type { DBOSClient } from "@dbos-inc/dbos-sdk";
 import { createStepPool, type StepPool } from "@hyperfixation/db";
 import {
   createTestDatabase,
   MockLanguageModel,
   MOCK_MODEL_ID,
-  MOCK_PROVIDER,
   testBuildSha,
   type TestDatabase,
 } from "@hyperfixation/testing";
@@ -27,6 +26,7 @@ import {
   type LedgerProbe,
 } from "./test-support/ledger-harness.js";
 import { llmFlow } from "./test-support/llm-flow.js";
+import { ParkedCall } from "./test-support/parked-call.js";
 import { PROMPTS_DIR } from "./test-support/prompts-dir.js";
 
 const BUDGET_USD = "1.00";
@@ -47,56 +47,6 @@ function ledger(model: LanguageModelV4, estimatedCostUsd: number, costUsd = esti
     }),
     promptsDir: PROMPTS_DIR,
   });
-}
-
-/**
- * A provider call held open. The gate has committed its `started` row and the answer is still in
- * flight — the one window a kill can orphan a row in, and the only one in which the row's own
- * reservation is there to be read.
- */
-class ParkedCall implements LanguageModelV4 {
-  readonly specificationVersion = "v4";
-  readonly provider = MOCK_PROVIDER;
-  readonly modelId = MOCK_MODEL_ID;
-  readonly supportedUrls: Record<string, RegExp[]> = {};
-
-  /** Resolves once the gate has committed and the provider has been entered. */
-  readonly entered: Promise<void>;
-  calls = 0;
-
-  private enter!: () => void;
-  private answer: ((result: LanguageModelV4GenerateResult) => void) | undefined;
-
-  constructor() {
-    this.entered = new Promise<void>((resolve) => {
-      this.enter = resolve;
-    });
-  }
-
-  doGenerate(): Promise<LanguageModelV4GenerateResult> {
-    this.calls += 1;
-    this.enter();
-    return new Promise((resolve) => {
-      this.answer = resolve;
-    });
-  }
-
-  /** Lets the parked call answer, which is what carries its row to `ok`. */
-  release(text: string): void {
-    this.answer?.({
-      content: [{ type: "text", text }],
-      finishReason: { unified: "stop", raw: undefined },
-      usage: {
-        inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined },
-        outputTokens: { total: 5, text: 5, reasoning: undefined },
-      },
-      warnings: [],
-    });
-  }
-
-  doStream(): never {
-    throw new Error(`${this.modelId}: a parked call is never streamed`);
-  }
 }
 
 /**

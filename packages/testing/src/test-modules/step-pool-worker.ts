@@ -5,9 +5,21 @@
  * package owns `startWorker()`.
  */
 import { createStepPool } from "@hyperfixation/db";
-import { runWorkerModule } from "../worker-module.js";
+import { runWorkerModule, workerClock } from "../worker-module.js";
 
 let steps: ReturnType<typeof createStepPool> | undefined;
+
+/** Duplicated as a literal in `spawn-worker.test.ts`: importing this module would run it. */
+const TICK_MARKER = "step-pool-worker: clock";
+const clock = workerClock();
+
+// A `tick` line answers with whatever the worker's clock says now, which is the only way a test
+// can see that `clockAt` and a live `clock <iso>` line reached the child.
+process.stdin.on("data", (chunk: Buffer | string) => {
+  for (const line of String(chunk).split("\n")) {
+    if (line.trim() === "tick") console.log(`${TICK_MARKER} ${clock().toISOString()}`);
+  }
+});
 
 await runWorkerModule({
   async start({ databaseUrl }) {
