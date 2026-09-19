@@ -6,12 +6,14 @@
 
 import { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { Client } from 'pg';
+import type { DBOSClient } from '@dbos-inc/dbos-sdk';
 import type { LanguageModelV4 } from '@ai-sdk/provider';
 import type { LanguageModelV4CallOptions } from '@ai-sdk/provider';
 import type { LanguageModelV4Content } from '@ai-sdk/provider';
 import type { LanguageModelV4FinishReason } from '@ai-sdk/provider';
 import type { LanguageModelV4GenerateResult } from '@ai-sdk/provider';
 import { MigrateResult } from '@hyperfixation/db/migrator';
+import type { Pool } from 'pg';
 import { ProvisionedRoles } from '@hyperfixation/db/migrator';
 import { RecordTable } from '@hyperfixation/db/migrator';
 
@@ -56,7 +58,13 @@ export interface CreateTestDatabaseOptions {
 }
 
 // @public (undocumented)
+export const DEFAULT_ATTEMPT_TIMEOUT_MS = 60000;
+
+// @public (undocumented)
 export const DEFAULT_READY_TIMEOUT_MS = 120000;
+
+// @public
+export const DOUBLE_CHARGE_COUNT_KEY = "hf_llm_call.possible_double_charge";
 
 // @public
 export interface FencingFailure {
@@ -77,6 +85,35 @@ export class FencingFailureInTest extends Error {
 
 // @public
 export function fencingFailureOf(error: unknown): FencingFailure | undefined;
+
+// @public
+export interface FlowRef {
+    // (undocumented)
+    readonly name: string;
+    // (undocumented)
+    readonly queue: string;
+}
+
+// @public (undocumented)
+export interface FlowSyncHarness {
+    client: DBOSClient;
+    pool: Pool;
+    start(flow: FlowRef, input: unknown): Promise<StartedRunRef>;
+    tables?: readonly string[];
+    worker: SpawnedWorker;
+}
+
+// @public (undocumented)
+export interface FlowSyncResult {
+    // (undocumented)
+    attempts: 1 | 2;
+    // (undocumented)
+    counts: Record<string, number>;
+    // (undocumented)
+    runId: string;
+    status: SettledRunStatus;
+    workflowIds: string[];
+}
 
 // @public
 export function killAt(stepKey: string, mode: KillAtMode): KillAtControl;
@@ -133,7 +170,41 @@ export interface MockLanguageModelOptions {
 export function parkedMarker(at: KillAtControl): string;
 
 // @public
+export const RESTART_COUNTED_TABLES: readonly ["hf_llm_call", "hf_action_log", "hf_activity", "hf_task", "hf_audit", "hf_approval"];
+
+// @public
+export const RESTART_SKIPPED_MARKER = "runFlowSync: restart skipped \u2014";
+
+// @public (undocumented)
+export class RestartChangedCounts extends Error {
+    constructor(runId: string, diff: Record<string, {
+        before: number;
+        after: number;
+    }>);
+    readonly diff: Record<string, {
+        before: number;
+        after: number;
+    }>;
+    // (undocumented)
+    readonly runId: string;
+}
+
+// @public (undocumented)
+export function runFlowSync(harness: FlowSyncHarness, flow: FlowRef, input: unknown, options?: RunFlowSyncOptions): Promise<FlowSyncResult>;
+
+// @public (undocumented)
+export interface RunFlowSyncOptions {
+    restart?: {
+        skip: string;
+    };
+    timeoutMs?: number;
+}
+
+// @public
 export function setTestBuildSha(): string;
+
+// @public
+export type SettledRunStatus = "done" | "waiting" | "paused";
 
 // @public (undocumented)
 export interface SpawnedWorker {
@@ -170,6 +241,14 @@ export interface SpawnWorkerOptions {
     drainMs?: number;
     module: string;
     version?: string;
+}
+
+// @public
+export interface StartedRunRef {
+    // (undocumented)
+    runId: string;
+    // (undocumented)
+    workflowId: string;
 }
 
 // @public

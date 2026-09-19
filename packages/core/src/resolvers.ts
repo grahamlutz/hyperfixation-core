@@ -4,6 +4,8 @@ import { InvalidDefinition } from "./registry.js";
 export interface ResolverFuzzy {
   /** The record column the candidate query matches on, `normalized_name` in every app so far. */
   readonly field: string;
+  /** The payload key compared against `field`, already normalized. Defaults to `field`. */
+  readonly payloadKey?: string;
   /** What `pg_trgm.similarity_threshold` is set to for the candidate query; in (0, 1]. */
   readonly threshold: number;
 }

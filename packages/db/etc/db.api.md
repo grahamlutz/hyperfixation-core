@@ -2806,14 +2806,14 @@ name: "method";
 tableName: "hf_record_link";
 dataType: "string";
 columnType: "PgText";
-data: "exact" | "fuzzy" | "manual" | "human_confirmed";
+data: "exact" | "fuzzy" | "created" | "manual" | "human_confirmed";
 driverParam: string;
 notNull: true;
 hasDefault: false;
 isPrimaryKey: false;
 isAutoincrement: false;
 hasRuntimeDefault: false;
-enumValues: ["exact", "fuzzy", "manual", "human_confirmed"];
+enumValues: ["exact", "fuzzy", "created", "manual", "human_confirmed"];
 baseColumn: never;
 identity: undefined;
 generated: undefined;
@@ -4347,7 +4347,7 @@ export function quoteIdent(name: string): string;
 export type RecordLinkMethod = (typeof recordLinkMethods)[number];
 
 // @public (undocumented)
-export const recordLinkMethods: readonly ["exact", "fuzzy", "manual", "human_confirmed"];
+export const recordLinkMethods: readonly ["exact", "fuzzy", "created", "manual", "human_confirmed"];
 
 // @public (undocumented)
 export interface RecordTable {

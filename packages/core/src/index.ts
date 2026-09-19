@@ -8,6 +8,8 @@ export {
   type AppLabels,
   type AppOutcomes,
   type AppRecords,
+  type AppResolution,
+  type AppResolutionBatchOptions,
   type AppSchedules,
   type AppScores,
   type AppTasks,
@@ -24,6 +26,16 @@ export {
 } from "./registry.js";
 export { defineSource, type SourceDefinition, type SourceRow } from "./sources.js";
 export { defineResolver, type ResolverDefinition, type ResolverFuzzy } from "./resolvers.js";
+export {
+  bigramDice,
+  fuzzyCandidateStatement,
+  resolveBatch,
+  DEFAULT_RESOLVE_LIMIT,
+  DEFAULT_RESOLVE_MAX_ATTEMPTS,
+  FUZZY_CANDIDATE_LIMIT,
+  type ResolveBatchOptions,
+  type ResolveBatchResult,
+} from "./resolution.js";
 export { defineSpec, type SpecDefinition } from "./specs.js";
 export { defineScorer, type Scored, type ScorerDefinition } from "./scorers.js";
 export type { PageDefinition } from "./pages.js";

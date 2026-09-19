@@ -11,8 +11,6 @@ import type { DBOSClient } from '@dbos-inc/dbos-sdk';
 import { DecideOptions } from '@hyperfixation/workflows';
 import { DecideResult } from '@hyperfixation/workflows';
 import { Flow } from '@hyperfixation/workflows';
-import { LabelTarget } from '@hyperfixation/db';
-import { LabelValue } from '@hyperfixation/db';
 import type { Pool } from 'pg';
 import { QueueConcurrency } from '@hyperfixation/workflows';
 import { ReconcileOptions } from '@hyperfixation/workflows';
@@ -21,92 +19,7 @@ import { RecordTable } from '@hyperfixation/db';
 import { RunsStartOptions } from '@hyperfixation/workflows';
 import type { RunStatus } from '@hyperfixation/db';
 import { StartedRun } from '@hyperfixation/workflows';
-import { StepContext } from '@hyperfixation/workflows';
-import type { StepDatabase } from '@hyperfixation/db';
-
-// @public
-export const ACTIVITY_KIND_PATTERN: RegExp;
-
-// @public (undocumented)
-export const ACTIVITY_LIST_OPERATION = "activity.list";
-
-// @public (undocumented)
-export interface ActivityListOptions {
-    // (undocumented)
-    recordId: string | number;
-    // (undocumented)
-    recordType: string;
-}
-
-// @public (undocumented)
-export interface ActivityRecorded {
-    created: boolean;
-    // (undocumented)
-    id: number;
-}
-
-// @public
-export interface ActivityRecordOptions {
-    // (undocumented)
-    actorId?: string;
-    // (undocumented)
-    body?: string;
-    key?: string;
-    // (undocumented)
-    kind: string;
-    // (undocumented)
-    meta?: unknown;
-    // (undocumented)
-    recordId?: string | number;
-    // (undocumented)
-    recordType?: string;
-}
-
-// @public (undocumented)
-export interface ActivityRow {
-    // (undocumented)
-    actorId: string | null;
-    // (undocumented)
-    at: Date;
-    // (undocumented)
-    body: string | null;
-    // (undocumented)
-    id: number;
-    // (undocumented)
-    kind: string;
-    // (undocumented)
-    meta: unknown;
-    // (undocumented)
-    recordId: string | null;
-    // (undocumented)
-    recordType: string | null;
-    runId: string | null;
-}
-
-// @public
-export interface ActivityWrite {
-    // (undocumented)
-    actorId?: string | null;
-    // (undocumented)
-    body?: string | null;
-    // (undocumented)
-    key?: string | null;
-    // (undocumented)
-    kind: string;
-    // (undocumented)
-    meta?: unknown;
-    // (undocumented)
-    recordId?: string | number | null;
-    // (undocumented)
-    recordType?: string | null;
-    // (undocumented)
-    runId?: string | null;
-}
-
-// @public
-export function addLabel(pool: Pool, records: Registry<RecordTable>, options: LabelAddOptions): Promise<{
-    id: number;
-}>;
+import { StepDatabase } from '@hyperfixation/db';
 
 // @public
 export type AnyFlow = Flow<never, unknown>;
@@ -126,8 +39,6 @@ export interface AnySchedule {
 // @public (undocumented)
 export interface App {
     // (undocumented)
-    readonly activity: AppActivity;
-    // (undocumented)
     readonly applicationVersion: string | undefined;
     // (undocumented)
     approvals: {
@@ -144,11 +55,7 @@ export interface App {
     // (undocumented)
     readonly flows: Registry<AnyFlow>;
     // (undocumented)
-    readonly labels: AppLabels;
-    // (undocumented)
     readonly name: string;
-    // (undocumented)
-    readonly outcomes: AppOutcomes;
     readonly pages: Registry<PageDefinition>;
     // (undocumented)
     pause(options?: PauseOptions): Promise<PauseResult>;
@@ -156,6 +63,8 @@ export interface App {
     reconcile(options?: Partial<ReconcileOptions>): Promise<ReconcileReport>;
     // (undocumented)
     readonly records: AppRecords;
+    // (undocumented)
+    readonly resolution: AppResolution;
     // (undocumented)
     readonly resolvers: Registry<ResolverDefinition>;
     // (undocumented)
@@ -169,34 +78,12 @@ export interface App {
     // (undocumented)
     readonly scorers: Registry<ScorerDefinition>;
     // (undocumented)
-    readonly scores: AppScores;
-    // (undocumented)
     readonly sources: Registry<SourceDefinition>;
     // (undocumented)
     readonly specs: Registry<SpecDefinition>;
     // (undocumented)
     status(): Promise<StatusReport>;
     statusHandler(request: Request): Promise<Response>;
-    // (undocumented)
-    readonly tasks: AppTasks;
-}
-
-// @public
-export interface AppActivity {
-    // (undocumented)
-    list(options: ActivityListOptions): Promise<ActivityRow[]>;
-    // (undocumented)
-    record(ctx: StepContext, options: ActivityRecordOptions): Promise<ActivityRecorded>;
-}
-
-// @public (undocumented)
-export interface AppLabels {
-    // (undocumented)
-    add(options: LabelAddOptions): Promise<{
-        id: number;
-    }>;
-    // (undocumented)
-    list(options: LabelListOptions): Promise<LabelRow[]>;
 }
 
 // @public (undocumented)
@@ -207,20 +94,27 @@ export class AppNotAttached extends Error {
 }
 
 // @public (undocumented)
-export interface AppOutcomes {
-    // (undocumented)
-    list(options: OutcomeListOptions): Promise<OutcomeRow[]>;
-    // (undocumented)
-    record(options: OutcomeRecordOptions): Promise<{
-        id: number;
-    }>;
-}
-
-// @public (undocumented)
 export interface AppRecords {
     // (undocumented)
     archive(options: ArchiveOptions): Promise<ArchiveResult>;
     readonly types: Registry<RecordTable>;
+}
+
+// @public (undocumented)
+export interface AppResolution {
+    batch(tx: StepDatabase, options: AppResolutionBatchOptions): Promise<ResolveBatchResult>;
+}
+
+// @public (undocumented)
+export interface AppResolutionBatchOptions {
+    // (undocumented)
+    limit?: number | undefined;
+    // (undocumented)
+    maxAttempts?: number | undefined;
+    // (undocumented)
+    resolver: string;
+    // (undocumented)
+    source: string;
 }
 
 // @public (undocumented)
@@ -237,26 +131,8 @@ export interface AppSchedules extends Registry<AnySchedule> {
     fire(name: string): Promise<ScheduleFired>;
 }
 
-// @public (undocumented)
-export interface AppScores {
-    write(ctx: StepContext, options: StepWriteScoreOptions): Promise<ScoreWritten>;
-}
-
 // @public
 export function appStatus(pool: Pool, options: StatusOptions): Promise<StatusReport>;
-
-// @public (undocumented)
-export interface AppTasks {
-    // (undocumented)
-    cancel(options: TaskCloseOptions): Promise<TaskClosed>;
-    // (undocumented)
-    complete(options: TaskCloseOptions): Promise<TaskClosed>;
-    create(ctx: StepContext, options: TaskCreateOptions): Promise<TaskCreated>;
-    // (undocumented)
-    createManual(options: TaskCreateManualOptions): Promise<TaskCreated>;
-    // (undocumented)
-    list(options?: TaskListOptions): Promise<TaskRow[]>;
-}
 
 // @public (undocumented)
 export const ARCHIVE_OPERATION = "records.archive";
@@ -286,27 +162,17 @@ export function archiveRecord(pool: Pool, client: DBOSClient, records: Registry<
 export interface ArchiveResult {
     archived: boolean;
     cancelledApprovals: number[];
-    cancelledTasks: number[];
     // (undocumented)
     recordId: string;
     // (undocumented)
     recordType: string;
 }
 
-// @public (undocumented)
-export function assertActivityKind(kind: string): void;
-
 // @public
 export function bearerToken(request: Request): string | null;
 
 // @public
-export function cancelOpenTasksForRecord(queryable: Pool | ClientBase, recordType: string, recordId: string): Promise<number[]>;
-
-// @public (undocumented)
-export function cancelTask(pool: Pool, options: TaskCloseOptions): Promise<TaskClosed>;
-
-// @public (undocumented)
-export function completeTask(pool: Pool, options: TaskCloseOptions): Promise<TaskClosed>;
+export function bigramDice(a: string, b: string): number;
 
 // @public
 export interface ControlPlane {
@@ -320,16 +186,16 @@ export interface ControlPlane {
 export const CORE_VERSION: string;
 
 // @public
-export function createManualTask(pool: Pool, records: Registry<RecordTable>, options: TaskCreateManualOptions): Promise<TaskCreated>;
-
-// @public
 export function createRegistry<T>(kind: string, keyOf?: (entry: T) => string): Registry<T>;
 
 // @public
 export function createStatusHandler(options: StatusHandlerOptions): (request: Request) => Promise<Response>;
 
-// @public
-export function createTask(ctx: StepContext, records: Registry<RecordTable>, options: TaskCreateOptions): Promise<TaskCreated>;
+// @public (undocumented)
+export const DEFAULT_RESOLVE_LIMIT = 500;
+
+// @public (undocumented)
+export const DEFAULT_RESOLVE_MAX_ATTEMPTS = 3;
 
 // @public
 export function defineApp(options: DefineAppOptions): App;
@@ -384,33 +250,17 @@ export class DuplicateRegistration extends Error {
     readonly registeredName: string;
 }
 
-// @public (undocumented)
-export const EXISTING_ACTIVITY_STATEMENT = "SELECT id FROM hf_activity WHERE run_id = $1 AND key = $2";
-
-// @public (undocumented)
-export const EXISTING_SCORE_STATEMENT = "SELECT id FROM hf_score WHERE run_id = $1 AND key = $2";
-
 // @public
 export function fireSchedule(pool: Pool, schedule: AnySchedule, start: (flow: Flow<unknown, unknown>, input: unknown) => Promise<StartedRun>): Promise<ScheduleFired>;
 
 // @public
-export function flowOriginRef(runId: string, key: string): string;
+export const FUZZY_CANDIDATE_LIMIT = 20;
+
+// @public
+export function fuzzyCandidateStatement(table: string, field: string): string;
 
 // @public
 export function hashStatusToken(token: string): string;
-
-// @public
-export const INSERT_ACTIVITY_STATEMENT: string;
-
-// @public
-export function insertActivity(queryable: Pool | ClientBase, write: ActivityWrite): Promise<ActivityRecorded>;
-
-// @public (undocumented)
-export class InvalidActivityKind extends Error {
-    constructor(kind: string);
-    // (undocumented)
-    readonly kind: string;
-}
 
 // @public
 export class InvalidDefinition extends Error {
@@ -422,117 +272,8 @@ export class InvalidDefinition extends Error {
 }
 
 // @public (undocumented)
-export const LABEL_ADD_OPERATION = "labels.add";
-
-// @public (undocumented)
-export const LABEL_LIST_OPERATION = "labels.list";
-
-// @public (undocumented)
-export interface LabelAddOptions {
-    // (undocumented)
-    correction?: unknown;
-    // (undocumented)
-    recordId: string | number;
-    // (undocumented)
-    recordType: string;
-    // (undocumented)
-    target: LabelTarget;
-    targetId?: string | number;
-    // (undocumented)
-    userId?: string;
-    // (undocumented)
-    value: LabelValue;
-}
-
-// @public (undocumented)
-export interface LabelListOptions {
-    // (undocumented)
-    recordId: string | number;
-    // (undocumented)
-    recordType: string;
-}
-
-// @public (undocumented)
-export interface LabelRow {
-    // (undocumented)
-    correction: unknown;
-    // (undocumented)
-    createdAt: Date;
-    // (undocumented)
-    id: number;
-    // (undocumented)
-    recordId: string;
-    // (undocumented)
-    recordType: string;
-    // (undocumented)
-    target: LabelTarget;
-    // (undocumented)
-    targetId: string | null;
-    // (undocumented)
-    userId: string | null;
-    // (undocumented)
-    value: LabelValue;
-}
-
-// @public
-export function listActivity(pool: Pool, options: ActivityListOptions): Promise<ActivityRow[]>;
-
-// @public (undocumented)
-export function listLabels(pool: Pool, options: LabelListOptions): Promise<LabelRow[]>;
-
-// @public (undocumented)
-export function listOutcomes(pool: Pool, options: OutcomeListOptions): Promise<OutcomeRow[]>;
-
-// @public (undocumented)
-export function listTasks(pool: Pool, options?: TaskListOptions): Promise<TaskRow[]>;
-
-// @public (undocumented)
 export class NoApplicationVersion extends Error {
     constructor(operation: string);
-}
-
-// @public (undocumented)
-export const OUTCOME_LIST_OPERATION = "outcomes.list";
-
-// @public (undocumented)
-export const OUTCOME_RECORD_OPERATION = "outcomes.record";
-
-// @public (undocumented)
-export interface OutcomeListOptions {
-    // (undocumented)
-    recordId: string | number;
-    // (undocumented)
-    recordType: string;
-}
-
-// @public (undocumented)
-export interface OutcomeRecordOptions {
-    at?: Date;
-    // (undocumented)
-    notes?: string;
-    outcome: string;
-    // (undocumented)
-    recordId: string | number;
-    // (undocumented)
-    recordType: string;
-    // (undocumented)
-    userId?: string;
-}
-
-// @public (undocumented)
-export interface OutcomeRow {
-    // (undocumented)
-    at: Date;
-    // (undocumented)
-    id: number;
-    // (undocumented)
-    notes: string | null;
-    // (undocumented)
-    outcome: string;
-    // (undocumented)
-    recordId: string;
-    // (undocumented)
-    recordType: string;
 }
 
 // @public
@@ -592,14 +333,6 @@ export interface QueueStatus {
     running: number;
 }
 
-// @public
-export function recordActivity(ctx: StepContext, options: ActivityRecordOptions): Promise<ActivityRecorded>;
-
-// @public
-export function recordOutcome(pool: Pool, records: Registry<RecordTable>, options: OutcomeRecordOptions): Promise<{
-    id: number;
-}>;
-
 // @public (undocumented)
 export interface Registry<T> {
     // (undocumented)
@@ -616,6 +349,39 @@ export interface Registry<T> {
     require(name: string): T;
     // (undocumented)
     readonly size: number;
+}
+
+// @public
+export function resolveBatch(tx: StepDatabase, options: ResolveBatchOptions): Promise<ResolveBatchResult>;
+
+// @public (undocumented)
+export interface ResolveBatchOptions {
+    limit?: number | undefined;
+    // (undocumented)
+    maxAttempts?: number | undefined;
+    // (undocumented)
+    resolver: ResolverDefinition;
+    // (undocumented)
+    source: string;
+    table: string;
+}
+
+// @public (undocumented)
+export interface ResolveBatchResult {
+    // (undocumented)
+    created: number;
+    done: boolean;
+    // (undocumented)
+    error: number;
+    // (undocumented)
+    linkedExact: number;
+    // (undocumented)
+    linkedFuzzy: number;
+    // (undocumented)
+    review: number;
+    // (undocumented)
+    scanned: number;
+    updated: number;
 }
 
 // @public (undocumented)
@@ -639,6 +405,7 @@ export interface ResolverDefinition<P = unknown> {
 // @public (undocumented)
 export interface ResolverFuzzy {
     readonly field: string;
+    readonly payloadKey?: string;
     readonly threshold: number;
 }
 
@@ -706,13 +473,6 @@ export interface ScorerDefinition<R = unknown, C = unknown> {
     score(record: R, criteria: C): Promise<Scored>;
     // (undocumented)
     readonly spec: SpecDefinition<C>;
-}
-
-// @public (undocumented)
-export interface ScoreWritten {
-    created: boolean;
-    // (undocumented)
-    id: number;
 }
 
 // @public (undocumented)
@@ -815,123 +575,6 @@ export function statusRouteOf(pathname: string): StatusRoute | undefined;
 // @public
 export function statusTokenMatches(presented: string | null | undefined, storedHash: string | null | undefined): boolean;
 
-// @public
-export interface StepWriteScoreOptions {
-    // (undocumented)
-    explanation?: string;
-    key?: string;
-    // (undocumented)
-    llmCallId?: number;
-    // (undocumented)
-    recordId: string | number;
-    // (undocumented)
-    recordType: string;
-    // (undocumented)
-    score: number;
-    // (undocumented)
-    spec: SpecDefinition;
-}
-
-// @public (undocumented)
-export const TASK_CANCEL_OPERATION = "tasks.cancel";
-
-// @public (undocumented)
-export const TASK_COMPLETE_OPERATION = "tasks.complete";
-
-// @public (undocumented)
-export const TASK_CREATE_MANUAL_OPERATION = "tasks.createManual";
-
-// @public (undocumented)
-export const TASK_LIST_OPERATION = "tasks.list";
-
-// @public (undocumented)
-export interface TaskClosed {
-    changed: boolean;
-    // (undocumented)
-    id: number;
-}
-
-// @public (undocumented)
-export interface TaskCloseOptions {
-    // (undocumented)
-    id: number;
-    // (undocumented)
-    userId?: string;
-}
-
-// @public (undocumented)
-export interface TaskCreated {
-    created: boolean;
-    // (undocumented)
-    id: number;
-}
-
-// @public (undocumented)
-export interface TaskCreateManualOptions extends TaskTarget {
-    // (undocumented)
-    dueAt?: Date;
-    // (undocumented)
-    ownerId?: string;
-    // (undocumented)
-    title: string;
-    // (undocumented)
-    userId?: string;
-}
-
-// @public (undocumented)
-export interface TaskCreateOptions extends TaskTarget {
-    // (undocumented)
-    dueAt?: Date;
-    key?: string;
-    // (undocumented)
-    ownerId?: string;
-    // (undocumented)
-    title: string;
-}
-
-// @public (undocumented)
-export interface TaskListOptions {
-    open?: boolean;
-    // (undocumented)
-    ownerId?: string;
-    // (undocumented)
-    recordId?: string | number;
-    // (undocumented)
-    recordType?: string;
-}
-
-// @public (undocumented)
-export interface TaskRow {
-    // (undocumented)
-    cancelledAt: Date | null;
-    // (undocumented)
-    createdAt: Date;
-    // (undocumented)
-    doneAt: Date | null;
-    // (undocumented)
-    dueAt: Date | null;
-    // (undocumented)
-    id: number;
-    // (undocumented)
-    origin: string;
-    // (undocumented)
-    ownerId: string | null;
-    // (undocumented)
-    recordId: string | null;
-    // (undocumented)
-    recordType: string | null;
-    // (undocumented)
-    title: string;
-}
-
-// @public (undocumented)
-export interface TaskTarget {
-    // (undocumented)
-    recordId?: string | number;
-    // (undocumented)
-    recordType?: string;
-}
-
 // @public (undocumented)
 export class UnknownRegistration extends Error {
     constructor(kind: string, name: string, known: readonly string[]);
@@ -941,33 +584,29 @@ export class UnknownRegistration extends Error {
     readonly known: readonly string[];
 }
 
-// @public
+// @public (undocumented)
 export const WRITE_SCORE_STATEMENT: string;
 
 // @public
-export function writeScore(queryable: Pool | ClientBase, options: WriteScoreOptions): Promise<ScoreWritten>;
+export function writeScore(queryable: Pool | ClientBase, options: WriteScoreOptions): Promise<{
+    id: number;
+}>;
 
 // @public (undocumented)
 export interface WriteScoreOptions {
     // (undocumented)
     explanation?: string;
     // (undocumented)
-    key?: string;
-    // (undocumented)
     llmCallId?: number;
     // (undocumented)
     recordId: string | number;
     // (undocumented)
     recordType: string;
-    runId?: string;
     // (undocumented)
     score: number;
     // (undocumented)
     spec: SpecDefinition;
 }
-
-// @public
-export function writeStepScore(ctx: StepContext, records: Registry<RecordTable>, options: StepWriteScoreOptions): Promise<ScoreWritten>;
 
 // (No @packageDocumentation comment for this package)
 
