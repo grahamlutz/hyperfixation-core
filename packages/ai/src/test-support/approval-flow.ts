@@ -11,7 +11,12 @@ import type {
   LanguageModelV4CallOptions,
   LanguageModelV4GenerateResult,
 } from "@ai-sdk/provider";
-import { MockLanguageModel, type KillAtControl, type WorkerControl } from "@hyperfixation/testing";
+import {
+  MockLanguageModel,
+  MOCK_MODEL_ID,
+  type KillAtControl,
+  type WorkerControl,
+} from "@hyperfixation/testing";
 import { parkFor, workerControl } from "@hyperfixation/testing/worker";
 import {
   actions,
@@ -21,8 +26,10 @@ import {
   type ActionChannel,
   type Flow,
 } from "@hyperfixation/workflows";
-import { llm } from "../llm-run.js";
+import { createLlm } from "../llm-run.js";
+import { createProviders, fixedCost } from "../providers.js";
 import { PROVIDER_CALL_MARKER } from "./llm-flow.js";
+import { PROMPTS_DIR } from "./prompts-dir.js";
 
 export const APPROVAL_FLOW_NAME = "approvalFlow";
 export const APPROVAL_KEY = "send";
@@ -65,13 +72,11 @@ export function approvalFlow(variant: ApprovalFlowVariant = {}): Flow<ApprovalFl
         await step(
           "draft",
           (ctx) =>
-            llm.run(ctx, {
+            ledgerFor(announcing(model, key, control.killAt), input).run(ctx, {
               key: ctx.key,
-              prompt: "draft one line",
+              model: MOCK_MODEL_ID,
+              prompt: "draft",
               input: { key },
-              estimatedCostUsd: input.estimatedCostUsd,
-              costUsd: input.costUsd,
-              model: announcing(model, key, control.killAt),
             }),
           { key },
         );
@@ -82,13 +87,11 @@ export function approvalFlow(variant: ApprovalFlowVariant = {}): Flow<ApprovalFl
         await step(
           "classify",
           (ctx) =>
-            llm.run(ctx, {
+            ledgerFor(announcing(model, CLASSIFY_KEY, control.killAt), input).run(ctx, {
               key: ctx.key,
-              prompt: "classify the draft",
+              model: MOCK_MODEL_ID,
+              prompt: "classify",
               input: { key: CLASSIFY_KEY },
-              estimatedCostUsd: input.estimatedCostUsd,
-              costUsd: input.costUsd,
-              model: announcing(model, CLASSIFY_KEY, control.killAt),
             }),
           { key: CLASSIFY_KEY },
         );
@@ -114,6 +117,17 @@ export function approvalFlow(variant: ApprovalFlowVariant = {}): Flow<ApprovalFl
     { queue: "llm" },
   );
   return flow;
+}
+
+/** One registry per call: the wrapped model is per key, the same way `llm-flow.ts` builds it. */
+function ledgerFor(model: LanguageModelV4, input: ApprovalFlowInput): ReturnType<typeof createLlm> {
+  return createLlm({
+    providers: createProviders({
+      models: { [MOCK_MODEL_ID]: model },
+      costs: { [MOCK_MODEL_ID]: fixedCost(input.estimatedCostUsd, input.costUsd) },
+    }),
+    promptsDir: PROMPTS_DIR,
+  });
 }
 
 /** One response per key the flow can reach, in the order it reaches them. */

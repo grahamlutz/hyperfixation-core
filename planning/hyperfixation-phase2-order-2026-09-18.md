@@ -138,7 +138,7 @@ the mixin snapshot, delete-guard over real referencing tables, and E002 over a `
 
 ## Track L — the ledger completion (`@hyperfixation/ai`)
 
-### L1 — Provider registry, prompt files, the AI SDK call — ⬜ Not started
+### L1 — Provider registry, prompt files, the AI SDK call — ✅ Done (deviated — see note)
 
 `createProviders({ anthropic?, openai?, … })` keyed by model name, with a cost table that turns
 `(model, input, output)` into `estimated_cost_usd` before the call and `cost_usd` after it. Prompt files: read
@@ -147,6 +147,16 @@ written on the row. `llm.run` moves from `model.doGenerate` to the SDK's `genera
 with `experimental_telemetry` carrying `runId`, `key`, `promptName`, `promptHash` — the join Langfuse needs —
 and `LlmRunOptions` loses the two TEMPORARY fields and the per-call `model` object. `@hyperfixation/ai` gains
 `ai` as a dependency (only `@ai-sdk/provider` today; `testing` already carries `ai@^7`).
+
+> **Built, and where it differs from the wording above:** `createLlm({ providers, promptsDir })` returns the `llm` flows call —
+> `LlmRunOptions` is `{ key, model: string, prompt: string, input, schema? }` with `model` a registry name and `prompt` a file
+> under `promptsDir`. `ai@7.0.102`'s telemetry has no `metadata` field or tracer, so the four join fields (`runId`, `key`,
+> `promptName`, `promptHash`) travel as `runtimeContext` + `telemetry.includeRuntimeContext`; **L2 must consume that**, not
+> `ai.telemetry.metadata.*` span attributes. `generateText` runs with `maxRetries: 0` (its default of 2 would re-bill a
+> call the ledger never sees). `@ai-sdk/anthropic` and `@ai-sdk/openai` are pinned **exactly** (4.0.54, 4.0.67): the
+> current majors pin `@ai-sdk/provider@4.0.17` against `ai@7.0.102`'s 4.0.15 and are type-incompatible; move them
+> together with `ai` and `@ai-sdk/provider` (in `ai` and `testing`) when upgrading. `DEFAULT_COSTS` prices are list
+> prices, not yet checked against a bill line. The fixture provider (open question 5) is not in this chunk.
 
 **The seven redeploy cases in `ai` are this chunk's regression net.** They assert on every ledger column the
 gate and completion write, and they all construct `LlmRunOptions` — they will not compile until re-pointed at

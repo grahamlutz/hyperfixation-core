@@ -1,13 +1,11 @@
-import type {
-  JSONSchema7,
-  LanguageModelV4,
-  LanguageModelV4CallOptions,
-  LanguageModelV4GenerateResult,
-} from "@ai-sdk/provider";
+import type { JSONSchema7 } from "@ai-sdk/provider";
 import type { StepDatabase } from "@hyperfixation/db";
+import { generateText, jsonSchema, Output } from "ai";
 import { sql } from "drizzle-orm";
 import { AppPaused, BudgetExceeded, LedgerKeyCollision } from "./errors.js";
 import { hashInput } from "./input-hash.js";
+import { loadPrompt } from "./prompts.js";
+import type { ProviderRegistry } from "./providers.js";
 
 /**
  * The subset of `@hyperfixation/workflows`' `StepContext` the ledger needs. Structural rather
@@ -22,23 +20,46 @@ export interface LedgerContext {
 export interface LlmRunOptions {
   /** Unique within the run, and stable across attempts: the ledger row is keyed by it. */
   key: string;
-  /** The system instruction. Phase 2 replaces it with a prompt file addressed by content hash. */
+  /** A registry model name; the registry resolves both the model and its price from it. */
+  model: string;
+  /** A file name under the llm's `promptsDir`, without the `.md`. */
   prompt: string;
   input: unknown;
   /** When set, the call asks for JSON and the answer is parsed rather than returned as text. */
   schema?: JSONSchema7;
-  /** TEMPORARY (chunk 10): Phase 2's provider registry estimates this from the model and input. */
-  estimatedCostUsd: number;
-  /** TEMPORARY (chunk 10): Phase 2 computes the billed cost from the model and returned tokens. */
-  costUsd?: number;
-  /** Phase 2 resolves this from the provider registry by name. */
-  model: LanguageModelV4;
+}
+
+export interface CreateLlmOptions {
+  providers: ProviderRegistry;
+  /** Where `prompt` names resolve: one directory of `.md` files. */
+  promptsDir: string;
+}
+
+export interface Llm {
+  run<O = { text: string }>(ctx: LedgerContext, options: LlmRunOptions): Promise<O>;
 }
 
 type GateOutcome =
   | { kind: "reserved"; period: string }
   | { kind: "cached"; output: unknown }
   | { kind: "failed"; error: Error };
+
+/** Everything the two transactions write, resolved before either of them opens. */
+interface LedgeredCall {
+  key: string;
+  model: string;
+  input: unknown;
+  inputHash: string;
+  promptName: string;
+  promptHash: string;
+  estimatedCostUsd: number;
+}
+
+interface ProviderAnswer {
+  output: unknown;
+  inputTokens: number | undefined;
+  outputTokens: number | undefined;
+}
 
 interface LedgerRow extends Record<string, unknown> {
   status: string;
@@ -49,6 +70,17 @@ interface LedgerRow extends Record<string, unknown> {
 
 interface StoredError {
   error?: { name?: string; message?: string };
+}
+
+/**
+ * `llm.run(…)`, the name the plan and every flow use, bound to a registry and a prompt
+ * directory. An app builds one at startup; a test builds one per call.
+ */
+export function createLlm({ providers, promptsDir }: CreateLlmOptions): Llm {
+  return {
+    run: <O,>(ctx: LedgerContext, options: LlmRunOptions): Promise<O> =>
+      runCall<O>(ctx, options, providers, promptsDir),
+  };
 }
 
 /**
@@ -65,52 +97,125 @@ interface StoredError {
  *
  * `O` names what `schema` asks the model for; without a schema the output is `{ text }`.
  */
-export async function run<O = { text: string }>(
+async function runCall<O>(
   ctx: LedgerContext,
   options: LlmRunOptions,
+  providers: ProviderRegistry,
+  promptsDir: string,
 ): Promise<O> {
-  const inputHash = hashInput(options.input);
+  // Both throw before the gate opens: an unknown name or a missing file leaves no row and
+  // makes no call.
+  const model = providers.model(options.model);
+  const cost = providers.cost(options.model);
+  const prompt = await loadPrompt(promptsDir, options.prompt);
 
-  const gate = await openGate(ctx, options, inputHash);
+  const userText = userTextOf(options.input);
+  const call: LedgeredCall = {
+    key: options.key,
+    model: options.model,
+    input: options.input,
+    inputHash: hashInput(options.input),
+    promptName: prompt.name,
+    promptHash: prompt.hash,
+    estimatedCostUsd: cost.estimate({
+      promptBytes: Buffer.byteLength(prompt.text),
+      inputBytes: Buffer.byteLength(userText),
+    }),
+  };
+
+  const gate = await openGate(ctx, call);
   if (gate.kind === "cached") return gate.output as O;
   // Committed before it is thrown: a failed call is not retried by replay, so the row that
   // records the failure has to outlive this attempt just as an `ok` row does.
   if (gate.kind === "failed") throw gate.error;
 
   const startedAt = Date.now();
-  let result: LanguageModelV4GenerateResult;
+  let answer: ProviderAnswer;
   try {
-    result = await options.model.doGenerate(callOptions(options));
+    answer = await callProvider(model, ctx, options, prompt.text, call.promptHash, userText);
   } catch (error) {
-    await recordProviderError(ctx, options, error, Date.now() - startedAt);
+    await recordProviderError(ctx, call, error, Date.now() - startedAt);
     throw error;
   }
 
-  const output = parseOutput(result, options.schema);
-  await complete(ctx, options, gate.period, result, output, Date.now() - startedAt);
-  return output as O;
+  // A provider that reported no usage at all bills nothing the estimate can be corrected with.
+  const costUsd =
+    answer.inputTokens === undefined && answer.outputTokens === undefined
+      ? call.estimatedCostUsd
+      : cost.actual({ inputTokens: answer.inputTokens, outputTokens: answer.outputTokens });
+
+  await complete(ctx, call, gate.period, answer, costUsd, Date.now() - startedAt);
+  return answer.output as O;
 }
 
-/** `llm.run(…)`, the name the plan and every flow use. */
-export const llm = { run };
+/**
+ * The SDK call. `maxRetries: 0` because the SDK's default of two would re-bill the provider
+ * behind the ledger's back; a retry is the run's business, not the call's. The four join fields
+ * travel as runtime context, which is how `ai@7`'s telemetry integrations — Langfuse in L2 —
+ * receive them.
+ */
+async function callProvider(
+  model: Parameters<typeof generateText>[0]["model"],
+  ctx: LedgerContext,
+  options: LlmRunOptions,
+  system: string,
+  promptHash: string,
+  userText: string,
+): Promise<ProviderAnswer> {
+  const common = {
+    model,
+    system,
+    prompt: userText,
+    maxRetries: 0,
+    runtimeContext: {
+      runId: ctx.runId,
+      key: options.key,
+      promptName: options.prompt,
+      promptHash,
+    },
+    telemetry: {
+      functionId: "llm.run",
+      includeRuntimeContext: {
+        runId: true,
+        key: true,
+        promptName: true,
+        promptHash: true,
+      },
+    },
+  };
+
+  if (options.schema === undefined) {
+    const result = await generateText(common);
+    return {
+      output: { text: result.text },
+      inputTokens: result.usage.inputTokens,
+      outputTokens: result.usage.outputTokens,
+    };
+  }
+  const result = await generateText({
+    ...common,
+    output: Output.object({ schema: jsonSchema(options.schema), name: options.key }),
+  });
+  return {
+    output: result.output,
+    inputTokens: result.usage.inputTokens,
+    outputTokens: result.usage.outputTokens,
+  };
+}
 
 /**
  * The gate, one transaction. Its committed `started` row under this attempt's `workflow_id`
  * *is* the reservation — nothing else records it, and an old row re-entering is budget-checked
  * exactly like a fresh one.
  */
-async function openGate(
-  ctx: LedgerContext,
-  options: LlmRunOptions,
-  inputHash: string,
-): Promise<GateOutcome> {
+async function openGate(ctx: LedgerContext, call: LedgeredCall): Promise<GateOutcome> {
   return ctx.tx(async (db) => {
     const state = await db.execute<{ paused: boolean; period: string }>(sql`
       SELECT COALESCE((SELECT paused FROM hf_app_state WHERE id = 1), false) AS paused,
              to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM') AS period
     `);
     const { paused, period } = state.rows[0]!;
-    if (paused) throw new AppPaused(ctx.runId, options.key);
+    if (paused) throw new AppPaused(ctx.runId, call.key);
 
     // Created by the first gate of the month from `hf_app_state.budget_usd`; there is no
     // rollover step because the month boundary is a different row.
@@ -133,20 +238,21 @@ async function openGate(
 
     const insert = await db.execute(sql`
       INSERT INTO hf_llm_call
-        (run_id, key, workflow_id, period, input_hash, model, status, input, estimated_cost_usd)
-      VALUES (${ctx.runId}, ${options.key}, ${ctx.workflowId}, ${period}, ${inputHash},
-              ${options.model.modelId}, 'started', ${JSON.stringify(options.input) ?? null}::jsonb,
-              ${options.estimatedCostUsd}::numeric)
+        (run_id, key, workflow_id, period, input_hash, model, prompt_name, prompt_hash, status,
+         input, estimated_cost_usd)
+      VALUES (${ctx.runId}, ${call.key}, ${ctx.workflowId}, ${period}, ${call.inputHash},
+              ${call.model}, ${call.promptName}, ${call.promptHash}, 'started',
+              ${JSON.stringify(call.input) ?? null}::jsonb, ${call.estimatedCostUsd}::numeric)
       ON CONFLICT (run_id, key) DO NOTHING
     `);
     const read = await db.execute<LedgerRow>(sql`
       SELECT status, input_hash, output, period FROM hf_llm_call
-      WHERE run_id = ${ctx.runId} AND key = ${options.key}
+      WHERE run_id = ${ctx.runId} AND key = ${call.key}
     `);
     const row = read.rows[0]!;
 
-    if (row.input_hash !== inputHash) {
-      throw new LedgerKeyCollision(ctx.runId, options.key, row.input_hash, inputHash);
+    if (row.input_hash !== call.inputHash) {
+      throw new LedgerKeyCollision(ctx.runId, call.key, row.input_hash, call.inputHash);
     }
     if (row.status === "ok") return { kind: "cached", output: row.output } as const;
     if (row.status === "error") return { kind: "failed", error: storedErrorOf(row) } as const;
@@ -163,10 +269,10 @@ async function openGate(
           AND l.period = ${period}
           AND l.workflow_id = r.current_workflow_id
           AND r.status = 'running'
-          AND (l.run_id, l.key) <> (${ctx.runId}, ${options.key})
+          AND (l.run_id, l.key) <> (${ctx.runId}, ${call.key})
       )
       SELECT reserved.amount::text AS reserved,
-             (b.spent_usd + reserved.amount + ${options.estimatedCostUsd}::numeric > b.budget_usd)
+             (b.spent_usd + reserved.amount + ${call.estimatedCostUsd}::numeric > b.budget_usd)
                AS exceeded,
              b.budget_usd::text AS budget,
              b.spent_usd::text AS spent
@@ -176,7 +282,7 @@ async function openGate(
     const { reserved, exceeded, budget: budgetUsd, spent } = check.rows[0]!;
     if (exceeded) {
       // Rolls back, which undoes the insert above; a pre-existing row stays exactly as it was.
-      throw new BudgetExceeded(period, budgetUsd, spent, reserved, options.estimatedCostUsd);
+      throw new BudgetExceeded(period, budgetUsd, spent, reserved, call.estimatedCostUsd);
     }
 
     if (insert.rowCount !== 1) {
@@ -186,8 +292,9 @@ async function openGate(
       await db.execute(sql`
         UPDATE hf_llm_call
         SET possible_double_charge = true, status = 'started', workflow_id = ${ctx.workflowId},
-            period = ${period}, finished_at = NULL
-        WHERE run_id = ${ctx.runId} AND key = ${options.key}
+            period = ${period}, finished_at = NULL, prompt_name = ${call.promptName},
+            prompt_hash = ${call.promptHash}
+        WHERE run_id = ${ctx.runId} AND key = ${call.key}
       `);
     }
     return { kind: "reserved", period } as const;
@@ -204,13 +311,12 @@ async function openGate(
  */
 async function complete(
   ctx: LedgerContext,
-  options: LlmRunOptions,
+  call: LedgeredCall,
   period: string,
-  result: LanguageModelV4GenerateResult,
-  output: unknown,
+  answer: ProviderAnswer,
+  costUsd: number,
   latencyMs: number,
 ): Promise<void> {
-  const costUsd = options.costUsd ?? options.estimatedCostUsd;
   await ctx.tx(async (db) => {
     await db.execute(sql`
       UPDATE hf_budget_period SET spent_usd = spent_usd + ${costUsd}::numeric
@@ -218,11 +324,11 @@ async function complete(
     `);
     await db.execute(sql`
       UPDATE hf_llm_call
-      SET status = 'ok', output = ${JSON.stringify(output) ?? null}::jsonb,
-          tokens_in = ${result.usage.inputTokens.total ?? null},
-          tokens_out = ${result.usage.outputTokens.total ?? null},
+      SET status = 'ok', output = ${JSON.stringify(answer.output) ?? null}::jsonb,
+          tokens_in = ${answer.inputTokens ?? null},
+          tokens_out = ${answer.outputTokens ?? null},
           cost_usd = ${costUsd}::numeric, latency_ms = ${latencyMs}, finished_at = now()
-      WHERE run_id = ${ctx.runId} AND key = ${options.key}
+      WHERE run_id = ${ctx.runId} AND key = ${call.key}
     `);
   });
 }
@@ -230,7 +336,7 @@ async function complete(
 /** The provider failed: the row records it, nothing is spent, and the error is rethrown. */
 async function recordProviderError(
   ctx: LedgerContext,
-  options: LlmRunOptions,
+  call: LedgeredCall,
   error: unknown,
   latencyMs: number,
 ): Promise<void> {
@@ -243,7 +349,7 @@ async function recordProviderError(
       UPDATE hf_llm_call
       SET status = 'error', output = ${JSON.stringify(stored)}::jsonb,
           latency_ms = ${latencyMs}, finished_at = now()
-      WHERE run_id = ${ctx.runId} AND key = ${options.key}
+      WHERE run_id = ${ctx.runId} AND key = ${call.key}
     `);
   });
 }
@@ -255,26 +361,7 @@ function storedErrorOf(row: LedgerRow): Error {
   return error;
 }
 
-function callOptions(options: LlmRunOptions): LanguageModelV4CallOptions {
-  const text = typeof options.input === "string" ? options.input : JSON.stringify(options.input);
-  return {
-    prompt: [
-      { role: "system", content: options.prompt },
-      { role: "user", content: [{ type: "text", text: text ?? "" }] },
-    ],
-    ...(options.schema === undefined
-      ? {}
-      : { responseFormat: { type: "json" as const, schema: options.schema, name: options.key } }),
-  };
-}
-
-function parseOutput(
-  result: LanguageModelV4GenerateResult,
-  schema: JSONSchema7 | undefined,
-): unknown {
-  const text = result.content
-    .filter((part): part is Extract<typeof part, { type: "text" }> => part.type === "text")
-    .map((part) => part.text)
-    .join("");
-  return schema === undefined ? { text } : (JSON.parse(text) as unknown);
+function userTextOf(input: unknown): string {
+  const text = typeof input === "string" ? input : JSON.stringify(input);
+  return text ?? "";
 }

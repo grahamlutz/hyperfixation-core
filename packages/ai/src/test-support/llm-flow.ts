@@ -13,12 +13,15 @@ import type {
 } from "@ai-sdk/provider";
 import {
   MockLanguageModel,
+  MOCK_MODEL_ID,
   type KillAtControl,
   type WorkerControl,
 } from "@hyperfixation/testing";
 import { parkFor, workerControl } from "@hyperfixation/testing/worker";
 import { defineFlow, step, type Flow } from "@hyperfixation/workflows";
-import { llm } from "../llm-run.js";
+import { createLlm } from "../llm-run.js";
+import { createProviders, fixedCost } from "../providers.js";
+import { PROMPTS_DIR } from "./prompts-dir.js";
 
 export const LLM_FLOW_NAME = "llmFlow";
 
@@ -67,13 +70,11 @@ export function llmFlow(variant: LlmFlowVariant = {}): Flow<LlmFlowInput, void> 
         await step(
           "draft",
           (ctx) =>
-            llm.run(ctx, {
+            ledgerFor(parkingModel(model, key, control.killAt), input).run(ctx, {
               key: ctx.key,
-              prompt: "draft one line",
+              model: MOCK_MODEL_ID,
+              prompt: "draft",
               input: { key },
-              estimatedCostUsd: input.estimatedCostUsd,
-              costUsd: input.costUsd,
-              model: parkingModel(model, key, control.killAt),
             }),
           { key },
         );
@@ -83,6 +84,20 @@ export function llmFlow(variant: LlmFlowVariant = {}): Flow<LlmFlowInput, void> 
     { queue: "llm" },
   );
   return flow;
+}
+
+/**
+ * One registry per call, not one per flow: the wrapped model is per key, and the two estimates
+ * redeploy case 9 uses have to be able to coexist in a single worker process.
+ */
+function ledgerFor(model: LanguageModelV4, input: LlmFlowInput): ReturnType<typeof createLlm> {
+  return createLlm({
+    providers: createProviders({
+      models: { [MOCK_MODEL_ID]: model },
+      costs: { [MOCK_MODEL_ID]: fixedCost(input.estimatedCostUsd, input.costUsd) },
+    }),
+    promptsDir: PROMPTS_DIR,
+  });
 }
 
 /**

@@ -227,12 +227,21 @@ importers:
 
   packages/ai:
     dependencies:
+      '@ai-sdk/anthropic':
+        specifier: 4.0.54
+        version: 4.0.54(zod@4.6.5)
+      '@ai-sdk/openai':
+        specifier: 4.0.67
+        version: 4.0.67(zod@4.6.5)
       '@ai-sdk/provider':
         specifier: ^4.0.15
         version: 4.0.15
       '@hyperfixation/db':
         specifier: workspace:*
         version: link:../db
+      ai:
+        specifier: ^7.0.102
+        version: 7.0.102(zod@4.6.5)
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(kysely@0.29.6)(pg@8.23.0)
@@ -484,8 +493,20 @@ importers:
 
 packages:
 
+  '@ai-sdk/anthropic@4.0.54':
+    resolution: {integrity: sha512-HBYwlpuHgDDiCe+5MnEWPD5UTkB+BOpCzdptteRMSYL0GZot0XUC/j5Aeh0csDnSzohnSEqXMxQdgUgMeEZs/w==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
   '@ai-sdk/gateway@4.0.82':
     resolution: {integrity: sha512-WbRChvbJY2zf0qBxFu6UENi0p69fPzP7lKViNTIp3gr76w9bLUFvV5fTXS5uGPqDOkzlTIuAkqWxYNayEBSn6Q==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
+  '@ai-sdk/openai@4.0.67':
+    resolution: {integrity: sha512-F14lzHMAEtFyN6hlIP1jH7zqcm4Lutpv4QV9jqpT+/SDRvRssNJrOEZGWA9FSolrUDNfzESPcX/AhvEzlm3czw==}
     engines: {node: '>=22'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -2922,11 +2943,23 @@ packages:
 
 snapshots:
 
+  '@ai-sdk/anthropic@4.0.54(zod@4.6.5)':
+    dependencies:
+      '@ai-sdk/provider': 4.0.15
+      '@ai-sdk/provider-utils': 5.0.41(zod@4.6.5)
+      zod: 4.6.5
+
   '@ai-sdk/gateway@4.0.82(zod@4.6.5)':
     dependencies:
       '@ai-sdk/provider': 4.0.15
       '@ai-sdk/provider-utils': 5.0.41(zod@4.6.5)
       '@vercel/oidc': 3.2.0
+      zod: 4.6.5
+
+  '@ai-sdk/openai@4.0.67(zod@4.6.5)':
+    dependencies:
+      '@ai-sdk/provider': 4.0.15
+      '@ai-sdk/provider-utils': 5.0.41(zod@4.6.5)
       zod: 4.6.5
 
   '@ai-sdk/provider-utils@5.0.41(zod@4.6.5)':

@@ -22,8 +22,11 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "4.0.54",
+    "@ai-sdk/openai": "4.0.67",
     "@ai-sdk/provider": "^4.0.15",
     "@hyperfixation/db": "workspace:*",
+    "ai": "^7.0.102",
     "drizzle-orm": "^0.45.2",
     "pg": "^8.23.0"
   },
