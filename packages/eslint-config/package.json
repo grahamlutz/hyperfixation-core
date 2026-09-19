@@ -1,7 +1,15 @@
 {
   "name": "@hyperfixation/eslint-config",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "The shared flat ESLint config: the DBOS primitive ban, the deep-import ban, and the raw-handle hint in flows",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/grahamlutz/hyperfixation-core.git",
+    "directory": "packages/eslint-config"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -11,7 +19,8 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "!dist/**/*.test.*"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",

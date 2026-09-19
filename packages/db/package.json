@@ -1,7 +1,15 @@
 {
   "name": "@hyperfixation/db",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Drizzle schema of every hf_* table, migrations, the migrator, boot checks, and the step/control pool factories",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/grahamlutz/hyperfixation-core.git",
+    "directory": "packages/db"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -15,8 +23,12 @@
     },
     "./package.json": "./package.json"
   },
+  "//files": "`migrations` is not build output but ships anyway: CORE_MIGRATIONS_DIR resolves it relative to dist/migrate.js, so a consumer's `hf migrate` reads the core migrations out of this tarball.",
   "files": [
-    "dist"
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/test-support/**",
+    "migrations"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
