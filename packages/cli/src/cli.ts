@@ -7,7 +7,7 @@ import { migrateApp } from "./migrate.js";
 import { newApp } from "./new.js";
 import { statusTokenApp, type StatusTokenKind } from "./status-token.js";
 import { requireTemplateSource } from "./template-source.js";
-import { upApp } from "./up.js";
+import { DEV_BUDGET_USD, upApp } from "./up.js";
 
 export const COMMANDS = [
   "new",
@@ -31,7 +31,8 @@ export const USAGE = `hf — the hyperfixation CLI
       --email <address>       the bootstrap admin's address; skips the prompt
 
   hf up                     install, infra, migrate, bootstrap, status tokens, then hf dev —
-                            the whole local loop after hf new, safe to rerun
+                            the whole local loop after hf new, safe to rerun; seeds a $10
+                            budget unless HF_BOOTSTRAP_BUDGET_USD is set in .env
 
   hf migrate                create the application role, then run the app's migrate.ts
       --skip-roles            the cloud path, where the roles already exist
@@ -291,6 +292,11 @@ async function commandUp(argv: readonly string[], io: Io): Promise<number> {
   );
   io.out(`migrated ${result.app.appName}`);
   io.out(result.bootstrapped ? "bootstrapped the admin" : "admin already bootstrapped; left alone");
+  if (result.budgetDefaulted) {
+    io.out(
+      `HF_BOOTSTRAP_BUDGET_USD unset: seeded the monthly LLM budget at $${DEV_BUDGET_USD} (dev default)`,
+    );
+  }
   io.out(
     result.tokensProvisioned.length > 0
       ? `provisioned status token(s): ${result.tokensProvisioned.join(", ")}`
