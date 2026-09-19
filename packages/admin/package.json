@@ -1,7 +1,16 @@
 {
   "name": "@hyperfixation/admin",
-  "version": "0.0.0",
+  "version": "0.1.0",
+  "license": "MIT",
   "description": "Admin router and resource definitions generated from Drizzle metadata",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/grahamlutz/hyperfixation-core.git",
+    "directory": "packages/admin"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -11,7 +20,9 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/test-support/**"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
