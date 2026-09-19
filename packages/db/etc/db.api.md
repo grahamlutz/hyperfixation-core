@@ -4273,6 +4273,9 @@ export type LlmCallStatus = (typeof llmCallStatuses)[number];
 export const llmCallStatuses: readonly ["started", "ok", "error", "abandoned"];
 
 // @public
+export function loadSource(tx: StepDatabase, source: string, rows: AsyncIterable<SourceRowInput>): Promise<SourceRun>;
+
+// @public
 export const LOCK_NOT_AVAILABLE = "55P03";
 
 // @public (undocumented)
@@ -4340,6 +4343,17 @@ export type SourceRecordStatus = (typeof sourceRecordStatuses)[number];
 
 // @public (undocumented)
 export const sourceRecordStatuses: readonly ["new", "linked", "review", "error"];
+
+// @public
+export interface SourceRowInput {
+    // (undocumented)
+    readonly externalId: string;
+    // (undocumented)
+    readonly payload: unknown;
+}
+
+// @public (undocumented)
+export type SourceRun = typeof hfSourceRun.$inferSelect;
 
 // @public (undocumented)
 export type SourceRunStatus = (typeof sourceRunStatuses)[number];
