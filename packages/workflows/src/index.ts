@@ -75,6 +75,22 @@ export {
   type ApprovalMessage,
   type ApprovalNotifierOptions,
 } from "./approval-notifier.js";
+export {
+  handleTelegramCallback,
+  encodeCallbackData,
+  decodeCallbackData,
+  decisionKeyFor,
+  maxNonceLength,
+  CallbackDataTooLong,
+  CALLBACK_DATA_MAX_BYTES,
+  CALLBACK_DATA_VERSION,
+  type TelegramCallbackData,
+  type TelegramCallbackFrom,
+  type TelegramCallbackOptions,
+  type TelegramCallbackOutcome,
+  type TelegramCallbackResult,
+  type TelegramDecision,
+} from "./telegram.js";
 export { UnknownFlow } from "./bump.js";
 export { Suspend, SUSPEND_STATUSES, type SuspendStatus } from "./suspend.js";
 export { currentRun, OutsideRun, type RunContext } from "./run-context.js";

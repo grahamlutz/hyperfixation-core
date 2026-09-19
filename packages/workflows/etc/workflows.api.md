@@ -176,6 +176,17 @@ export class ApprovalWriteLost extends Error {
     constructor(approvalId: number, rowCount: number);
 }
 
+// @public
+export const CALLBACK_DATA_MAX_BYTES = 64;
+
+// @public
+export const CALLBACK_DATA_VERSION = "hf1";
+
+// @public (undocumented)
+export class CallbackDataTooLong extends Error {
+    constructor(data: string);
+}
+
 // @public (undocumented)
 export const CLIENT_POOL_SIZE = 2;
 
@@ -260,6 +271,12 @@ export interface DecideResult {
 }
 
 // @public
+export function decisionKeyFor(data: TelegramCallbackData): string;
+
+// @public
+export function decodeCallbackData(data: string | undefined): TelegramCallbackData | null;
+
+// @public
 export function definedFlows(): ReadonlyMap<string, Flow<never, unknown>>;
 
 // @public
@@ -281,6 +298,9 @@ export const DRIFT_STATEMENT: string;
 export class DuplicateFlow extends Error {
     constructor(name: string);
 }
+
+// @public
+export function encodeCallbackData(data: TelegramCallbackData): string;
 
 // @public
 export const EXPIRED_APPROVALS_STATEMENT: string;
@@ -327,6 +347,9 @@ export interface GetClientOptions {
     recordTables?: readonly RecordTable[];
 }
 
+// @public
+export function handleTelegramCallback(update: unknown, options: TelegramCallbackOptions): Promise<TelegramCallbackResult>;
+
 // @public (undocumented)
 export function idempotencyKey(runId: string, key: string): string;
 
@@ -346,6 +369,9 @@ export const LAUNCHING_MARKER = "hf-worker: calling DBOS.launch";
 
 // @public
 export const LOCK_ACQUIRED_MARKER = "hf-worker: advisory lock acquired";
+
+// @public
+export function maxNonceLength(approvalId: number): number;
 
 // @public
 export const MIN_BUILD_SHA_LENGTH = 7;
@@ -639,6 +665,55 @@ export const SYSTEM_DATABASE_POOL_SIZE = 5;
 
 // @public (undocumented)
 export const SYSTEM_DATABASE_SCHEMA = "dbos";
+
+// @public (undocumented)
+export interface TelegramCallbackData {
+    // (undocumented)
+    approvalId: number;
+    // (undocumented)
+    decision: TelegramDecision;
+    nonce: string;
+}
+
+// @public
+export interface TelegramCallbackFrom {
+    // (undocumented)
+    id: number;
+    // (undocumented)
+    username?: string;
+}
+
+// @public (undocumented)
+export interface TelegramCallbackOptions {
+    admin?: boolean;
+    decide(options: DecideOptions): Promise<DecideResult>;
+    secret?: {
+        expected: string;
+        received: string | undefined;
+    };
+    userFor?: (from: TelegramCallbackFrom) => string | null | undefined;
+}
+
+// @public
+export type TelegramCallbackOutcome = "decided" | "refused" | "ignored";
+
+// @public (undocumented)
+export interface TelegramCallbackResult {
+    // (undocumented)
+    approvalId: number | null;
+    callbackQueryId: string | null;
+    // (undocumented)
+    decision: TelegramDecision | null;
+    // (undocumented)
+    decisionKey: string | null;
+    // (undocumented)
+    outcome: TelegramCallbackOutcome;
+    reason: string | null;
+    replayed: boolean;
+}
+
+// @public
+export type TelegramDecision = Extract<ApprovalDecisionKind, "approved" | "rejected">;
 
 // @public
 export const UNCERTAIN_ACTIONS_STATEMENT: string;
