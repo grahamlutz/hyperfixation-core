@@ -117,18 +117,47 @@ export type ApprovalDecisionKind = (typeof APPROVAL_DECISIONS)[number];
 // @public
 export type ApprovalDraftSchema = ZodType;
 
+// @public
+export interface ApprovalMessage {
+    // (undocumented)
+    subject: string;
+    // (undocumented)
+    text: string;
+    // (undocumented)
+    to: string[];
+    url: string;
+}
+
 // @public (undocumented)
 export interface ApprovalNotice {
     // (undocumented)
     approvalId: number;
+    assigneeId: string | null;
     // (undocumented)
     draft: unknown;
     // (undocumented)
+    expiresAt: Date | null;
+    // (undocumented)
     key: string;
+    // (undocumented)
+    recordId: string | null;
+    // (undocumented)
+    recordType: string | null;
     // (undocumented)
     runId: string;
     // (undocumented)
     type: string;
+}
+
+// @public
+export type ApprovalNotifier = (notice: ApprovalNotice, ctx: StepContext) => Promise<void>;
+
+// @public (undocumented)
+export interface ApprovalNotifierOptions {
+    appUrl: string;
+    recipients(notice: ApprovalNotice, ctx: StepContext): Promise<string[]>;
+    // (undocumented)
+    send(message: ApprovalMessage): Promise<void>;
 }
 
 // @public (undocumented)
@@ -172,6 +201,9 @@ export interface ControlPool {
     // (undocumented)
     readonly pool: Pool;
 }
+
+// @public
+export function createApprovalNotifier(options: ApprovalNotifierOptions): ApprovalNotifier;
 
 // @public (undocumented)
 export function currentRun(operation: string): RunContext;
@@ -322,6 +354,9 @@ export const MIN_BUILD_SHA_LENGTH = 7;
 export class MissingBuildSha extends Error {
     constructor(buildSha: string | undefined);
 }
+
+// @public
+export const NO_RECIPIENTS_MARKER = "hf-approval-notifier: no recipients";
 
 // @public (undocumented)
 export class NotAWorkerProcess extends Error {
@@ -546,6 +581,7 @@ export interface StartWorkerOptions {
     appMigrationsDir?: string;
     // (undocumented)
     appName: string;
+    approvalNotifier?: ApprovalNotifier;
     databaseUrl: string;
     recordTables?: readonly RecordTable[];
 }
@@ -630,7 +666,7 @@ export interface WaitForApprovalOptions {
     draft?: unknown;
     expiresInMs?: number;
     key: string;
-    notify?(notice: ApprovalNotice): Promise<void>;
+    notify?: ApprovalNotifier;
     // (undocumented)
     recordId?: string;
     // (undocumented)
