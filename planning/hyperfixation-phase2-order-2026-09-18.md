@@ -23,8 +23,9 @@ Phase 1 actually built; this document assumes it and does not restate it.
 | 🚧 In progress | partially built |
 | ⬜ Not started | nothing built yet |
 
-**Landed so far (main at `e64f7bb`, 2026-09-19):** chunk 0 (#8), L1 (#10), C1 (#11), P1 (#13), L2 (#14), L3 (#17),
-C2 (#18), P2 (#19), L4 (#21), P3 (#22), C3 (#23), T1 (#24), C4 (#25), L5a (#26). Their
+**Landed so far (core main at `451e086`, 2026-09-19):** chunk 0 (#8), L1 (#10), C1 (#11), P1 (#13), L2 (#14), L3 (#17),
+C2 (#18), P2 (#19), L4 (#21), P3 (#22), C3 (#23), T1 (#24), C4 (#25), L5a (#26), C5 (#28), the T2 core prerequisite
+C0 (#30), L5b (#29); in `hyperfixation-template`, T0 (#12) and the `replace-demo` drop-step fix (#13). Their
 "Built, and where it differs" notes below record every place the build departed from this document's wording;
 the markers on the remaining chunks are unchanged.
 
@@ -106,7 +107,7 @@ registry hands it out like any provider), a real Langfuse endpoint, a real Teleg
 Only one chunk is truly serial. Each chunk is one PR; the done-check is the named test that first passes
 because of it.
 
-### 0 — The eight tables, the mixin, one migration — ✅ Done (db half; T0 template half not started)
+### 0 — The eight tables, the mixin, one migration — ✅ Done (db half; T0 template half landed as template #12)
 
 `@hyperfixation/db`: Drizzle definitions and `0004_machinery.sql` (one migration, every table) for
 `hf_source_run`, `hf_source_record`, `hf_record_link`, `hf_score`, `hf_activity` (**with `run_id text null`**,
@@ -494,7 +495,11 @@ latter; it lives in `workflows` (it needs `decide()`), not in `db`.
 
 **Done:** `pnpm --filter @hyperfixation/workflows test approvals` — every row of the table green.
 
-### P4 — Telegram `via`, the default notifier, expiry — ⬜ Not started, **shape depends on open question 3**
+### P4 — Telegram `via`, the default notifier, expiry — ⬜ Not started, **shape decided 2026-09-19 (open question 3)**
+
+**Decided (Graham, 2026-09-19):** the callback handler only, **no bot** — the real bot stays in Phase 6 — and the
+default email notifier ships **with C6**, when the workspace URL it needs exists; until then `notify` stays
+app-supplied.
 
 Expiry is already built (`reconcile()` step (5), `expiresInMs`), so "expiry" here is only what the notifier
 says. The plan's Telegram sentence — "callbacks carry the approval id and a per-message nonce as
@@ -708,6 +713,12 @@ through** — then a budget of 0, below what the period spent, refuses the one a
 
 ### C6 — The workspace — ⬜ Not started, **open question 2 decided: descriptors, template renders**
 
+**Decided (Graham, 2026-09-19):** (1) scope is the **full spec** — home, approval inbox with batch approve and
+inline edit, pipeline board, record page with timeline — **split into PRs**: the core descriptors first, then the
+template rendering in pieces. (2) The board's **stage list is registered by the app, ordered, per record type**
+(a small registry, e.g. `stages` on the record definition, which nothing defines yet); a `stage` value outside the
+list shows in an "other" column. The default approval notifier (P4) lands here with the URL it needed.
+
 Graham confirmed (2026-09-18) the recommended shape: `@hyperfixation/core/workspace` exports descriptors, not
 React components. `core` stays framework-light — no `react` peer, no `core`-owned server actions to bind — and
 `hyperfixation-template` renders them, matching every other Phase 1 package's boundary. The plan's routing
@@ -781,7 +792,18 @@ with `attempts: 2`; a fixture flow with a plain `INSERT` rejects with `RestartCh
 (`UnfencedWrite`) in ~1 s, not a timeout; `restart: { skip }` runs one attempt. `flow-restart.test.ts` in the
 template green over it — T2's half, the template being a separate repo.
 
-### T2 — The demo registrations and `tests/contract.test.ts` — ⬜ Not started (needs L1, P1, P2, C1–C4, T1)
+### T2 — The demo registrations and `tests/contract.test.ts` — 🚧 In progress (C0 and T0 landed; split into T2a–T2d)
+
+**Split, as planned 2026-09-19 (each its own PR, across two repos):** C0 (core: the fixture provider, `score()` with a
+step context — landed, #30) and T0 (template: `demo_note` adopts the mixin — landed, template #12) first; **T2a**
+`flow-restart.test.ts` over every registered flow via `runFlowSync`; **T2b** the source, resolver, spec, scorer, the
+collect/resolve/score flows, `src/llm.ts`, prompts, fixtures, the schedule tick in `worker.ts`, `Dockerfile` copying
+`fixtures/`; **T2c** the draft flow (`demoDraft` approval type with the contact-allowlist validators, the email channel
+with `dedupes: false`, `tasks.create`, `activity.record`); **T2d** `tests/contract.test.ts`, `CLAUDE.md` and the
+replace-demo skill. The template's CI builds core's `main`, so each core change merges before the template PR that
+needs it. Decisions taken: fixtures are served only when **no** provider key is set (never per provider — a missing
+OpenAI key must not silently produce fake drafts); the email channel uses nodemailer's `jsonTransport` when
+`SMTP_URL` is unset (mailpit stays the exit bar's); the allowlist is a constant, not a new env var.
 
 The shape doc's loop, one registered example per file: a sample **source** (fixture JSON → the COPY loader),
 the **resolver** on `normalized_name`, a sample **spec** and a **scorer** (`llm.run`, `score:<record_id>`),
@@ -857,10 +879,10 @@ number here.
 
 | Track | Package(s) | Can start | Must land by | Status |
 |---|---|---|---|---|
-| **L — ledger** (L1–L5b) | `ai` (+ one `startWorker` hook in `workflows` for L2) | chunk 0 | T2 needs L1; Exit needs all | 🚧 L1–L5a done; L5b open |
-| **P — approvals and actions** (P1–P4) | `workflows` | chunk 0 | T2 needs P1, P2; Exit needs all | 🚧 P1–P3 done; P4 open |
-| **C — core** (C1–C6) | `core`, `db` (C2), `admin` (C5) | chunk 0 | T2 needs C1–C4; Exit needs C6 | 🚧 C1–C5 done; C6 open |
-| **T — testing and template** (T1–T3) | `testing`, `hyperfixation-template` | chunk 0 for T1; the others as listed | Exit | 🚧 T1 done; T2, T3 open |
+| **L — ledger** (L1–L5b) | `ai` (+ one `startWorker` hook in `workflows` for L2) | chunk 0 | T2 needs L1; Exit needs all | ✅ L1–L5b done |
+| **P — approvals and actions** (P1–P4) | `workflows` | chunk 0 | T2 needs P1, P2; Exit needs all | 🚧 P1–P3 done; P4 open (decided: callback handler only) |
+| **C — core** (C1–C6) | `core`, `db` (C2), `admin` (C5) | chunk 0 | T2 needs C1–C4; Exit needs C6 | 🚧 C1–C5 done; C6 open (decided: full spec, split; app-registered stages) |
+| **T — testing and template** (T1–T3) | `testing`, `hyperfixation-template` | chunk 0 for T1; the others as listed | Exit | 🚧 T1, T0 done; T2 in progress (T2a, T2b started); T3 open |
 
 **Execution model.** Chunk 0 is one PR by one head, first. After it the three tracks are genuinely
 independent — they touch disjoint packages, and the one shared file each will touch is its own package's
@@ -953,7 +975,7 @@ orders against, to be overturned cheaply if wrong.
    put the whole UI in the template, where a core release cannot change it — the shape every other Phase 1
    package already chose, overriding the plan's routing arrow. The `registry/` shadcn directory supplies the
    UI pieces the descriptors render through.
-3. **Defaulted (P4) — Telegram in Phase 2 without the Phase 6 bot** is the `via: 'telegram'` callback
+3. **Decided 2026-09-19 (P4) — Telegram in Phase 2 without the Phase 6 bot** is the `via: 'telegram'` callback
    handler and its nonce-as-`decisionKey` replay test, and no message is ever sent. If Graham wants a real
    bot in Phase 2, `hf_telegram_link` and a `TELEGRAM_BOT_TOKEN` in `REQUIRED_ENV` come forward with it.
 4. **Defaulted (C1) — the plan's "actions" registry is the existing `channels` registry.** It is already
@@ -984,7 +1006,7 @@ orders against, to be overturned cheaply if wrong.
   surface should be narrowed; nothing in Phase 2 makes it worse.
 - **8 — `hf_invitation`** untouched by Phase 2.
 - **New, from this pass — `records.archive()` on a mixin-less record table fails with `42703`** in a
-  generated app today. Closed on the `db` side by chunk 0; the template half (T0: `demo_note` adopting the mixin) is still open, and a template test that archives a demo record is still worth writing.
+  generated app today. Closed on the `db` side by chunk 0; the template half landed as template #12 (`demo_note` adopts the mixin, with a `records-archive` test that fails with the `42703` when the migration is withheld).
 
 ## Verification
 
