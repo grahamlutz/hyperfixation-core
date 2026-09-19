@@ -1,10 +1,12 @@
 export {
   AppPaused,
   BudgetExceeded,
+  FixtureMissing,
   LedgerKeyCollision,
   UnknownModel,
   UnknownPrompt,
 } from "./errors.js";
+export type { FixtureFile, FixtureResponse, FixtureWhen } from "./fixture-model.js";
 export { hashInput } from "./input-hash.js";
 export {
   createLlm,

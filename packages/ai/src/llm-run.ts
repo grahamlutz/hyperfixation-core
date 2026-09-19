@@ -182,6 +182,16 @@ async function callProvider(
     system,
     prompt: userText,
     maxRetries: 0,
+    // The same four fields the SDK forwards to `doGenerate` untouched, under our own namespace;
+    // a real provider reads only its own. The fixture provider picks its answer from them.
+    providerOptions: {
+      hyperfixation: {
+        runId: ctx.runId,
+        key: options.key,
+        promptName: options.prompt,
+        promptHash,
+      },
+    },
     runtimeContext: {
       runId: ctx.runId,
       key: options.key,

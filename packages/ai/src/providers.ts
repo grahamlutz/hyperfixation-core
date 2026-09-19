@@ -7,6 +7,7 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
 import type { LanguageModelV4 } from "@ai-sdk/provider";
 import { UnknownModel } from "./errors.js";
+import { createFixtureModel } from "./fixture-model.js";
 
 export type CostProvider = "anthropic" | "openai";
 
@@ -43,6 +44,13 @@ export interface CreateProvidersOptions {
   models?: Record<string, LanguageModelV4>;
   /** Merged over `DEFAULT_COSTS`, so an app can reprice a row without replacing the table. */
   costs?: Record<string, ModelCost>;
+  /**
+   * Canned answers under `<dir>/<promptName>.json`, served only when *no* provider key at all is
+   * configured — `hf up` on a laptop with an empty `ANTHROPIC_API_KEY`, and CI. Deliberately not
+   * per provider: an app that configured Anthropic but forgot an OpenAI key must still fail
+   * loudly rather than quietly produce fake drafts.
+   */
+  fixtures?: { dir: string };
 }
 
 export interface PerMillionTokensRow {
@@ -91,6 +99,9 @@ export const DEFAULT_COSTS: Record<string, ModelCost> = {
   "gpt-4o-mini": perMillionTokens({ provider: "openai", input: 0.15, output: 0.6 }),
 };
 
+/** Once per process, however many registries are built: this is a startup condition, not a call. */
+let warnedAboutFixtures = false;
+
 export function createProviders(options: CreateProvidersOptions = {}): ProviderRegistry {
   const costs = { ...DEFAULT_COSTS, ...options.costs };
   const models = options.models ?? {};
@@ -105,6 +116,19 @@ export function createProviders(options: CreateProvidersOptions = {}): ProviderR
     clients.set("openai", (name) => openai.languageModel(name));
   }
 
+  const fixturesDir = clients.size === 0 ? options.fixtures?.dir : undefined;
+  const servingFixtures = fixturesDir !== undefined;
+
+  function fixtureModel(dir: string, name: string): LanguageModelV4 {
+    if (!warnedAboutFixtures) {
+      warnedAboutFixtures = true;
+      console.warn(
+        `hyperfixation: no provider API keys set — serving LLM calls from fixtures in ${dir}`,
+      );
+    }
+    return createFixtureModel({ dir, modelId: name });
+  }
+
   return {
     model(name) {
       const explicit = models[name];
@@ -112,10 +136,12 @@ export function createProviders(options: CreateProvidersOptions = {}): ProviderR
 
       const provider = costs[name]?.provider;
       if (provider === undefined) {
+        if (fixturesDir !== undefined) return fixtureModel(fixturesDir, name);
         throw new UnknownModel(name, "is not in the cost table and was not passed in `models`");
       }
       const client = clients.get(provider);
       if (client === undefined) {
+        if (fixturesDir !== undefined) return fixtureModel(fixturesDir, name);
         throw new UnknownModel(name, `needs the ${provider} provider, which has no api key`);
       }
       return client(name);
@@ -123,6 +149,8 @@ export function createProviders(options: CreateProvidersOptions = {}): ProviderR
     cost(name) {
       const cost = costs[name];
       if (cost === undefined) {
+        // A fixture answer bills zero tokens, so a missing row costs the budget nothing.
+        if (servingFixtures) return fixedCost(0, 0);
         // A `models` entry with no price would bill the budget zero for every call.
         throw new UnknownModel(name, "has no cost row; name it in `costs`");
       }
