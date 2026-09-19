@@ -223,7 +223,7 @@ Phase 2 verification names it, and it should **reuse** case 3's fixture rather t
 > finishes at `attempt = 1`. Whole file: 4 tests in ~14 s (the loop ~4 s), stable over three runs; the loop's
 > timeout is 60 s, the crash cases' 240 s as in case 3.
 
-### L4 — `kill-switch.test.ts` — ⬜ Not started
+### L4 — `kill-switch.test.ts` — ✅ Done (deviated — see note)
 
 100 runs each orphaning one `started` row by failing, then 100 `reconcile()` passes: 100 `abandoned` rows,
 derived reservation 0, the period's `spent_usd` unchanged, `BudgetExceeded` still fires at the budget. Then
@@ -236,6 +236,23 @@ Lives in `ai` — it drives `llm.run` — though the plan's verification line li
 
 **Done:** `pnpm --filter @hyperfixation/ai test kill-switch`. Budget the runtime: 100 passes each scanning
 `hf_run` is seconds, not minutes, but say so in the file's timeout.
+
+> **Built, and where it differs from the wording above:** no worker is spawned — both halves run in-process
+> against a `createStepPool` `ctx.tx`, with `getClient()` and the probe pool handed to `reconcile()` and
+> `decide()` as the control plane, which works with no `DBOS.launch()` because `migrate()`'s
+> `dbos schema -s dbos -r <role>` step already created the system schema. Half (1)'s 100 orphans are inserted
+> directly (two `generate_series` statements: a `failed` run and a `started` row on the attempt that was
+> current), since redeploy case 9 already proves a real kill leaves exactly that row and 100 killed workers
+> would cost minutes; the `spent_usd` the passes must not move is made non-zero first by one real `llm.run`,
+> so "unchanged" is a claim about a figure that is not zero. Half (2) needs the reservation read *mid-flight*,
+> which no cassette can do, so the file carries a 40-line `ParkedCall` `LanguageModelV4` whose `doGenerate`
+> parks until the test releases it — attempt 1 parks forever (the answer a dead process never gets), and
+> attempt 2 is released to carry the row to `ok`. Two databases, one per `describe`, because half (1) asserts
+> absolute `spent_usd`. Two assertions beyond the wording: every pass reports `anomalies: []` and
+> `failures: []` (a pass that was quietly failing would otherwise still "abandon 100"), and a call that *does*
+> fit still passes after the 100 orphans — round-3 finding 6's lesson is that a spurious refusal is the worse
+> failure. Whole file: 2 tests in ~1.4 s, the 100 passes ~0.5 s of that, stable over three runs; both timeouts
+> are 60 s, which is two orders of magnitude of headroom on a shared Postgres.
 
 ### L5a — `budget.test.ts` (b), (c), (d) — ⬜ Not started
 
@@ -595,7 +612,7 @@ number here.
 
 | Track | Package(s) | Can start | Must land by | Status |
 |---|---|---|---|---|
-| **L — ledger** (L1–L5b) | `ai` (+ one `startWorker` hook in `workflows` for L2) | chunk 0 | T2 needs L1; Exit needs all | 🚧 L1–L3 done |
+| **L — ledger** (L1–L5b) | `ai` (+ one `startWorker` hook in `workflows` for L2) | chunk 0 | T2 needs L1; Exit needs all | 🚧 L1–L4 done |
 | **P — approvals and actions** (P1–P4) | `workflows` | chunk 0 | T2 needs P1, P2; Exit needs all | 🚧 P1, P2 done |
 | **C — core** (C1–C6) | `core`, `db` (C2), `admin` (C5) | chunk 0 | T2 needs C1–C4; Exit needs C6 | 🚧 C1, C2 done |
 | **T — testing and template** (T1–T3) | `testing`, `hyperfixation-template` | chunk 0 for T1; the others as listed | Exit | ⬜ |
@@ -709,8 +726,8 @@ orders against, to be overturned cheaply if wrong.
 7. **Defaulted — Sentry is not Phase 2's.** The template's `instrumentation.ts` says `TODO(phase 2)` for
    both Sentry and Langfuse; the plan's Phase 2 text names only Langfuse, and Phase 3's `hf new` provisions
    the DSN. Change the TODO's label, not the phase.
-8. **Defaulted — `kill-switch.test.ts` lives in `ai`**, where `llm.run` is; the plan's verification line
-   lists it under the `workflows` filter. Update the plan's line when the file lands.
+8. **Closed by L4 — `kill-switch.test.ts` lives in `ai`**, where `llm.run` is; the plan's verification line
+   now names it under the `ai` filter and no longer under `workflows`.
 
 ## Carried from Phase 1's "Still open"
 
