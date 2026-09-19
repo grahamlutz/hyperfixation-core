@@ -201,7 +201,8 @@ export async function workspaceInbox(
   });
   return {
     items,
-    mine: items.filter((item) => item.assigneeId === options.userId).length,
+    mine: items.filter((item) => item.assigneeId !== null && item.assigneeId === options.userId)
+      .length,
     unassigned: items.filter((item) => item.assigneeId === null).length,
   };
 }
@@ -321,11 +322,10 @@ async function timelineOf(pool: Pool, entries: ActivityRow[]): Promise<TimelineG
     for (const run of rows) runs.set(run.run_id, run);
   }
 
-  const groups = new Map<string, TimelineGroup>();
+  const groups = new Map<string | null, TimelineGroup>();
   const ordered: TimelineGroup[] = [];
   for (const entry of entries) {
-    const key = entry.runId ?? "";
-    let group = groups.get(key);
+    let group = groups.get(entry.runId);
     if (group === undefined) {
       const run = entry.runId === null ? undefined : runs.get(entry.runId);
       group = {
@@ -334,7 +334,7 @@ async function timelineOf(pool: Pool, entries: ActivityRow[]): Promise<TimelineG
         startedAt: run?.started_at ?? null,
         entries: [],
       };
-      groups.set(key, group);
+      groups.set(entry.runId, group);
       ordered.push(group);
     }
     group.entries.push(entry);

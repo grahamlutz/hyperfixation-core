@@ -152,6 +152,16 @@ async function insertApproval(fields: ApprovalFields): Promise<number> {
 }
 
 describe("workspace.inbox", () => {
+  it("counts nothing as mine when the caller has no identity", async () => {
+    await insertRun("anon-run");
+    await insertApproval({ runId: "anon-run", key: "a" });
+    await insertApproval({ runId: "anon-run", key: "b", assigneeId: "dana" });
+
+    const anonymous = await app.workspace.inbox({ userId: null as unknown as string });
+    expect(anonymous.items).toHaveLength(1);
+    expect(anonymous).toMatchObject({ mine: 0, unassigned: 1 });
+  });
+
   it("shows a user their own and the unassigned approvals, and an admin every one", async () => {
     const recordId = await insertRecord("acme");
     await insertRun("inbox-run");
@@ -326,6 +336,22 @@ describe("workspace.record", () => {
     expect(view!.timeline[0]!.startedAt).toBeInstanceOf(Date);
     expect(view!.timeline[2]!.startedAt).toBeNull();
     expect(view!.timeline[2]!.entries.map((entry) => entry.kind)).toEqual(["label.added"]);
+  });
+
+  it("keeps a run whose id is the empty string apart from the manual writes", async () => {
+    const recordId = await insertRecord("empty-run", { stage: "new" });
+    await insertRun("", "oddFlow");
+    await pool.query(
+      "INSERT INTO hf_activity (record_type, record_id, kind, run_id, key) VALUES ($1, $2, 'run.started', '', 'k1')",
+      [RECORD_TYPE, recordId],
+    );
+    await app.labels.add({ recordType: RECORD_TYPE, recordId, target: "record", value: "up", userId: "graham" });
+
+    const view = await app.workspace.record(RECORD_TYPE, recordId);
+    expect(view!.timeline.map((group) => [group.runId, group.flow])).toEqual([
+      ["", "oddFlow"],
+      [null, null],
+    ]);
   });
 
   it("carries the record's own row, its labels, outcomes, tasks and pending approvals", async () => {
