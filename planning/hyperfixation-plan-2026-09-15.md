@@ -33,7 +33,8 @@ running the suite: "Done" means built with its gate case committed, not observed
 | `redeploy.test.ts` | ✅ Done — all twelve cases (case 5 at 51bc37e; case 7 with three deviations — see chunk 14 in the ordering doc) |
 | `fence.test.ts` | ✅ Done (deviated — case (vii)'s `records.archive()` half is in `@hyperfixation/core`'s tests, because `db` cannot import `core`) |
 | Phase 2 | ✅ Complete (2026-09-19) — every chunk landed and the exit bar runs as an e2e test; small follow-ups are listed at the end of the Exit section; per-chunk status in [hyperfixation-phase2-order-2026-09-18.md](hyperfixation-phase2-order-2026-09-18.md) |
-| Phases 3–7 | ⬜ Not started |
+| Phase 3 | ⬜ Not started — ordered in [hyperfixation-phase3-order-2026-09-19.md](hyperfixation-phase3-order-2026-09-19.md) (chunk 0 first publish; tracks D template deploy shape and E the `hf` cloud path; six open questions) |
+| Phases 4–7 | ⬜ Not started |
 
 ## Adversary findings: disposition
 
