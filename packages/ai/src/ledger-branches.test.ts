@@ -1,9 +1,31 @@
+import type { LanguageModelV4 } from "@ai-sdk/provider";
 import { createStepPool, type StepPool } from "@hyperfixation/db";
-import { asRole, createTestDatabase, MockLanguageModel, type TestDatabase } from "@hyperfixation/testing";
+import {
+  asRole,
+  createTestDatabase,
+  MockLanguageModel,
+  MOCK_MODEL_ID,
+  type TestDatabase,
+} from "@hyperfixation/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AppPaused, BudgetExceeded, LedgerKeyCollision } from "./errors.js";
 import { hashInput } from "./input-hash.js";
-import { llm, type LedgerContext } from "./llm-run.js";
+import { createLlm, type LedgerContext, type Llm } from "./llm-run.js";
+import { createProviders, fixedCost } from "./providers.js";
+import { PROMPTS_DIR } from "./test-support/prompts-dir.js";
+
+/** The registry the cassette needs: one named model, one flat price, one prompt directory. */
+function ledger(model: LanguageModelV4, estimatedCostUsd: number, costUsd = estimatedCostUsd): Llm {
+  return createLlm({
+    providers: createProviders({
+      models: { [MOCK_MODEL_ID]: model },
+      costs: { [MOCK_MODEL_ID]: fixedCost(estimatedCostUsd, costUsd) },
+    }),
+    promptsDir: PROMPTS_DIR,
+  });
+}
+
+const CALL = { key: "k", model: MOCK_MODEL_ID, prompt: "draft" };
 
 /** The gate's five branches, driven straight through `ctx.tx` with no worker in the picture. */
 describe("the gate's branches", () => {
@@ -47,10 +69,10 @@ describe("the gate's branches", () => {
   it("refuses a second call on the same key with a different input", async () => {
     const ctx = await context("branch-collision");
     const model = new MockLanguageModel({ responses: [{ text: "one" }] });
-    const call = { key: "k", prompt: "p", estimatedCostUsd: 0.01, model };
+    const llm = ledger(model, 0.01);
 
-    await expect(llm.run(ctx, { ...call, input: { a: 1 } })).resolves.toEqual({ text: "one" });
-    await expect(llm.run(ctx, { ...call, input: { a: 2 } })).rejects.toBeInstanceOf(
+    await expect(llm.run(ctx, { ...CALL, input: { a: 1 } })).resolves.toEqual({ text: "one" });
+    await expect(llm.run(ctx, { ...CALL, input: { a: 2 } })).rejects.toBeInstanceOf(
       LedgerKeyCollision,
     );
     expect(model.callCount).toBe(1);
@@ -59,7 +81,8 @@ describe("the gate's branches", () => {
   it("serves an ok row from the ledger without calling the provider again", async () => {
     const ctx = await context("branch-ok");
     const model = new MockLanguageModel({ responses: [{ text: "cached" }] });
-    const call = { key: "k", prompt: "p", input: { a: 1 }, estimatedCostUsd: 0.01, model };
+    const llm = ledger(model, 0.01);
+    const call = { ...CALL, input: { a: 1 } };
 
     await expect(llm.run(ctx, call)).resolves.toEqual({ text: "cached" });
     await expect(llm.run(ctx, call)).resolves.toEqual({ text: "cached" });
@@ -73,7 +96,8 @@ describe("the gate's branches", () => {
   it("rethrows an error row instead of retrying the call", async () => {
     const ctx = await context("branch-error");
     const model = new MockLanguageModel({ responses: [{ error: new Error("provider exploded") }] });
-    const call = { key: "k", prompt: "p", input: { a: 1 }, estimatedCostUsd: 0.01, model };
+    const llm = ledger(model, 0.01);
+    const call = { ...CALL, input: { a: 1 } };
 
     await expect(llm.run(ctx, call)).rejects.toThrow("provider exploded");
     expect(await rowOf("branch-error", "k")).toMatchObject({ status: "error", cost_usd: null });
@@ -96,9 +120,9 @@ describe("the gate's branches", () => {
       );
     });
 
-    await expect(
-      llm.run(ctx, { key: "k", prompt: "p", input, estimatedCostUsd: 0.01, model }),
-    ).resolves.toEqual({ text: "second" });
+    await expect(ledger(model, 0.01).run(ctx, { ...CALL, input })).resolves.toEqual({
+      text: "second",
+    });
 
     expect(model.callCount).toBe(1);
     expect(await rowOf("branch-crashed", "k")).toMatchObject({
@@ -113,7 +137,7 @@ describe("the gate's branches", () => {
     const model = new MockLanguageModel({ responses: [{ text: "never" }] });
 
     await expect(
-      llm.run(ctx, { key: "k", prompt: "p", input: {}, estimatedCostUsd: 1000, model }),
+      ledger(model, 1000, 0).run(ctx, { ...CALL, input: {} }),
     ).rejects.toBeInstanceOf(BudgetExceeded);
     expect(model.callCount).toBe(0);
     expect(await rowOf("branch-budget", "k")).toBeUndefined();
@@ -128,7 +152,7 @@ describe("the gate's branches", () => {
 
     try {
       await expect(
-        llm.run(ctx, { key: "k", prompt: "p", input: {}, estimatedCostUsd: 0.01, model }),
+        ledger(model, 0.01).run(ctx, { ...CALL, input: {} }),
       ).rejects.toBeInstanceOf(AppPaused);
       expect(model.callCount).toBe(0);
       expect(await rowOf("branch-paused", "k")).toBeUndefined();

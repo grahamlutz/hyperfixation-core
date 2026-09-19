@@ -32,6 +32,57 @@ export class BudgetExceeded extends Error {
     readonly spentUsd: string;
 }
 
+// @public (undocumented)
+export interface CostActualUsage {
+    // (undocumented)
+    inputTokens?: number;
+    // (undocumented)
+    outputTokens?: number;
+}
+
+// @public
+export interface CostEstimateCall {
+    // (undocumented)
+    inputBytes: number;
+    // (undocumented)
+    maxOutputTokens?: number;
+    // (undocumented)
+    promptBytes: number;
+}
+
+// @public (undocumented)
+export type CostProvider = "anthropic" | "openai";
+
+// @public
+export function createLlm(input: CreateLlmOptions): Llm;
+
+// @public (undocumented)
+export interface CreateLlmOptions {
+    promptsDir: string;
+    // (undocumented)
+    providers: ProviderRegistry;
+}
+
+// @public (undocumented)
+export function createProviders(options?: CreateProvidersOptions): ProviderRegistry;
+
+// @public (undocumented)
+export interface CreateProvidersOptions {
+    // (undocumented)
+    anthropic?: {
+        apiKey: string;
+    };
+    costs?: Record<string, ModelCost>;
+    models?: Record<string, LanguageModelV4>;
+    // (undocumented)
+    openai?: {
+        apiKey: string;
+    };
+}
+
+// @public
+export function fixedCost(estimateUsd: number, costUsd: number): ModelCost;
+
 // @public
 export function hashInput(input: unknown): string;
 
@@ -58,27 +109,68 @@ export class LedgerKeyCollision extends Error {
     readonly storedInputHash: string;
 }
 
-// @public
-export const llm: {
-    run: typeof run;
-};
+// @public (undocumented)
+export interface Llm {
+    // (undocumented)
+    run<O = {
+        text: string;
+    }>(ctx: LedgerContext, options: LlmRunOptions): Promise<O>;
+}
 
 // @public (undocumented)
 export interface LlmRunOptions {
-    costUsd?: number;
-    estimatedCostUsd: number;
     // (undocumented)
     input: unknown;
     key: string;
-    model: LanguageModelV4;
+    model: string;
     prompt: string;
     schema?: JSONSchema7;
 }
 
+// @public (undocumented)
+export interface ModelCost {
+    actual(usage: CostActualUsage): number;
+    estimate(call: CostEstimateCall): number;
+    provider?: CostProvider;
+}
+
+// @public (undocumented)
+export function perMillionTokens(row: PerMillionTokensRow): ModelCost;
+
+// @public (undocumented)
+export interface PerMillionTokensRow {
+    assumedOutputTokens?: number;
+    input: number;
+    output: number;
+    // (undocumented)
+    provider: CostProvider;
+}
+
+// @public (undocumented)
+export interface ProviderRegistry {
+    // (undocumented)
+    cost(name: string): ModelCost;
+    // (undocumented)
+    model(name: string): LanguageModelV4;
+}
+
 // @public
-export function run<O = {
-    text: string;
-}>(ctx: LedgerContext, options: LlmRunOptions): Promise<O>;
+export class UnknownModel extends Error {
+    constructor(model: string, reason: string);
+    // (undocumented)
+    readonly model: string;
+}
+
+// @public
+export class UnknownPrompt extends Error {
+    constructor(prompt: string, file: string, options?: {
+        cause?: unknown;
+    });
+    // (undocumented)
+    readonly file: string;
+    // (undocumented)
+    readonly prompt: string;
+}
 
 // (No @packageDocumentation comment for this package)
 

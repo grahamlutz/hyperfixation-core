@@ -35,6 +35,33 @@ export class LedgerKeyCollision extends Error {
   }
 }
 
+/**
+ * The registry has no model under that name. Thrown before the gate opens: no ledger row, no
+ * provider call, nothing to reconcile — a typo in a flow costs nothing.
+ */
+export class UnknownModel extends Error {
+  readonly model: string;
+
+  constructor(model: string, reason: string) {
+    super(`UnknownModel: ${JSON.stringify(model)} ${reason}`);
+    this.name = "UnknownModel";
+    this.model = model;
+  }
+}
+
+/** No prompt file of that name. Thrown before the gate, for the same reason as `UnknownModel`. */
+export class UnknownPrompt extends Error {
+  readonly prompt: string;
+  readonly file: string;
+
+  constructor(prompt: string, file: string, options?: { cause?: unknown }) {
+    super(`UnknownPrompt: ${JSON.stringify(prompt)} does not resolve to a readable ${file}`, options);
+    this.name = "UnknownPrompt";
+    this.prompt = prompt;
+    this.file = file;
+  }
+}
+
 export class BudgetExceeded extends Error {
   readonly period: string;
   readonly budgetUsd: string;
