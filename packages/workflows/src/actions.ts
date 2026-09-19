@@ -4,11 +4,11 @@ import type { StepContext } from "./step.js";
 
 /** What a channel is handed. `idempotencyKey` is stable across attempts, so a provider that
  * supports one dedupes a re-send rather than sending twice. */
-export interface ActionDispatch {
+export interface ActionDispatch<Req = unknown> {
   idempotencyKey: string;
   runId: string;
   key: string;
-  request: unknown;
+  request: Req;
 }
 
 export interface ActionResult {
@@ -16,18 +16,19 @@ export interface ActionResult {
   response?: unknown;
 }
 
-export interface ActionChannel {
+/** `Req` is what this channel is sent; left off, a channel takes `unknown` as it always has. */
+export interface ActionChannel<Req = unknown> {
   readonly name: string;
   /** Whether a re-send with the same `idempotencyKey` is delivered at most once by the provider. */
   readonly dedupes: boolean;
-  send(dispatch: ActionDispatch): Promise<ActionResult>;
+  send(dispatch: ActionDispatch<Req>): Promise<ActionResult>;
 }
 
-export interface ActionsPerformOptions {
+export interface ActionsPerformOptions<Req = unknown> {
   /** Unique within the run and stable across attempts, exactly as `llm.run`'s is. */
   key: string;
-  channel: ActionChannel;
-  request?: unknown;
+  channel: ActionChannel<Req>;
+  request?: Req;
   recordType?: string;
   recordId?: string;
 }
@@ -135,9 +136,9 @@ async function uncertainOf(
  * and `ActionUncertain` ends the run. A first dispatch always sends, so a non-deduping channel
  * gets at most one send per row ever.
  */
-export async function perform(
+export async function perform<Req>(
   ctx: StepContext,
-  options: ActionsPerformOptions,
+  options: ActionsPerformOptions<Req>,
 ): Promise<ActionResult> {
   const taken = await ctx.tx<Taken>(async (db) => {
     const insert = await db.execute(sql`
@@ -205,7 +206,9 @@ export async function perform(
       idempotencyKey: idempotencyKey(ctx.runId, options.key),
       runId: ctx.runId,
       key: options.key,
-      request: options.request,
+      // `request` stays optional here, as it always was; a channel that declares a `Req` is
+      // saying it will not be performed without one.
+      request: options.request as Req,
     });
   } catch (error) {
     await ctx.tx(async (db) => {

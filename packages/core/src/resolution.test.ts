@@ -305,6 +305,18 @@ describe("resolveBatch()", () => {
     expect(await batch(testResolver({ review: () => true }))).toMatchObject({ scanned: 1 });
   });
 
+  it("reports a batch that filled its limit with `review` rows done, so the caller's loop ends", async () => {
+    await query(
+      `INSERT INTO ${TABLE} (name, normalized_name, email) VALUES ('ACME', 'acme industries', 'old@x')`,
+    );
+    await load([person("r1", "r1@x", "acme industries"), person("r2", "r2@x", "acme industries")]);
+
+    const result = await batch(testResolver({ review: () => true }), { limit: 2 });
+
+    // Full scan, nothing moved out of it: the same two rows would come back forever.
+    expect(result).toMatchObject({ scanned: 2, review: 2, done: true });
+  });
+
   it("skips an error row that has reached maxAttempts", async () => {
     await load([person("a", "a@x", "alpha holdings")]);
     await query("UPDATE hf_source_record SET status = 'error', attempts = 3");

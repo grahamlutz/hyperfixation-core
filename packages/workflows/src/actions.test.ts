@@ -279,4 +279,23 @@ describe("actions.perform", () => {
     );
     expect(await rowOf("action-failed")).toMatchObject({ status: "failed" });
   });
+
+  it("hands a typed channel its own request shape, uncast", async () => {
+    const ctx = await context("action-typed", "send");
+    const seen: string[] = [];
+    const channel: ActionChannel<{ to: string }> = {
+      name: "typed",
+      dedupes: true,
+      send: (dispatch) => {
+        // The point of the generic: `dispatch.request.to` without a cast in the channel body.
+        seen.push(dispatch.request.to);
+        return Promise.resolve({ externalId: dispatch.idempotencyKey });
+      },
+    };
+
+    await actions.perform(ctx, { key: ctx.key, channel, request: { to: "crystal@example.com" } });
+
+    expect(seen).toEqual(["crystal@example.com"]);
+    expect(await rowOf("action-typed")).toMatchObject({ status: "ok" });
+  });
 });

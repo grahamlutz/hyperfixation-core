@@ -4,7 +4,7 @@
 
 ```ts
 
-import type { JSONSchema7 } from '@ai-sdk/provider';
+import { JSONSchema7 } from '@ai-sdk/provider';
 import type { LanguageModelV4 } from '@ai-sdk/provider';
 import type { StepDatabase } from '@hyperfixation/db';
 
@@ -125,6 +125,8 @@ export interface FixtureWhen {
 // @public
 export function hashInput(input: unknown): string;
 
+export { JSONSchema7 }
+
 // @public
 export interface LedgerContext {
     // (undocumented)
@@ -156,12 +158,19 @@ export interface Llm {
     }>(ctx: LedgerContext, options: LlmRunOptions): Promise<O>;
 }
 
+// @public
+export interface LlmCall {
+    // (undocumented)
+    id: number;
+}
+
 // @public (undocumented)
 export interface LlmRunOptions {
     // (undocumented)
     input: unknown;
     key: string;
     model: string;
+    onCall?: (call: LlmCall) => void;
     prompt: string;
     schema?: JSONSchema7;
 }
