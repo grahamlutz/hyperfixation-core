@@ -61,7 +61,7 @@ chunk 0.
 
 ---
 
-## Chunk 0 — First publish, template consumes npm (core + template, one head, first) — ⬜ Not started
+## Chunk 0 — First publish, template consumes npm (core + template, one head, first) — ✅ Done (deviated — see note)
 
 **D0 (core):** `pnpm changeset` (one fixed-group entry), `pnpm changeset version` → `0.1.0`,
 `pnpm -r build && pnpm -r publish --access public` by hand from a clean clone (the API Extractor ordering lesson
@@ -75,6 +75,34 @@ CI's `next build`; delete the core checkout/build steps in `ci.yml`; regenerate 
 
 > After chunk 0, tracks D and E are independent (template versus `packages/cli`).
 
+> **Built (core #51, template #28), 2026-09-19, and where it differs from the plan:** all nine packages are at `0.1.0` on
+> npm (published by hand from a clean clone of `f741ea2`; `npm org ls hyperfixation` shows Graham as owner) under **MIT**
+> (a root `LICENSE` and one in each package; decided 2026-09-19). One real packaging bug: `@hyperfixation/db` did not ship
+> `migrations/`, which `CORE_MIGRATIONS_DIR` resolves from `dist/migrate.js`. The template resolves from npm with no
+> `link:` entries; its lockfile integrity hashes match the registry. **Differences from the plan:**
+> 1. **`--webpack` stays** (dev, `build`, CI, `tests/e2e/server.ts`). Dropping it failed CI with
+>    `DuplicateFlow: a flow named "collectDemoSource" is already defined`: Turbopack gives each page entry its own copy of
+>    the app's `src/flows/*`, so `defineFlow` runs twice when two pages are collected in one process. It depends on the
+>    worker count (10 locally passed, 3 in CI failed; `experimental.cpus: 1` reproduces it). Core's duplicate check is a safety
+>    guard and was **not** relaxed.
+> 2. **`typescript` is `~5.9.3` in the template** (was `^7.0.2`): typescript-eslint 8.70's peer range is
+>    `>=4.8.4 <6.1.0`, and the `link:` layout had hidden the mismatch by resolving core's TypeScript.
+> 3. **`minimumReleaseAgeExclude: ["@hyperfixation/*"]`** in the template's `pnpm-workspace.yaml`. pnpm 12 refuses a version
+>    published under 24 hours ago, which would block the template and every core-bump PR for a day after each publish; proved
+>    both ways against a fresh Verdaccio package. `hf new` copies that file verbatim, so apps inherit it. The file is not a
+>    monorepo file any more but survives for that and `allowBuilds`.
+> 4. **`Dockerfile` base is `node:22-alpine`** (it said 25).
+>
+> **Publishing notes, learned the hard way.** npm needs 2FA on the account ("Authorization and publishing") or a publish is a
+> 403; with 2FA on, `pnpm -r publish` prints a browser URL and waits for Enter, so run it in a terminal you can see. The full
+> packument of a just-published package can 404 from a CDN cache for a while (the abbreviated one pnpm uses is 200 at once);
+> `curl https://registry.npmjs.org/@hyperfixation%2f<name>/0.1.0` is the check. **Phase 4's release workflow must use npm
+> trusted publishing (OIDC), not a stored `NPM_TOKEN`**: from early August 2026 granular tokens that bypass 2FA stop
+> skipping authentication for sensitive operations, and around January 2027 they lose direct publishing (only staged
+> publishes pending human approval); manual laptop publishing with 2FA is unaffected. Trusted publishing is configured
+> per package on npm after the package exists, so it can be set up now. npm v12 also disables install scripts and blocks
+> git and remote-URL dependencies by default; the CLI's dependency list should be checked for any that need a script.
+
 ## Track D — the deploy shape (template)
 
 ### D1 — The image builds and names its version — ⬜ Not started
@@ -86,13 +114,27 @@ build **without** the arg proves the entrypoint fallback (`HF_BUILD_SHA` length 
 
 **Done:** both `docker run` assertions green in CI.
 
-### D2 — Sentry in both processes — ⬜ Not started
+### D2 — Sentry in both processes — ✅ Done (template #29)
 
 `@sentry/nextjs` in `instrumentation.ts` (replacing the TODO) and `@sentry/node` at the top of `worker.ts`, both
 no-ops when `SENTRY_DSN` is empty. Depends on nothing.
 
 **Done:** `tests/instrumentation.test.ts` — DSN empty → `Sentry.getClient()` undefined; dummy DSN → defined, no
 network; `next build` still prerenders with the DSN empty.
+
+> **Built (template #29).** `@sentry/nextjs` and `@sentry/node`, pinned exactly. `instrumentation.ts` registers Sentry
+> only under the nodejs runtime and only with a non-empty `SENTRY_DSN` (dynamic `/* webpackIgnore: true */` import, a
+> once-flag, `onRequestError`); `src/sentry.ts` and `src/boot-sentry.ts` (top-level await, imported second in `worker.ts`
+> after `boot-env`, which owns the DSN). **PII:** `sendDefaultPii: false` (v10 maps it to no HTTP bodies, no gen-AI
+> inputs/outputs, no database query data, cookies/headers/query denied); `LocalVariables` (a failing step's locals are the
+> draft and the model output), `Console` and `ProcessSession` (a `beforeExit` POST) are dropped by name. `tracesSampleRate:
+> 0` in both processes. **`withSentryConfig` is not used** (it only adds source-map upload and plugin telemetry;
+> `onRequestError` alone captures server errors), so there is no `SENTRY_AUTH_TOKEN`. Checked against a local ingest
+> endpoint: no request at build time, and a dev-server 500 arrives as an event with empty cookies, no body and no frame
+> variables. `pnpm-workspace.yaml` gained `"@sentry/cli": false` (pnpm 12 fails an install on an unanswered build script). As
+> T3 found, `@sentry/nextjs`'s runtime does not export `requestDataIntegration` even though its types say so — it 500'd `pnpm
+> dev` while the build passed. Worker auto-instrumentation under ESM would need `--import @sentry/node/preload` in `pnpm
+> worker` and the image `CMD`; irrelevant at sampling 0. Sentry still sends request-driven session counts.
 
 ### D3 — The prod stack comes up locally (after D1) — ⬜ Not started
 
@@ -116,7 +158,7 @@ the harness pool; assert `hf_run.attempt = 2`, `current_workflow_id = '<run>:2'`
 
 ## Track E — the `hf` cloud path (`packages/cli`)
 
-### E1 — Config, state cache, provider clients, the OpenAPI harness — ⬜ Not started
+### E1 — Config, state cache, provider clients, the OpenAPI harness — ✅ Done (core #52)
 
 Operator config read from `~/.config/hf/config.json` (0600) with env override, keys exact: `HF_COOLIFY_URL`,
 `HF_COOLIFY_TOKEN`, `HF_COOLIFY_SERVER_UUID`, `HF_COOLIFY_GITHUB_APP_UUID`, `HF_COOLIFY_POSTGRES_UUID`, `HF_SSH_HOST`,
@@ -130,6 +172,21 @@ validate.
 
 **Done:** `pnpm --filter @hyperfixation/cli test providers` — every client method validates; a fixture handler with
 the wrong verb fails; a state file written at 0644 is refused and rewritten 0600.
+
+> **Built (core #52).** `packages/cli` gains the operator config (`$XDG_CONFIG_HOME` or `~/.config/hf/config.json`, env
+> override; `HF_LANGFUSE_ORG_KEY` is `publicKey:secretKey` for HTTP Basic), the per-app state cache (0600, atomic
+> write; a 0644 file is chmod'ed and then refused; an unparsable or wrong-shaped file is refused and left byte-identical),
+> five `fetch` clients under `src/providers/` (nothing exported from `index.ts` yet, so `etc/cli.api.md` is unchanged)
+> and the OpenAPI harness: trimmed specs vendored under `packages/cli/openapi/` (coolify `coollabsio/coolify@383a5a7`,
+> cloudflare `cloudflare/api-schemas@efeb8eb`, github `github/rest-api-description@814de7a`, sentry
+> `getsentry/sentry-api-schema@ea6ffa7`, langfuse `langfuse/langfuse@be747a7`; each recorded in a README) with `msw` and a
+> validator that fails any request whose method, path or body does not validate. **Risk 1 paid off:** Coolify's bulk
+> envs is `PATCH`, not `POST`, and creating an application needs both `environment_uuid` and `environment_name`, so
+> `listEnvironments` was added; `createOrgRepository` sits beside `createUserRepository`. **Risk 3 resolved toward the API:**
+> `databases_to_backup` is settable, so the backup client stayed (`POST /databases/{uuid}/backups`). **Still unverified:**
+> the Coolify document is upstream `main`, not the box's build (re-vendor before X1); its `Project`/`Environment` models
+> omit `uuid` though the API returns it; `SOURCE_COMMIT` under Coolify; where a registered backup lands. 96 files / 661
+> tests. A known CI flake: `ai/src/redeploy-case-1.test.ts` occasionally times out under load (once; a re-run passed).
 
 ### E2 — SSH runner, database and roles (after E1) — ⬜ Not started
 
