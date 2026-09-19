@@ -7,6 +7,7 @@ import {
   type StepPool,
 } from "@hyperfixation/db";
 import { createControlPool, type ControlPool } from "./control-pool.js";
+import { registerLangfuse, type LangfuseRegistration } from "./langfuse.js";
 import { setPausedQueueConcurrency } from "./queue-concurrency.js";
 import { reconcile, startReconciler, type Reconciler } from "./reconcile.js";
 import { acquireWorkerLock, type WorkerLock } from "./worker-lock.js";
@@ -104,6 +105,9 @@ export interface Worker {
   reconciler: Reconciler;
 }
 
+/** Set when the keys are present; the SIGTERM handler flushes through it. */
+let langfuse: LangfuseRegistration | undefined;
+
 /**
  * The only place `DBOS.launch()` runs. Boot checks, then the two pools, then the advisory
  * lock, then launch — a worker that cannot prove it is alone never reaches the launch.
@@ -133,6 +137,10 @@ export async function startWorker(options: StartWorkerOptions): Promise<Worker> 
 
   let client: DBOSClient | undefined;
   try {
+    // Before `setConfig`, so DBOS finds a registered provider and a working context manager and
+    // keeps ours: both globals are first-one-wins.
+    langfuse = registerLangfuse();
+
     const lock = await acquireWorkerLock(options.databaseUrl, options.appName);
 
     DBOS.setConfig({
@@ -146,6 +154,8 @@ export async function startWorker(options: StartWorkerOptions): Promise<Worker> 
       runAdminServer: false,
       maxConcurrentQueueDispatches: 1,
       runMigrations: false,
+      // Without a Langfuse destination DBOS's spans are stubs, which is the cheaper default.
+      tracingEnabled: langfuse !== undefined,
     });
 
     // Installed before `launch`, so a SIGTERM arriving during it is this process's to drain.
@@ -234,11 +244,23 @@ function handleSigterm(): void {
 
   console.info(SHUTDOWN_MARKER);
   DBOS.shutdown({ workflowCompletionTimeoutMS: DRAIN_TIMEOUT_MS }).then(
-    () => process.exit(0),
+    () => flushThenExit(0),
     (error: unknown) => {
       console.error(SHUTDOWN_FAILED_MARKER, error);
-      process.exit(1);
+      flushThenExit(1);
     },
+  );
+}
+
+/**
+ * The last span batch would otherwise die with the process. Both arms exit with the code the
+ * drain earned: a Langfuse flush that fails is not a reason to change it.
+ */
+function flushThenExit(code: number): void {
+  const flushed = langfuse?.shutdown() ?? Promise.resolve();
+  flushed.then(
+    () => process.exit(code),
+    () => process.exit(code),
   );
 }
 

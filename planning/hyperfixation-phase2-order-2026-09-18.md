@@ -168,7 +168,7 @@ yields a new hash on the next call and a `LedgerKeyCollision` on the *same* key 
 the prompt hash is recorded, not fenced); redeploy cases 1, 2, 3, 4, 8, 9, 12 green **unchanged in what they
 assert**.
 
-### L2 — Langfuse wiring — ⬜ Not started
+### L2 — Langfuse wiring — ✅ Done (deviated — see note)
 
 `startWorker()` registers Langfuse's OTel span processor when `LANGFUSE_*` are set and nothing when they are
 not (the worker fixture's `skipOpenTelemetrySetup: true` stays); `trace_id` lands on the row. The web half is
@@ -178,6 +178,25 @@ DSN is provisioned by Phase 3's `hf new`, and the plan's Phase 2 text does not n
 **Done:** with the keys unset, `startWorker()` registers no processor (assert on the OTel global); with a
 fake in-memory exporter, one `llm.run` produces a span whose attributes carry the four telemetry fields and
 whose id is the row's `trace_id`.
+
+> **Built, and where it differs from the wording above:** `registerLangfuse(env = process.env)` in
+> `workflows/src/langfuse.ts` — all three of `LANGFUSE_PUBLIC_KEY`/`SECRET_KEY`/`BASE_URL` non-empty or it
+> registers nothing and returns `undefined`; `startWorker()` calls it before `DBOS.setConfig`, passes
+> `tracingEnabled: langfuse !== undefined`, and the SIGTERM handler flushes the batch before `process.exit`
+> (still no `await` in the handler — the flush is chained onto `DBOS.shutdown`'s `.then`). `ai` gains
+> `@ai-sdk/otel@1.0.102` and pins **`ai` to `7.0.102` exactly**: `@ai-sdk/otel` depends on `ai@7.0.102` and
+> `@ai-sdk/provider@4.0.15` exactly, so a caret would duplicate `ai` under it. Its `OpenTelemetry` integration
+> is one module-level instance passed per call as `telemetry.integrations`, not `registerTelemetry()` (a test
+> builds a `createLlm` per call). The join fields arrive as `ai.settings.context.<key>` attributes, **not**
+> `ai.telemetry.metadata.*`, and **two** spans carry them — the operation root (`invoke_agent <model>`) and
+> `step 1`, not one: the inference span (`chat <model>`) does not. `trace_id` is read once from
+> `trace.getActiveSpan()` before the gate and written on both gate statements, so `error` and
+> `possible_double_charge` rows carry it too. `@opentelemetry/context-async-hooks` is a **runtime** dependency
+> of `workflows`, not just a dev one: DBOS's lazy `require`s (`api`, `core`, `sdk-trace-base`,
+> `context-async-hooks`) are undeclared and resolve only through pnpm hoisting. Verified by probe: under fake
+> keys DBOS launches with `globalParams.tracingEnabled = true`, `enableOTLP = false`, keeps our
+> `NodeTracerProvider` as the global delegate, and runs workflow and step bodies under real `SpanImpl` spans
+> sharing one trace id. No filtering beyond `LangfuseSpanProcessor`'s default, and the web half is still T3.
 
 ### L3 — `ledger-crash.test.ts` (re-scoped) — ⬜ Not started
 
@@ -255,7 +274,7 @@ expression changed under them).
 
 ## Track P — approvals and actions completion (`@hyperfixation/workflows`)
 
-### P1 — `ActionUncertain`, the task, `reconcile()` step (4)'s task — ⬜ Not started
+### P1 — `ActionUncertain`, the task, `reconcile()` step (4)'s task — ✅ Done (deviated — see note)
 
 `ActionChannel` gains the declaration of whether it dedupes on `idempotencyKey`. `actions.perform`: on
 re-entry of a `started` row (the branch `actions.test.ts` calls "takes a started row left by a dead attempt
@@ -264,6 +283,15 @@ insert one `hf_task` (`origin = 'flow'`) and one `hf_activity` row, all inside t
 re-send. `reconcile()` step (4)'s action half gains its task (`origin = 'sweep'`), **exactly once per row
 across passes**, which needs an idempotency key on `hf_task` that v1's columns do not give it (open
 question 6). The lock-order tier for `hf_task`/`hf_activity` is under "Readings taken".
+
+> **Built, and where it differs from the wording above:** `ActionChannel.dedupes` is a **required** boolean (`stubChannel` is
+> `true`). A non-deduping channel treats a `failed` row like a `started` one on re-entry — a channel that throws after
+> delivering (SMTP accepted, socket timed out) must not be re-sent either. A row already `uncertain` makes **any** channel
+> throw `ActionUncertain` on re-entry, deduping ones included: a human has been asked, and a send behind them is what the
+> task exists to prevent. `ActionUncertain.taskId` is `number | null` (a row that went `uncertain` before this chunk has
+> none). The activity row is written even when the task insert conflicts — exactly-once comes from the
+> `started -> uncertain` transition, not the task insert. A task's `record_type`/`record_id` fall back to
+> `('hf_action_log', id)` when the action carried none.
 
 **Done:** `actions.test.ts` extended — a non-deduping channel re-entered yields `uncertain` + one task + no
 second `send`; a deduping channel re-entered re-sends with the same `idempotencyKey` (today's behaviour,

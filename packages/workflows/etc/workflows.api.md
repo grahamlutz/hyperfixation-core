@@ -21,6 +21,7 @@ export const ABANDON_LLM_CALLS_STATEMENT: string;
 
 // @public (undocumented)
 export interface ActionChannel {
+    readonly dedupes: boolean;
     // (undocumented)
     readonly name: string;
     // (undocumented)
@@ -63,6 +64,19 @@ export interface ActionsPerformOptions {
     recordType?: string;
     // (undocumented)
     request?: unknown;
+}
+
+// @public
+export class ActionUncertain extends Error {
+    constructor(runId: string, key: string, actionLogId: number, taskId: number | null);
+    // (undocumented)
+    readonly actionLogId: number;
+    // (undocumented)
+    readonly key: string;
+    // (undocumented)
+    readonly runId: string;
+    // (undocumented)
+    readonly taskId: number | null;
 }
 
 // @public
@@ -277,6 +291,14 @@ export interface GetClientOptions {
 // @public (undocumented)
 export function idempotencyKey(runId: string, key: string): string;
 
+// @public
+export const LANGFUSE_ENV: readonly ["LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_BASE_URL"];
+
+// @public (undocumented)
+export interface LangfuseRegistration {
+    shutdown(): Promise<void>;
+}
+
 // @public (undocumented)
 export const LAUNCHED_MARKER = "hf-worker: DBOS launched";
 
@@ -451,6 +473,9 @@ export interface ReconcileReport {
     // (undocumented)
     uncertainActions: number;
 }
+
+// @public
+export function registerLangfuse(env?: NodeJS.ProcessEnv): LangfuseRegistration | undefined;
 
 // @public
 export function resetClient(): Promise<void>;
