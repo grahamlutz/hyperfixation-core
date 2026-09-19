@@ -493,12 +493,19 @@ package). Land L2 and P2's `core` half as small PRs on their own so neither trac
 T2 is the integration chunk and waits on both — start it when L1, P1, P2 and C4 are in, not before; a demo
 written against stubs would be rewritten.
 
-**Merge friction to plan for.** One migration, in chunk 0; if a track needs a column after that (P1's task
-idempotency key is the likely one), it is its own nullable `ADD COLUMN` migration and takes the
-`migrate.test.ts` literals up by one. API reports churn on every chunk that exports anything — Phase 1's
-Still open 7 — and `core.api.md` will churn most; regenerate in the same PR, and expect a reordering-only
-diff in a neighbour's report from a dependency change (`zod` into `workflows` is the likely trigger, the way
-`admin`'s `kysely` peer was).
+**Merge friction to plan for.** One migration, in chunk 0; if a track needs a column after that, it is its
+own nullable `ADD COLUMN` migration (P1's task key, `origin_ref`, already shipped in chunk 0). Since #5
+`migrate.test.ts` derives the expected set from the journal, so a new migration no longer touches it, but the
+journal baseline (`migrations-journal.baseline.json`) still grows. API reports churn on every chunk that
+exports anything — Phase 1's Still open 7 — and `core.api.md` will churn most; regenerate in the same PR, and
+expect a reordering-only diff in a neighbour's report from a dependency change (`zod` into `workflows` is the
+likely trigger, the way `admin`'s `kysely` peer was).
+
+**Regenerate API reports from a clean clone, not the working tree.** api-extractor orders string-literal
+unions by type-creation order, which an incremental local build does not reproduce: chunk 0's PR failed CI
+because a worktree build ordered three existing status unions (`hf_approval`, `hf_llm_call`, `hf_run`)
+differently from CI's. Fresh clone, `pnpm install --frozen-lockfile`, `pnpm turbo build`, `api-extractor run`,
+copy `temp/<pkg>.api.md` over `etc/`, and confirm `pnpm turbo api-extractor` passes there before pushing.
 
 ## Gate case → chunk map
 
