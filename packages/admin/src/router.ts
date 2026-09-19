@@ -6,6 +6,8 @@ import {
 } from "@hyperfixation/auth";
 import { createRegistry, type Registry } from "@hyperfixation/core";
 import type { Pool } from "pg";
+import { createSetBudgetAction, type SetBudgetAction } from "./budget.js";
+import { approvalsResource, budgetPeriodsResource, runsResource } from "./machinery.js";
 import type { AdminResource } from "./resource.js";
 import { usersResource } from "./users.js";
 
@@ -20,13 +22,22 @@ export type AdminRoute =
 /** The admin's server actions. Each one carries its own guard. */
 export interface AdminActions {
   resetSecondFactor: ResetSecondFactorAction;
+  setBudget: SetBudgetAction;
 }
+
+/** The framework's own tables. An app registers none of these; they come with the admin. */
+const BUILT_IN_RESOURCES: readonly AdminResource[] = [
+  usersResource,
+  approvalsResource,
+  runsResource,
+  budgetPeriodsResource,
+];
 
 export interface AdminRouterOptions {
   /** The app's own pool. The admin builds none and runs on the web request path. */
   pool: Pool;
   requireSession: RequireSession;
-  /** Resources beyond `users`. Phase 1 registers none; Phase 2's machinery tables will. */
+  /** The app's own resources, beyond the built-in ones. */
   resources?: readonly AdminResource[];
 }
 
@@ -61,13 +72,17 @@ function segmentsOf(path: string | readonly string[] | undefined): string[] {
  */
 export function createAdminRouter(options: AdminRouterOptions): AdminRouter {
   const resources = createRegistry<AdminResource>("admin resource");
-  resources.register(usersResource);
+  for (const resource of BUILT_IN_RESOURCES) resources.register(resource);
   for (const resource of options.resources ?? []) resources.register(resource);
 
   return {
     resources,
     actions: {
       resetSecondFactor: createResetSecondFactorAction({
+        pool: options.pool,
+        requireSession: options.requireSession,
+      }),
+      setBudget: createSetBudgetAction({
         pool: options.pool,
         requireSession: options.requireSession,
       }),

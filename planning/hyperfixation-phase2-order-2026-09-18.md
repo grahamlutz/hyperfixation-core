@@ -603,7 +603,7 @@ did not build (no table).
 **Done:** `pnpm --filter @hyperfixation/core test activity tasks labels outcomes`; `records.test.ts` gains the
 open-task cancellation and the "keeps history" assertion over real `hf_activity`/`hf_label` rows.
 
-### C5 — Admin resources for the machinery tables — ⬜ Not started
+### C5 — Admin resources for the machinery tables — ✅ Done (deviated — see note)
 
 In `@hyperfixation/admin`, over track D's `resourceFromTable`: `hf_approval` and `hf_run` read-only,
 `hf_budget_period` with `budget_usd` editable as an admin *action* (the package's existing shape — it resolves
@@ -611,9 +611,52 @@ and refuses, the template reads and renders; `resetSecondFactor` is the preceden
 admin page gains the edit form. "An admin edit to a period's `budget_usd` takes effect at the next gate" —
 assert it.
 
-**Done:** `pnpm --filter @hyperfixation/admin test` — the three resources register; a member 404s on all
-three; the budget action refuses a non-admin, writes for an admin, and a gate opened after it reads the new
-value.
+> **Built, and where it differs from the wording above:** the three resources are
+> `packages/admin/src/machinery.ts` — `approvals` (`hf_approval`), `runs` (`hf_run`), `budget-periods`
+> (`hf_budget_period`) — and `createAdminRouter` **registers them itself**, beside `usersResource`, rather than
+> taking them through the `resources` option. They are the framework's own tables; an app has no choice to make
+> about them, and the option's comment ("Phase 1 registers none; Phase 2's machinery tables will") now reads as
+> the app's own resources. `router.resources.names()` is therefore
+> `["users", "approvals", "runs", "budget-periods", …app]`, which is the one Phase 1 assertion that changed.
+>
+> **Read-only is the absence of an action, not a new flag.** The package has no write path except an action, so
+> `approvals` and `runs` ship with `actions: []` and nothing was added to `AdminResource` to say so. A decision
+> belongs to `decide()`, which fences it against the run; `hf_run.current_workflow_id` *is* the fencing token.
+> An admin editing either table directly would be writing behind the fence.
+>
+> **Decisions the wording left open.** Lowering `budget_usd` below `spent_usd` is **allowed**: it is not a
+> correction but the kill-lever — the next gate compares `spent + reserved + estimate > budget` and refuses
+> every further call for the period, which is what an admin watching a runaway month wants. The action touches
+> **only the named period's row**: never `spent_usd` (the money is spent either way, and editing it would make
+> the gate lie) and never `hf_app_state.budget_usd`, which is only the default copied into each *future*
+> period — editing it here would silently change every month to come. Validation is finite and non-negative,
+> refused before any lock is taken (`InvalidBudget`); a period with no row is `UnknownBudgetPeriod` rather than
+> an insert, since the first gate of a period is the only thing that creates one.
+>
+> The write is one transaction: `SELECT … FOR UPDATE` on the period in a CTE, the `UPDATE`, then the `hf_audit`
+> row (`app.budget_set`, `target_type` `hf_budget_period`, `target_id` the period, `meta` carrying
+> `previousBudgetUsd`/`budgetUsd`/`spentUsd`/`reason`) — `app.pause`'s shape, with `resetSecondFactor`'s guard
+> and its "actor from the guarded session, not from the form" rule. It takes only the one lock, so it cannot
+> deadlock against a gate holding `hf_run` first. `SetBudgetResult` returns the numerics **as stored strings**,
+> so a caller sees what `numeric(12,4)` kept rather than what it asked for.
+>
+> The gate half is driven for real: `@hyperfixation/admin` gained a **test-only** devDependency on
+> `@hyperfixation/ai` (no cycle — nothing in the workspace depends on `admin`), and the test opens actual gates
+> through `createLlm`/`createProviders`/`fixedCost` over a `MockLanguageModel`, as `ledger-branches.test.ts`
+> does. `PROMPTS_DIR` is not on `ai`'s public entry, so the test carries its own one-line prompt at
+> `packages/admin/src/test-support/prompts/budget.md`.
+>
+> **Follow-up, not this chunk:** the template's admin page still has no budget edit form.
+> `AdminRouter.actions.setBudget` is the whole server half and is exported; `hyperfixation-template` is a
+> separate repo, so the form lands there alongside C6's workspace work.
+
+**Done:** `pnpm --filter @hyperfixation/admin test` — 44 tests, 7 files, 1.7s. The three resources register and
+resolve; a member 404s on all four resources including `users`; the budget action refuses a member (writing no
+row and no audit line), writes `budget_usd` for an admin while leaving `spent_usd` and `hf_app_state` alone,
+audits with the session's admin and both values, and refuses a non-finite, negative or unknown-period budget.
+The gate assertion is end-to-end: a gate at the app default opens the month's row and spends it, the next gate
+is refused with `BudgetExceeded`, the admin raises the period's budget, and **the same call then goes
+through** — then a budget of 0, below what the period spent, refuses the one after it.
 
 ### C6 — The workspace — ⬜ Not started, **open question 2 decided: descriptors, template renders**
 
@@ -749,7 +792,7 @@ number here.
 |---|---|---|---|---|
 | **L — ledger** (L1–L5b) | `ai` (+ one `startWorker` hook in `workflows` for L2) | chunk 0 | T2 needs L1; Exit needs all | 🚧 L1–L5a done; L5b open |
 | **P — approvals and actions** (P1–P4) | `workflows` | chunk 0 | T2 needs P1, P2; Exit needs all | 🚧 P1–P3 done; P4 open |
-| **C — core** (C1–C6) | `core`, `db` (C2), `admin` (C5) | chunk 0 | T2 needs C1–C4; Exit needs C6 | 🚧 C1–C4 done; C5, C6 open |
+| **C — core** (C1–C6) | `core`, `db` (C2), `admin` (C5) | chunk 0 | T2 needs C1–C4; Exit needs C6 | 🚧 C1–C5 done; C6 open |
 | **T — testing and template** (T1–T3) | `testing`, `hyperfixation-template` | chunk 0 for T1; the others as listed | Exit | 🚧 T1 done; T2, T3 open |
 
 **Execution model.** Chunk 0 is one PR by one head, first. After it the three tracks are genuinely

@@ -22,6 +22,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "devDependencies": {
+    "@hyperfixation/ai": "workspace:*",
     "@hyperfixation/eslint-config": "workspace:*",
     "@hyperfixation/testing": "workspace:*",
     "@microsoft/api-extractor": "^7.59.1",

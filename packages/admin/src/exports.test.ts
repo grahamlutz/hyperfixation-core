@@ -19,7 +19,14 @@ describe("the exports map", () => {
   });
 
   it("builds no pool of its own", async () => {
-    for (const entry of ["index.ts", "router.ts", "resource.ts", "users.ts"]) {
+    for (const entry of [
+      "index.ts",
+      "router.ts",
+      "resource.ts",
+      "users.ts",
+      "machinery.ts",
+      "budget.ts",
+    ]) {
       const source = await readFile(path.join(packageRoot, "src", entry), "utf8");
       expect(source).not.toMatch(/new Pool\b/);
       expect(source).not.toMatch(/createStepPool|createControlPool|controlPlaneTx/);
