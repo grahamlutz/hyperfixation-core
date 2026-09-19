@@ -73,6 +73,9 @@ export interface CreateProvidersOptions {
         apiKey: string;
     };
     costs?: Record<string, ModelCost>;
+    fixtures?: {
+        dir: string;
+    };
     models?: Record<string, LanguageModelV4>;
     // (undocumented)
     openai?: {
@@ -82,6 +85,41 @@ export interface CreateProvidersOptions {
 
 // @public
 export function fixedCost(estimateUsd: number, costUsd: number): ModelCost;
+
+// @public (undocumented)
+export interface FixtureFile {
+    // (undocumented)
+    responses?: FixtureResponse[];
+}
+
+// @public
+export class FixtureMissing extends Error {
+    constructor(model: string, file: string, reason: string, options?: {
+        cause?: unknown;
+    });
+    // (undocumented)
+    readonly file: string;
+    // (undocumented)
+    readonly model: string;
+}
+
+// @public (undocumented)
+export interface FixtureResponse {
+    // (undocumented)
+    inputTokens?: number;
+    json?: unknown;
+    // (undocumented)
+    outputTokens?: number;
+    // (undocumented)
+    text?: string;
+    // (undocumented)
+    when?: FixtureWhen;
+}
+
+// @public (undocumented)
+export interface FixtureWhen {
+    userTextIncludes?: string;
+}
 
 // @public
 export function hashInput(input: unknown): string;

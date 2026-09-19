@@ -749,6 +749,25 @@ Open question 5 is decided: the provider registry hands out a **fixture provider
 from `fixtures/llm/*.json`) when no key is set, and the demo's fixtures ship with the template. This is what
 makes the exit bar's "no extra provider calls" countable in CI without a real key.
 
+**Prerequisite landed (C0).** The core half of the above is in, so T2 only has to ship fixtures and
+registrations:
+
+- **The fixture provider.** `createProviders({ fixtures: { dir } })` serves a `LanguageModelV4` reading
+  `<dir>/<promptName>.json`, whose shape is
+  `{ "responses": [ { "when": { "userTextIncludes": "acme roofing" }, "json": {…} }, { "text": "…" } ] }`.
+  Selection is the first entry whose `when` matches the last user message's text (case-insensitive), else the
+  first entry with no `when`, else `FixtureMissing` — never a silent default, like `CassetteExhausted`. A
+  `json` entry is returned as JSON text, which is what the `schema` path parses. Tokens default to 0, so
+  `cost_usd` is 0 and a fixture run never moves `spent_usd`. The file is read per call, like a prompt file.
+- **Only when *no* key at all is set**, not per provider: an app with Anthropic configured and an OpenAI key
+  missing still throws `UnknownModel`, because silently serving fake drafts in production is worse than the
+  crash. Explicit `models` entries still win. One `console.warn` per process says fixtures are being served.
+- **The join.** `llm.run` now puts `providerOptions: { hyperfixation: { runId, key, promptName, promptHash } }`
+  on every call. Verified: the AI SDK forwards it to `doGenerate` unaltered on both the plain and the
+  `Output.object` path, and a real provider reads only its own namespace.
+- **`score(record, criteria, ctx)`.** `ScorerDefinition.score` takes a third `StepContext` argument, without
+  which a scorer cannot call `llm.run` at all. Type only; core still has no scorer runner.
+
 **Done:** `pnpm test` in a generated app — `contract.test.ts`, `flow-restart.test.ts` over every registered
 flow, `compose-envs.test.ts` — green; `hf check` green; `rg -i demo` finds only the allowed files.
 
