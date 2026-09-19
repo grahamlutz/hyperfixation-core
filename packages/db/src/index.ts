@@ -29,6 +29,7 @@ export {
   type BumpedAttempt,
   type ControlPlaneTxOptions,
 } from "./control-plane.js";
+export { loadSource, type SourceRowInput, type SourceRun } from "./loader.js";
 export {
   appPaused,
   AppStateMissing,

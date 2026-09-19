@@ -32,7 +32,8 @@
     "@opentelemetry/sdk-trace-base": "2.11.0",
     "@opentelemetry/sdk-trace-node": "2.11.0",
     "drizzle-orm": "^0.45.2",
-    "pg": "^8.23.0"
+    "pg": "^8.23.0",
+    "zod": "4.6.5"
   },
   "devDependencies": {
     "@hyperfixation/eslint-config": "workspace:*",

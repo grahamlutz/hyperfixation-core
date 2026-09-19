@@ -109,8 +109,10 @@ export const hfActivity = pgTable(
   "hf_activity",
   {
     id: id(),
-    recordType: text("record_type").notNull(),
-    recordId: text("record_id").notNull(),
+    // Nullable, like `hf_approval`'s and `hf_action_log`'s: a row about no record writes NULL,
+    // which E002 ignores. A stand-in such as `'hf_approval'` would fail it at the next boot.
+    recordType: text("record_type"),
+    recordId: text("record_id"),
     kind: text("kind").notNull(),
     actorId: text("actor_id"),
     body: text("body"),
@@ -127,8 +129,9 @@ export const hfTask = pgTable(
   "hf_task",
   {
     id: id(),
-    recordType: text("record_type").notNull(),
-    recordId: text("record_id").notNull(),
+    // Nullable for the same reason as `hf_activity`'s above.
+    recordType: text("record_type"),
+    recordId: text("record_id"),
     title: text("title").notNull(),
     dueAt: at("due_at"),
     ownerId: text("owner_id"),

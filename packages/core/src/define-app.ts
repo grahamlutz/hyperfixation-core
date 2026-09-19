@@ -5,6 +5,7 @@ import {
   runsStart,
   decide as decideApprovals,
   type ActionChannel,
+  type ApprovalDraftSchema,
   type DecideOptions,
   type DecideResult,
   type Flow,
@@ -39,8 +40,8 @@ export type AnyFlow = Flow<never, unknown>;
 
 export interface ApprovalTypeDefinition {
   readonly name: string;
-  /** Phase 2 resolves this to the Zod schema an edited draft is validated against. */
-  readonly schema?: unknown;
+  /** The Zod schema an edited draft is parsed against; a type without one refuses every edit. */
+  readonly schema?: ApprovalDraftSchema;
 }
 
 /**
@@ -251,7 +252,10 @@ export function defineApp(options: DefineAppOptions): App {
     approvals: {
       async decide(decideOptions) {
         const { pool, client } = controlPlane("approvals.decide");
-        return decideApprovals(pool, client, decideOptions);
+        return decideApprovals(pool, client, {
+          schemaFor: (type) => approvalTypes.get(type)?.schema,
+          ...decideOptions,
+        });
       },
     },
     async reconcile(reconcileOptions = {}) {

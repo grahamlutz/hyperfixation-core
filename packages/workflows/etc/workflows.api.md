@@ -15,6 +15,7 @@ import * as schema from '@hyperfixation/db';
 import { StepDatabase } from '@hyperfixation/db';
 import { StepPool } from '@hyperfixation/db';
 import { WorkflowQueue } from '@dbos-inc/dbos-sdk';
+import { ZodType } from 'zod';
 
 // @public
 export const ABANDON_LLM_CALLS_STATEMENT: string;
@@ -113,6 +114,9 @@ export interface ApprovalDecision {
 // @public (undocumented)
 export type ApprovalDecisionKind = (typeof APPROVAL_DECISIONS)[number];
 
+// @public
+export type ApprovalDraftSchema = ZodType;
+
 // @public (undocumented)
 export interface ApprovalNotice {
     // (undocumented)
@@ -193,6 +197,7 @@ export interface DecidedApproval {
 
 // @public (undocumented)
 export interface DecideOptions {
+    admin?: boolean;
     // (undocumented)
     decision: ApprovalDecisionKind;
     decisionKey: string;
@@ -201,6 +206,7 @@ export interface DecideOptions {
     ids: number[];
     // (undocumented)
     lockTimeout?: string;
+    schemaFor?: (type: string) => ApprovalDraftSchema | undefined;
     // (undocumented)
     userId?: string | null;
     // (undocumented)
@@ -209,6 +215,7 @@ export interface DecideOptions {
 
 // @public (undocumented)
 export interface DecideResult {
+    batchId: string | null;
     // (undocumented)
     decided: DecidedApproval[];
     // (undocumented)

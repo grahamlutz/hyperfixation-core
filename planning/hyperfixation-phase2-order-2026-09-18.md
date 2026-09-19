@@ -303,15 +303,18 @@ question 6). The lock-order tier for `hf_task`/`hf_activity` is under "Readings 
 > throw `ActionUncertain` on re-entry, deduping ones included: a human has been asked, and a send behind them is what the
 > task exists to prevent. `ActionUncertain.taskId` is `number | null` (a row that went `uncertain` before this chunk has
 > none). The activity row is written even when the task insert conflicts — exactly-once comes from the
-> `started -> uncertain` transition, not the task insert. A task's `record_type`/`record_id` fall back to
-> `('hf_action_log', id)` when the action carried none.
+> `started -> uncertain` transition, not the task insert. A task's `record_type`/`record_id` are **NULL** when
+> the action carries no record — corrected after P2's CI: the `('hf_action_log', id)` stand-in this note first
+> described is a record type no app registers, so E002 failed the next worker boot (`redeploy-case-1`). E002
+> ignores NULL, and `origin_ref` is the back-pointer to the action row. `0005_nullable_activity_task_record`
+> drops the `NOT NULL` on `hf_activity` and `hf_task`'s target columns for it.
 
 **Done:** `actions.test.ts` extended — a non-deduping channel re-entered yields `uncertain` + one task + no
 second `send`; a deduping channel re-entered re-sends with the same `idempotencyKey` (today's behaviour,
 now conditional); `reconcile.test.ts` step (4) — one task per orphaned action row, unchanged across three
 passes. Redeploy cases 1 and 8 still green (`stubChannel` is re-declared as deduping).
 
-### P2 — `decide()` completion: Zod, the assignee rule, `hf_activity`, `batch_id` — ⬜ Not started
+### P2 — `decide()` completion: Zod, the assignee rule, `hf_activity`, `batch_id` — ✅ Done (deviated — see note)
 
 Validate the whole batch before writing, as step 2 of the protocol lists it: every edited draft parses against
 the approval type's Zod schema; `assignee_id IS NULL OR assignee_id = userId` or the user is an admin —
@@ -325,11 +328,33 @@ One constraint the plan does not state: **the schemas live in `core`'s `approval
 the schema lookup, the way it is handed the pool and the client; `app.approvals.decide(options)` in
 `defineApp` is where the registry closes over it. The shape is the implementer's; the constraint is not.
 
+> **Built, and where it differs from the wording above:** the lookup is `DecideOptions.schemaFor(type)`, sync and
+> pure, called inside the locked transaction; `ApprovalDraftSchema` (a re-exported `ZodType`) is what `core`'s
+> `ApprovalTypeDefinition.schema` is typed as, so `core` still needs no `zod` of its own. `edits` with no
+> `schemaFor` is a **`TypeError` thrown before the transaction opens** — a wiring bug, not a refused row — which
+> made `wait-for-approval.test.ts`'s one `decide()` call gain a `schemaFor`; it asserts exactly what it asserted.
+> The value written to `edited_draft` is **what the schema returned**, not what the caller sent, so a `z.object`
+> strips what it does not declare. Admin is `DecideOptions.admin`, a boolean the caller's session sets: `via:
+> 'admin'` alone does not clear the assignee rule, the flag does. `via` in {`archive`, `sweep`} is **exempt** from
+> the rule outright — neither carries a human decider, and an assigned row has to stay cancellable and
+> expirable. `hf_activity.run_id` is `NULL` (reading 4), `actor_id` is the decider, `kind` is
+> `approval.<decision>`, and `record_type`/`record_id` are **NULL** when the approval is about no record — a
+> `('hf_approval', id)` stand-in is a record type no app registers and fails E002 at the next worker boot, and
+> the audit row's `target_id` already carries the id; the insert is
+> last in the transaction, after every `hf_approval` write, per reading 2. `batch_id` is a `randomUUID()` stamped
+> on every row when the deduped `ids` number more than one, `null` otherwise, and `DecideResult.batchId` carries
+> it (a replay reads the stored one back). `defineApprovalType()` was **not** added — that is C-track's.
+
 **Done:** `approvals.test.ts` — a batch with one edit that parses is written with `edited_draft`; an edit
 that fails the schema refuses the whole batch naming the row; assignee mismatch refused; an admin decides an
 assigned row; one `hf_activity` row per decided approval; a `hf_activity` insert made to fail (a `BEFORE
-INSERT` trigger installed by the test, the same trick the audit case uses) leaves the approval `pending`,
-creates no `dbos.workflow_status` row, and a retry with the same `decisionKey` succeeds.
+INSERT` trigger installed by the test) leaves the approval `pending`, creates no `dbos.workflow_status` row,
+and a retry with the same `decisionKey` succeeds. Adversary target (c) is a test of its own: a `schemaFor`
+that throws rolls the whole transaction back and the throw leaves `decide()` unaltered. `records.test.ts` in
+`core` covers the registry end — a registered schema refusing an edit through `app.approvals.decide`, and
+`records.archive()` still cancelling an approval assigned to someone else. `checkE002(pool, [])` is asserted
+green after a decision and after an uncertain action on rows that carry no record, in `approvals.test.ts`,
+`actions.test.ts` and `reconcile.test.ts` — the regression `redeploy-case-1` caught.
 
 ### P3 — The approvals negative suite — ⬜ Not started
 
@@ -393,13 +418,26 @@ duplicate/unknown errors. `core.api.md` will grow a great deal here; regenerate 
 **Done:** `registry.test.ts` extended for the new kinds; a spec test — scoring against version 2 leaves
 version 1's `hf_score` rows and writes new ones; a schedule under a paused app starts no run.
 
-### C2 — The COPY loader and `hf_source_run` — ⬜ Not started
+### C2 — The COPY loader and `hf_source_run` — ✅ Done (deviated — see note)
 
 In `@hyperfixation/db` (the layout puts "COPY loader" there): `pg-copy-streams` into a per-run `UNLOGGED`
 staging table, `INSERT … SELECT DISTINCT ON (source, external_id) … ON CONFLICT DO UPDATE` into
 `hf_source_record` with `payload_hash`, all inside one `ctx.tx` (the classifier counts `COPY` as a write and
 the tagged client allows it — `fenced-client.test.ts` already proves the classification). `hf_source_run`
 bookkeeping: `rows_in`, `rows_new`, `rows_changed`.
+
+> **Built, and where it differs from the wording above:** the staging table is `CREATE TEMP TABLE … ON COMMIT
+> DROP`, not `UNLOGGED` — the application role holds `USAGE` but not `CREATE` on `public` (`roles.ts`), so
+> `CREATE UNLOGGED TABLE` is refused with 42501; `TEMP` is granted to `PUBLIC`, has the same no-WAL property,
+> and `ON COMMIT DROP` makes the cleanup structural. `loadSource(tx, source, rows)` lives in
+> `packages/db/src/loader.ts` and takes rows structurally (`SourceRowInput`), because `db` cannot import
+> `core`; `core`'s `SourceRow<P>` is assignable. Within a batch the **last** occurrence of an external id
+> wins. `payload_hash` is computed in SQL over `payload::text` (jsonb's canonical form, so key order does not
+> change it), never in TypeScript. A changed payload rewrites `payload`/`payload_hash`/`run_id` and resets the
+> record to `status = 'new'`, `attempts = 0`, `error = NULL` for C3 to re-resolve; an unchanged one moves only
+> `last_seen`, keeping `first_seen`, `status`, `run_id` and `attempts`. `hf_record_link` is never touched. The
+> loader writes only `running` → `ok`: a throw anywhere propagates and `ctx.tx` rolls the whole load back, so
+> `hf_source_run.status = 'error'` stays unused until C3/T2 own retries.
 
 **Done:** `pnpm --filter @hyperfixation/db test loader` — a batch with a duplicate external id loads once;
 the staging table is gone after commit; an unchanged payload leaves `last_seen` moved and `payload_hash`
