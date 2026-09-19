@@ -3125,6 +3125,23 @@ baseColumn: never;
 identity: undefined;
 generated: undefined;
 }, {}, {}>;
+specName: PgColumn<    {
+name: "spec_name";
+tableName: "hf_score";
+dataType: "string";
+columnType: "PgText";
+data: string;
+driverParam: string;
+notNull: false;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: [string, ...string[]];
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
 specVersion: PgColumn<    {
 name: "spec_version";
 tableName: "hf_score";
