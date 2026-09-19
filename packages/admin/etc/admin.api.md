@@ -10,8 +10,17 @@ import { RequireSession } from '@hyperfixation/auth';
 import { ResetSecondFactorAction } from '@hyperfixation/auth';
 import { Table } from 'drizzle-orm';
 
+// @public (undocumented)
+export const ADMIN_APPROVALS_RESOURCE = "approvals";
+
 // @public
 export const ADMIN_BASE_PATH = "/admin";
+
+// @public (undocumented)
+export const ADMIN_BUDGET_PERIODS_RESOURCE = "budget-periods";
+
+// @public (undocumented)
+export const ADMIN_RUNS_RESOURCE = "runs";
 
 // @public (undocumented)
 export const ADMIN_USERS_RESOURCE = "users";
@@ -29,6 +38,8 @@ export interface AdminActionDescriptor {
 export interface AdminActions {
     // (undocumented)
     resetSecondFactor: ResetSecondFactorAction;
+    // (undocumented)
+    setBudget: SetBudgetAction;
 }
 
 // @public (undocumented)
@@ -97,7 +108,31 @@ export interface AdminRouterOptions {
 }
 
 // @public
+export const approvalsResource: AdminResource;
+
+// @public
+export const BUDGET_SET_MARKER = "hf-admin: budget set";
+
+// @public
+export const BUDGET_SET_OPERATION = "app.budget_set";
+
+// @public
+export const budgetPeriodsResource: AdminResource;
+
+// @public
 export function createAdminRouter(options: AdminRouterOptions): AdminRouter;
+
+// @public
+export function createSetBudgetAction(options: SetBudgetActionOptions): SetBudgetAction;
+
+// @public
+export class InvalidBudget extends Error {
+    constructor(period: string, budgetUsd: number);
+    // (undocumented)
+    readonly budgetUsd: number;
+    // (undocumented)
+    readonly period: string;
+}
 
 // @public
 export const RESET_SECOND_FACTOR_ACTION = "reset-second-factor";
@@ -117,6 +152,47 @@ export interface ResourceFromTableOptions {
 }
 
 // @public
+export const runsResource: AdminResource;
+
+// @public
+export const SET_BUDGET_ACTION = "set-budget";
+
+// @public
+export function setBudget(pool: Pool, options: SetBudgetOptions): Promise<SetBudgetResult>;
+
+// @public (undocumented)
+export type SetBudgetAction = (options: SetBudgetOptions) => Promise<SetBudgetResult>;
+
+// @public (undocumented)
+export interface SetBudgetActionOptions {
+    // (undocumented)
+    pool: Pool;
+    // (undocumented)
+    requireSession: RequireSession;
+}
+
+// @public (undocumented)
+export interface SetBudgetOptions {
+    actorId?: string | null;
+    // (undocumented)
+    budgetUsd: number;
+    period: string;
+    // (undocumented)
+    reason?: string;
+}
+
+// @public (undocumented)
+export interface SetBudgetResult {
+    budgetUsd: string;
+    // (undocumented)
+    period: string;
+    // (undocumented)
+    previousBudgetUsd: string;
+    // (undocumented)
+    spentUsd: string;
+}
+
+// @public
 export class UnknownAdminField extends Error {
     constructor(resource: string, field: string, known: readonly string[]);
     // (undocumented)
@@ -125,6 +201,13 @@ export class UnknownAdminField extends Error {
     readonly known: readonly string[];
     // (undocumented)
     readonly resource: string;
+}
+
+// @public
+export class UnknownBudgetPeriod extends Error {
+    constructor(period: string);
+    // (undocumented)
+    readonly period: string;
 }
 
 // @public
