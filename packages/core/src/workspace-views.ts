@@ -18,15 +18,14 @@ import { listOutcomes, type OutcomeRow } from "./outcomes.js";
 import { displayColumnOf, type RecordDefinition, type StageDefinition } from "./records.js";
 import type { Registry } from "./registry.js";
 import { taskRowOf, TASK_COLUMNS, type TaskQueryRow, type TaskRow } from "./tasks.js";
-import { draftFields, type DraftField } from "./workspace.js";
+import { DEFAULT_BOARD_LIMIT, draftFields, type DraftField } from "./workspace.js";
+
+export { DEFAULT_BOARD_LIMIT };
 
 export const WORKSPACE_INBOX_OPERATION = "workspace.inbox";
 export const WORKSPACE_HOME_OPERATION = "workspace.home";
 export const WORKSPACE_BOARD_OPERATION = "workspace.board";
 export const WORKSPACE_RECORD_OPERATION = "workspace.record";
-
-/** How many cards a board reads per record type before it stops. */
-export const DEFAULT_BOARD_LIMIT = 500;
 
 /**
  * The run is joined, not looked up per row: an approval's `run_id` is NOT NULL and its row is
@@ -143,6 +142,10 @@ export interface BoardView {
   columns: BoardColumn[];
   /** Cards whose `stage` is null or names no registered stage. */
   other: BoardCard[];
+  /** The limit this read used, whether the caller gave one or not. */
+  limit: number;
+  /** True when the table holds more unarchived rows than `limit` returned. */
+  truncated: boolean;
 }
 
 /** One run's writes on a record, in order. `runId` null is the manual group. */
@@ -225,7 +228,10 @@ export async function workspaceBoard(
 ): Promise<BoardView> {
   assertNotInWorkflow(WORKSPACE_BOARD_OPERATION);
   const record = deps.records.require(recordType);
-  const { rows } = await deps.pool.query<{
+  const limit = options.limit ?? DEFAULT_BOARD_LIMIT;
+  // One row past the limit, trimmed before anything is columned: a count(*) would be a second
+  // read of the same table under no lock, and could disagree with the page it is reported beside.
+  const { rows: fetched } = await deps.pool.query<{
     id: string;
     title: unknown;
     stage: string | null;
@@ -235,8 +241,10 @@ export async function workspaceBoard(
     `SELECT id::text AS id, ${quoteIdent(displayColumnOf(record))} AS title, stage, score, ` +
       `updated_at FROM ${quoteIdent(record.table)} WHERE archived_at IS NULL ` +
       "ORDER BY updated_at DESC NULLS LAST, id DESC LIMIT $1",
-    [options.limit ?? DEFAULT_BOARD_LIMIT],
+    [limit + 1],
   );
+  const truncated = fetched.length > limit;
+  const rows = truncated ? fetched.slice(0, limit) : fetched;
 
   const columns = (record.stages ?? []).map((stage) => ({ stage, cards: [] as BoardCard[] }));
   const byStage = new Map(columns.map((column) => [column.stage.name, column]));
@@ -253,7 +261,7 @@ export async function workspaceBoard(
     if (column === undefined) other.push(card);
     else column.cards.push(card);
   }
-  return { record, columns, other };
+  return { record, columns, other, limit, truncated };
 }
 
 export async function workspaceRecord(

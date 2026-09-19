@@ -1019,7 +1019,7 @@ prerenders.
 
 ---
 
-## Exit — Phase 2 exit assembly — ✅ Done (template #24 merged; the bar's "flat" is read as "bounded", to be confirmed)
+## Exit — Phase 2 exit assembly — ✅ Done (template #24 merged)
 
 The bar, from the plan: *the demo run approves two drafts with one edit, mailpit receives the send, a
 follow-up task appears, a label is recorded; pausing mid-run stops the next flow at its next step and resuming
@@ -1069,15 +1069,14 @@ number here.
 
 **Phase 2 is complete (2026-09-19).** Every chunk in the tracks above has landed and the exit bar's assertions run in
 the template's e2e suite. What is still open, none of it blocking:
-- **Decide:** whether the bar's "flat connection count" is restated as "bounded: no upward drift and a peak under the
-  limit" (the soak measured a peak of 9 against a budget of 24 and a limit of 25, and cannot be flat because `pg.Pool`
-  closes idle clients after 10 s); and whether the notifier's recipient read should exclude **banned** admins.
-- **Core, small:** `draftFields` should emit unambiguous paths (an additive `segments` on `DraftField`) so a draft key
-  containing `.` can be edited; `BoardView` should report the limit and whether it was hit, and `DEFAULT_BOARD_LIMIT`
-  should be exported from the `/workspace` subpath; `hf_score` has `spec_version` but no spec name; `@hyperfixation/testing`
-  has no `waitForRun`-style helper; `bootstrapAdmin` ignores `designatedEmail`; `migrate()` assumes provisioned roles and a
-  migrator-owned `public`.
-- **Template, small:** the C5 budget form; the template's own unrelated open PR #11 (the $10 dev budget note).
+- **Decided (Graham, 2026-09-19):** the bar's "flat connection count" is **restated as "bounded: no upward drift and a
+  peak under the limit"** (the soak measured a peak of 9 against a budget of 24 and a limit of 25, and cannot be flat
+  because `pg.Pool` closes idle clients after 10 s); and the notifier's recipient read **excludes banned users**.
+- **In flight (2026-09-19), one PR each:** core `draftFields` gains `segments` and `BoardView` reports `limit` and
+  `truncated` (and `DEFAULT_BOARD_LIMIT` on the `/workspace` subpath); core `hf_score.spec_name` (migration 0007) and
+  `waitForRun` in `@hyperfixation/testing`; core `bootstrapAdmin`'s `designatedEmail` contract and `migrate()`'s
+  role/ownership assumption; template banned-recipient exclusion and the C5 budget form.
+- **Template, unrelated:** the template's own open PR #11 (the $10 dev budget note).
 
 ---
 

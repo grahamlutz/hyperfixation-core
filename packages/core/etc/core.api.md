@@ -365,9 +365,11 @@ export interface BoardOptions {
 export interface BoardView {
     // (undocumented)
     columns: BoardColumn[];
+    limit: number;
     other: BoardCard[];
     // (undocumented)
     record: RecordDefinition;
+    truncated: boolean;
 }
 
 // @public
@@ -466,6 +468,7 @@ export interface DraftField {
     // (undocumented)
     readonly label: string;
     readonly path: string;
+    readonly segments: readonly (string | number)[];
     // (undocumented)
     readonly value: string;
 }
