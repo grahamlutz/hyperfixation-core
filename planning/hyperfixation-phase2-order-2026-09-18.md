@@ -297,7 +297,7 @@ question 1.
 > it is (d), not (c), that pins finding 8 — round 3's note that "`budget.test.ts` runs a 200-iteration stress
 > … and asserts zero `40P01`" should not be read as the regression test for the inverted order.
 
-### L5b — `withClock` and `budget.test.ts` (a) — ⬜ Not started, **shape decided 2026-09-18 via `/brainstorm`**
+### L5b — `withClock` and `budget.test.ts` (a) — ✅ Done (deviated — see note)
 
 **Decided: an injected clock, not a database-level override.** The three original candidates ((i) GUC +
 `ALTER DATABASE` + restart, (ii) a core-owned `hf_now()` function, (iii) a manual once-off run) are dropped
@@ -333,6 +333,54 @@ counts nothing against it.
 
 **Done:** (a) turns from `it.todo` to green; `redeploy-case-12` and `ledger-branches` still green (the stamp
 expression changed under them).
+
+> **Built, and where it differs from the wording above:** the seam is **`CreateLlmOptions.clock?: () => Date`,
+> owned by `createLlm` in `packages/ai/src/llm-run.ts`** — not `ControlPlane.attach`. `attach()` lives in
+> `@hyperfixation/core`, which `@hyperfixation/ai` does not and cannot depend on (the dependency runs the
+> other way), so the gate had no way to read a clock passed there. The *intent* of the decision is unchanged:
+> one optional injected clock, unset on every production path and in practice constructed only by
+> `@hyperfixation/testing`, no SQL `now()` override, no new function and no migration. Unset, the gate reads
+> the period from Postgres exactly as before — see the trade-off below. The alternatives considered and rejected for the same reason the doc rejects the GUC:
+> `LedgerContext`/`StepContext` would have routed a test knob through `workflows`' `step()` and
+> `startWorker()`, which is production surface.
+>
+> **Pinned, not offset.** `WorkerControl.clockAt?: string` (an ISO instant) replaces the planned
+> `clockOffsetMs`: an offset ticks relative to real time and a spawned worker takes seconds to reach ready,
+> so the instant a case arranges would drift by however long the launch took. The live advance is as planned
+> — a `clock <iso>` line on the worker's stdin, alongside `release`, exposed as `SpawnedWorker.setClock()`.
+> The stdin handler in `worker-module.ts` is now **line-based** rather than `chunk.includes(keyword)`,
+> because `clock <iso>` is the first message that carries an argument.
+>
+> **The dates are a century out, not September/October 2026.** Under the real current period the doc's
+> `2026-09`/`2026-10` would be indistinguishable from what SQL `now()` used to return, and the case would
+> pass whether or not the injected clock was ever consulted. It uses `2099-12-31T23:59:58Z` →
+> `2100-01-01T00:00:02Z`, which also makes the year rollover implicit. Verified by falsification: dropping
+> the `clock` argument from the case's first `createLlm` fails it on `period`.
+>
+> **Case (a) is in-process**, no worker: the period semantics live entirely in `openGate`/`complete`, and
+> L4 already proved a mid-flight park needs only a parked cassette. `ParkedCall` moved from
+> `kill-switch.test.ts` to `packages/ai/src/test-support/parked-call.ts` for that reuse, with kill-switch's
+> assertions untouched. The worker-side plumbing (`clockAt` + the `clock <iso>` line) is under test once, in
+> `packages/testing/src/spawn-worker.test.ts`.
+>
+> **Postgres is still the production time authority.** The gate's `SELECT` is byte-for-byte `origin/main`'s,
+> `to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM')` included, and the period comes from it whenever no clock is
+> injected; `periodOf(clock())` is taken *only* on the injected branch. A first cut defaulted the option to
+> `() => new Date()` and dropped the SQL, which was wrong: with N workers and host-clock skew S, for S
+> seconds around a month boundary two workers would stamp different periods, lock different
+> `hf_budget_period` rows and be unable to see each other's reservations. One database clock is precisely
+> what the SQL expression was buying, so "production never passes a clock" has to mean the production SQL is
+> unchanged too. There is **no** new single-read property to claim — `origin/main` already read the stamp
+> once per gate transaction into JS and bound it to every later statement, and that is untouched. The
+> completion still bills `gate.period`, `finished_at = now()` stays real time (audit time, not a billing
+> period), and `status.ts` and `reconcile()` are untouched — the invariant "billed to the period on its own
+> row" makes drift exact regardless of which month the reader is in.
+>
+> **Worth knowing:** the re-entry `UPDATE` re-stamps `period` to the *replaying* gate's month, by design. A
+> September `started` row re-entered in October bills October, and the row carries `possible_double_charge`
+> to say so. The only other `to_char(now() …)` readers left are two tests' own —
+> `packages/ai/src/test-support/ledger-harness.ts`'s `currentPeriod()` and a seed in
+> `ledger-branches.test.ts` — both real time, which agrees with the gate's default clock.
 
 ---
 
@@ -889,13 +937,15 @@ Questions only Graham can answer are **blockers** for the chunk named; the rest 
 orders against, to be overturned cheaply if wrong.
 
 1. **Decided 2026-09-18, via `/brainstorm` — an injected clock, not a database-level override.** None of
-   the three original SQL-level candidates won. `llm.run`'s gate takes its `clock: () => Date` through
-   `ControlPlane.attach()`, the same handle-passing seam `runs.start`/`decide()`/`reconcile()` already use;
-   it defaults to real time, and only `@hyperfixation/testing`'s worker module — a package production code
-   never imports — ever constructs a non-default one. `WorkerControl.clockOffsetMs` sets it at spawn; a new
-   stdin message (`clock <iso-timestamp>`, alongside the existing `release`) advances it live, without a
-   restart, which is what lets case (a) move the clock while the cassette still has the call parked. Full
-   reasoning and the rejected alternatives are under L5b.
+   the three original SQL-level candidates won. `llm.run`'s gate takes a `clock: () => Date` that defaults
+   to real time, and only `@hyperfixation/testing` — a package production code never imports — ever
+   constructs a non-default one. **Built 2026-09-19 with one correction:** the clock is handed to
+   `createLlm({ clock })` in `@hyperfixation/ai`, **not** to `ControlPlane.attach()`, which lives in
+   `@hyperfixation/core` and is invisible to `ai`; and the worker knob is `WorkerControl.clockAt` (a pinned
+   ISO instant) rather than `clockOffsetMs`, which would have drifted by however long the spawn took. The
+   live advance is as decided: a `clock <iso-timestamp>` stdin message alongside `release`, no restart,
+   which is what lets case (a) move the clock while the cassette still has the call parked. Full reasoning
+   and the rejected alternatives are under L5b.
 2. **Decided 2026-09-18 — descriptors, template renders.** `@hyperfixation/core/workspace` ships descriptors,
    not React components. Components would make a core release an upgrade (the template's `/w` page says
    exactly that) at the cost of `react` as a peer of `core`, server actions the app must bind (the

@@ -23,6 +23,9 @@ export const WORKER_SHUTDOWN = "shutdown";
 /** Written to the worker's stdin to let every parked `parkFor()` go. */
 export const WORKER_RELEASE = "release";
 
+/** `clock <iso>` on the worker's stdin re-pins `workerClock()`, live, with no restart. */
+export const WORKER_CLOCK = "clock";
+
 /**
  * Where a step is held relative to its DBOS checkpoint. The checkpoint is written after the
  * step body returns and before `runStep` resolves (`dbos-executor.js:768-780`), which is what
@@ -62,5 +65,11 @@ export interface WorkerControl {
   drainMs?: number;
   /** Where the worker parks, for `killWhenParked()` to kill it or `release()` to let it go. */
   killAt?: KillAtControl;
+  /**
+   * An ISO timestamp `workerClock()` is pinned to from the worker's first read. Pinned rather
+   * than an offset: a spawned worker takes seconds to reach ready, and an offset would carry
+   * that delay into whatever instant the case is arranging.
+   */
+  clockAt?: string;
   [knob: string]: unknown;
 }

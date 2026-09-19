@@ -6,6 +6,7 @@ export {
   type TestDatabase,
 } from "./database.js";
 export { setTestBuildSha, testBuildSha, TEST_BUILD_SHA_PREFIX } from "./build-sha.js";
+export { withClock, type TestClock } from "./clock.js";
 export { fencingFailureOf, FencingFailureInTest, type FencingFailure } from "./fencing.js";
 export {
   assertNoFencingFailure,
@@ -33,6 +34,7 @@ export { killAt, killWhenParked } from "./kill-at.js";
 export {
   parkedMarker,
   WORKER_APP_NAME_ENV,
+  WORKER_CLOCK,
   WORKER_CONTROL_ENV,
   WORKER_DATABASE_URL_ENV,
   WORKER_FAILED,

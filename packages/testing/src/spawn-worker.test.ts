@@ -8,6 +8,9 @@ const STEP_POOL_WORKER = fileURLToPath(
   new URL("./test-modules/step-pool-worker.ts", import.meta.url),
 );
 
+/** The same literal that module prints; it cannot be imported without running the worker. */
+const TICK_MARKER = "step-pool-worker: clock";
+
 /**
  * The pipeline this package exists to give every other one: a database of its own, a worker
  * process spawned against it, and a clean shutdown. The worker that launches DBOS lives in
@@ -70,6 +73,29 @@ describe("spawnWorker against a per-run database", () => {
 
     expect(exit).toEqual({ code: 0, signal: null });
   }, 60_000);
+
+  it("pins the worker's clock at spawn and moves it live over stdin", async () => {
+    const pinned = spawnWorker({
+      module: STEP_POOL_WORKER,
+      appName: database.appName,
+      databaseUrl: database.applicationUrl,
+      control: { clockAt: "2099-12-31T23:59:58Z" },
+    });
+
+    try {
+      await pinned.ready();
+      pinned.send("tick");
+      await pinned.waitFor(`${TICK_MARKER} 2099-12-31T23:59:58.000Z`);
+
+      // Live, with no restart: a worker holding a parked call is what this exists for.
+      pinned.setClock("2100-01-01T00:00:02Z");
+      pinned.send("tick");
+      await pinned.waitFor(`${TICK_MARKER} 2100-01-01T00:00:02.000Z`);
+      assertNoFencingFailure(pinned);
+    } finally {
+      await pinned.kill();
+    }
+  }, 120_000);
 
   it("rejects ready() with the worker's own message when it never comes up", async () => {
     const doomed = spawnWorker({

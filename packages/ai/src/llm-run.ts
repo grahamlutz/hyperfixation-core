@@ -35,6 +35,13 @@ export interface CreateLlmOptions {
   providers: ProviderRegistry;
   /** Where `prompt` names resolve: one directory of `.md` files. */
   promptsDir: string;
+  /**
+   * Where the gate takes a row's billing period from, for tests that need to move a month
+   * boundary. Left unset — which is what the production wiring does — the period comes from
+   * Postgres, the single time authority every worker agrees on. An app that does pass one bills
+   * against whatever month that function returns.
+   */
+  clock?: () => Date;
 }
 
 export interface Llm {
@@ -80,10 +87,10 @@ interface StoredError {
  * `llm.run(…)`, the name the plan and every flow use, bound to a registry and a prompt
  * directory. An app builds one at startup; a test builds one per call.
  */
-export function createLlm({ providers, promptsDir }: CreateLlmOptions): Llm {
+export function createLlm({ providers, promptsDir, clock }: CreateLlmOptions): Llm {
   return {
     run: <O,>(ctx: LedgerContext, options: LlmRunOptions): Promise<O> =>
-      runCall<O>(ctx, options, providers, promptsDir),
+      runCall<O>(ctx, options, providers, promptsDir, clock),
   };
 }
 
@@ -106,6 +113,7 @@ async function runCall<O>(
   options: LlmRunOptions,
   providers: ProviderRegistry,
   promptsDir: string,
+  clock: (() => Date) | undefined,
 ): Promise<O> {
   // Both throw before the gate opens: an unknown name or a missing file leaves no row and
   // makes no call.
@@ -130,7 +138,7 @@ async function runCall<O>(
     traceId: trace.getActiveSpan()?.spanContext().traceId,
   };
 
-  const gate = await openGate(ctx, call);
+  const gate = await openGate(ctx, call, clock);
   if (gate.kind === "cached") return gate.output as O;
   // Committed before it is thrown: a failed call is not retried by replay, so the row that
   // records the failure has to outlive this attempt just as an `ok` row does.
@@ -234,13 +242,21 @@ async function callProvider(
  * *is* the reservation — nothing else records it, and an old row re-entering is budget-checked
  * exactly like a fresh one.
  */
-async function openGate(ctx: LedgerContext, call: LedgeredCall): Promise<GateOutcome> {
+async function openGate(
+  ctx: LedgerContext,
+  call: LedgeredCall,
+  clock: (() => Date) | undefined,
+): Promise<GateOutcome> {
   return ctx.tx(async (db) => {
     const state = await db.execute<{ paused: boolean; period: string }>(sql`
       SELECT COALESCE((SELECT paused FROM hf_app_state WHERE id = 1), false) AS paused,
              to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM') AS period
     `);
-    const { paused, period } = state.rows[0]!;
+    const { paused } = state.rows[0]!;
+    // Postgres stays the single time authority whenever no clock is injected: N workers with
+    // skewed host clocks would otherwise stamp different periods around a boundary and lock
+    // different `hf_budget_period` rows, unable to see each other's reservations.
+    const period = clock === undefined ? state.rows[0]!.period : periodOf(clock());
     if (paused) throw new AppPaused(ctx.runId, call.key);
 
     // Created by the first gate of the month from `hf_app_state.budget_usd`; there is no
@@ -379,6 +395,11 @@ async function recordProviderError(
       WHERE run_id = ${ctx.runId} AND key = ${call.key}
     `);
   });
+}
+
+/** An injected clock's UTC month, in the format the gate's `to_char` produces. */
+function periodOf(at: Date): string {
+  return `${at.getUTCFullYear()}-${String(at.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
 function storedErrorOf(row: LedgerRow): Error {

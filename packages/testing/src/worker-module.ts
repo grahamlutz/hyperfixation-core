@@ -5,10 +5,12 @@
  * a module like this one.
  */
 import { DBOS } from "@dbos-inc/dbos-sdk";
+import { withClock, type TestClock } from "./clock.js";
 import { fencingFailureOf } from "./fencing.js";
 import {
   parkedMarker,
   WORKER_APP_NAME_ENV,
+  WORKER_CLOCK,
   WORKER_CONTROL_ENV,
   WORKER_DATABASE_URL_ENV,
   WORKER_FAILED,
@@ -56,6 +58,22 @@ export function workerControl<C extends WorkerControl = WorkerControl>(): C {
 
 const parked = new Set<() => void>();
 
+/** Real time until `control.clockAt` or a `clock <iso>` line pins it. */
+let pinnedClock: TestClock | undefined;
+
+/**
+ * The clock a fixture hands to `createLlm({ clock })` inside the step. Live, so a `clock <iso>`
+ * line sent while a call is parked at the provider moves the period the completion bills to.
+ */
+export function workerClock(): () => Date {
+  return () => pinnedClock?.() ?? new Date();
+}
+
+/** Pins the worker's clock; throws on anything `Date.parse` refuses. */
+export function setWorkerClock(at: string | Date): void {
+  pinnedClock = withClock(at);
+}
+
 /**
  * The child half of `killAt`. A flow module calls this at each of the three points and the
  * call that matches the worker's `killAt` control prints the marker and then **stops** —
@@ -97,6 +115,9 @@ export async function runWorkerModule<C extends WorkerControl = WorkerControl>(
   if (control.drainMs !== undefined && control.drainMs > 0) delayDrain(control.drainMs);
 
   try {
+    // Inside the try so an unparseable `clockAt` fails the worker with a marker rather than an
+    // unhandled rejection the harness can only see as a timeout.
+    if (control.clockAt !== undefined) setWorkerClock(control.clockAt);
     await options.start({
       appName: required(WORKER_APP_NAME_ENV),
       databaseUrl: required(WORKER_DATABASE_URL_ENV),
@@ -112,18 +133,42 @@ export async function runWorkerModule<C extends WorkerControl = WorkerControl>(
   // A launched worker's dispatch loops hold the process open; stdin is how a test asks it to
   // stop without a signal. SIGTERM is `startWorker()`'s own to handle.
   process.stdin.setEncoding("utf8");
+  // Line by line rather than per chunk: `clock <iso>` carries an argument, so a handler that
+  // only asked whether a chunk contained a keyword could not read one.
+  let pending = "";
   process.stdin.on("data", (chunk: string) => {
-    if (chunk.includes(WORKER_RELEASE)) releaseParked();
-    if (!chunk.includes(WORKER_SHUTDOWN)) return;
-    const shutdown = options.shutdown ?? (() => DBOS.shutdown());
-    shutdown().then(
-      () => process.exit(0),
-      (error: unknown) => {
-        console.error(error);
-        process.exit(1);
-      },
-    );
+    pending += chunk;
+    const lines = pending.split("\n");
+    pending = lines.pop() ?? "";
+    for (const line of lines) handleLine(line.trim(), options);
   });
+}
+
+function handleLine<C extends WorkerControl>(
+  line: string,
+  options: WorkerModuleOptions<C>,
+): void {
+  if (line === WORKER_RELEASE) {
+    releaseParked();
+    return;
+  }
+  if (line.startsWith(`${WORKER_CLOCK} `)) {
+    try {
+      setWorkerClock(line.slice(WORKER_CLOCK.length + 1));
+    } catch (error) {
+      reportWorkerFailure(error);
+    }
+    return;
+  }
+  if (line !== WORKER_SHUTDOWN) return;
+  const shutdown = options.shutdown ?? (() => DBOS.shutdown());
+  shutdown().then(
+    () => process.exit(0),
+    (error: unknown) => {
+      console.error(error);
+      process.exit(1);
+    },
+  );
 }
 
 /**

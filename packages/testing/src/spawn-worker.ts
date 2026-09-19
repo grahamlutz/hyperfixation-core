@@ -2,9 +2,11 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { testBuildSha } from "./build-sha.js";
+import { parseClock } from "./clock.js";
 import { FencingFailureInTest, type FencingFailure } from "./fencing.js";
 import {
   WORKER_APP_NAME_ENV,
+  WORKER_CLOCK,
   WORKER_CONTROL_ENV,
   WORKER_DATABASE_URL_ENV,
   WORKER_FAILED,
@@ -69,6 +71,8 @@ export interface SpawnedWorker {
   send(line: string): void;
   /** Lets a worker parked by `parkFor()` carry on from where it stopped. */
   release(): void;
+  /** Re-pins the worker's `workerClock()`, live — a running worker never restarts for it. */
+  setClock(at: string | Date): void;
   /** Asks for a clean shutdown over stdin; resolves with the exit. */
   shutdown(): Promise<WorkerExit>;
   /** `SIGKILL`, which is also how a worker's advisory lock is released in production. */
@@ -211,6 +215,9 @@ export function spawnWorker(options: SpawnWorkerOptions): SpawnedWorker {
     send,
     release(): void {
       send(WORKER_RELEASE);
+    },
+    setClock(at: string | Date): void {
+      send(`${WORKER_CLOCK} ${new Date(parseClock(at)).toISOString()}`);
     },
     shutdown(): Promise<WorkerExit> {
       send(WORKER_SHUTDOWN);

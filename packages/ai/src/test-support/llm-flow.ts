@@ -17,7 +17,7 @@ import {
   type KillAtControl,
   type WorkerControl,
 } from "@hyperfixation/testing";
-import { parkFor, workerControl } from "@hyperfixation/testing/worker";
+import { parkFor, workerClock, workerControl } from "@hyperfixation/testing/worker";
 import { defineFlow, step, type Flow } from "@hyperfixation/workflows";
 import { createLlm } from "../llm-run.js";
 import { createProviders, fixedCost } from "../providers.js";
@@ -97,6 +97,7 @@ function ledgerFor(model: LanguageModelV4, input: LlmFlowInput): ReturnType<type
       costs: { [MOCK_MODEL_ID]: fixedCost(input.estimatedCostUsd, input.costUsd) },
     }),
     promptsDir: PROMPTS_DIR,
+    clock: workerClock(),
   });
 }
 
