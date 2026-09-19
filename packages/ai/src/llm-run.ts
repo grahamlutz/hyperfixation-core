@@ -29,6 +29,17 @@ export interface LlmRunOptions {
   input: unknown;
   /** When set, the call asks for JSON and the answer is parsed rather than returned as text. */
   schema?: JSONSchema7;
+  /**
+   * Handed the ledger row once it is reserved — and on a replay that returns the cached output,
+   * where there is no new row but the old one is still what the call is. A scorer uses it to
+   * fill `hf_score.llm_call_id`. Never called for a call that never reached a row.
+   */
+  onCall?: (call: LlmCall) => void;
+}
+
+/** The `hf_llm_call` row one `llm.run` is ledgered on: what `hf_score.llm_call_id` points at. */
+export interface LlmCall {
+  id: number;
 }
 
 export interface CreateLlmOptions {
@@ -49,8 +60,8 @@ export interface Llm {
 }
 
 type GateOutcome =
-  | { kind: "reserved"; period: string }
-  | { kind: "cached"; output: unknown }
+  | { kind: "reserved"; period: string; id: number }
+  | { kind: "cached"; output: unknown; id: number }
   | { kind: "failed"; error: Error };
 
 /** Everything the two transactions write, resolved before either of them opens. */
@@ -73,6 +84,7 @@ interface ProviderAnswer {
 }
 
 interface LedgerRow extends Record<string, unknown> {
+  id: string;
   status: string;
   input_hash: string;
   output: unknown;
@@ -139,10 +151,11 @@ async function runCall<O>(
   };
 
   const gate = await openGate(ctx, call, clock);
-  if (gate.kind === "cached") return gate.output as O;
   // Committed before it is thrown: a failed call is not retried by replay, so the row that
   // records the failure has to outlive this attempt just as an `ok` row does.
   if (gate.kind === "failed") throw gate.error;
+  options.onCall?.({ id: gate.id });
+  if (gate.kind === "cached") return gate.output as O;
 
   const startedAt = Date.now();
   let answer: ProviderAnswer;
@@ -289,15 +302,16 @@ async function openGate(
       ON CONFLICT (run_id, key) DO NOTHING
     `);
     const read = await db.execute<LedgerRow>(sql`
-      SELECT status, input_hash, output, period FROM hf_llm_call
+      SELECT id::text AS id, status, input_hash, output, period FROM hf_llm_call
       WHERE run_id = ${ctx.runId} AND key = ${call.key}
     `);
     const row = read.rows[0]!;
+    const id = Number(row.id);
 
     if (row.input_hash !== call.inputHash) {
       throw new LedgerKeyCollision(ctx.runId, call.key, row.input_hash, call.inputHash);
     }
-    if (row.status === "ok") return { kind: "cached", output: row.output } as const;
+    if (row.status === "ok") return { kind: "cached", output: row.output, id } as const;
     if (row.status === "error") return { kind: "failed", error: storedErrorOf(row) } as const;
 
     // Only rows a live attempt can still complete count: a dead attempt's row stops reserving
@@ -340,7 +354,7 @@ async function openGate(
         WHERE run_id = ${ctx.runId} AND key = ${call.key}
       `);
     }
-    return { kind: "reserved", period } as const;
+    return { kind: "reserved", period, id } as const;
   });
 }
 

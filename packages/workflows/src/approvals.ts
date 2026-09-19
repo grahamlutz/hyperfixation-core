@@ -467,6 +467,16 @@ function assertDecidable(
   const parsed = new Map<number, unknown>();
   const found = new Set(locked.map((row) => Number(row.id)));
   for (const id of ids) {
+    // `ids` is typed `number[]`, but a caller crossing a query string or a JSON body can still
+    // hand a numeric string: Postgres accepts it, `found` is keyed by number, and the row would
+    // be reported missing when it is right there.
+    if (typeof (id as unknown) !== "number") {
+      reasons.push({
+        approvalId: Number(id),
+        reason: `was given as a ${typeof (id as unknown)}, not a number`,
+      });
+      continue;
+    }
     if (!found.has(id)) reasons.push({ approvalId: id, reason: "has no hf_approval row" });
   }
   // `archive` and `sweep` carry no human decider — the record went, or the row timed out — so

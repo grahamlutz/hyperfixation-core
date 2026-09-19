@@ -279,6 +279,19 @@ describe("approvals.decide", () => {
     await expect(decision({ ids: [987_654] })).rejects.toThrow(/has no hf_approval row/);
   });
 
+  it("names the type mismatch when an id arrives as a numeric string", async () => {
+    const runId = runIdFor("string-id");
+    await startRun(runId);
+    const id = await pending(runId);
+
+    // What a query string or a JSON body hands a route that forgot to coerce: the row is right
+    // there, so "has no hf_approval row" would send the reader looking for a missing row.
+    await expect(decision({ ids: [String(id) as unknown as number] })).rejects.toThrow(
+      /was given as a string, not a number/,
+    );
+    expect(await approval(id)).toMatchObject({ status: "pending" });
+  });
+
   it("is refused from inside a run before it touches the database", async () => {
     const inWorkflow = vi.spyOn(DBOS, "isWithinWorkflow").mockReturnValue(true);
     try {

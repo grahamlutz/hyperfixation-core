@@ -13,8 +13,11 @@ export {
   type CreateLlmOptions,
   type LedgerContext,
   type Llm,
+  type LlmCall,
   type LlmRunOptions,
 } from "./llm-run.js";
+/** Re-exported so an app can type a hoisted `LlmRunOptions.schema` constant without deriving it. */
+export type { JSONSchema7 } from "@ai-sdk/provider";
 export {
   createProviders,
   fixedCost,

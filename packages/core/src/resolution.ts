@@ -66,7 +66,10 @@ export interface ResolveBatchResult {
   updated: number;
   review: number;
   error: number;
-  /** False while the scan filled its `limit`, so the caller has another batch to run. */
+  /**
+   * False while the scan filled its `limit` *and* the batch moved at least one row out of the
+   * scan, so the caller has another batch to run.
+   */
   done: boolean;
 }
 
@@ -168,7 +171,6 @@ export async function resolveBatch(
   const scanned = await client.query<ScanRow>(SCAN_STATEMENT, [source, maxAttempts, limit]);
   const rows = scanned.rows;
   result.scanned = rows.length;
-  result.done = rows.length < limit;
   if (rows.length === 0) return result;
 
   const linked = await client.query<{ source_record_id: string; record_id: string }>(
@@ -244,6 +246,12 @@ export async function resolveBatch(
     }
   }
 
+  // A `review` row stays scannable, so a full batch that moved nothing would be handed back
+  // identically forever and a `while (!done)` loop would never end. An `error` row counts as
+  // movement: its `attempts` climbs towards `maxAttempts`, which does take it out of the scan.
+  const moved =
+    result.linkedExact + result.linkedFuzzy + result.created + result.updated + result.error;
+  result.done = rows.length < limit || moved === 0;
   return result;
 
   async function resolveRow(row: ScanRow, keys: string[] | undefined): Promise<Outcome> {
