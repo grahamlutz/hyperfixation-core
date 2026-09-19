@@ -47,6 +47,8 @@
     "@hyperfixation/testing": "workspace:*",
     "@microsoft/api-extractor": "^7.59.1",
     "@types/pg": "^8.23.1",
-    "eslint": "^10.10.0"
+    "eslint": "^10.10.0",
+    "msw": "2.15.0",
+    "openapi-request-validator": "12.1.3"
   }
 }

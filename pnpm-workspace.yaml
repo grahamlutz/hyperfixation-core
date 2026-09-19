@@ -3,3 +3,6 @@ packages:
 
 allowBuilds:
   esbuild: true
+  # msw's postinstall only copies its browser service worker into a public directory; the CLI's
+  # tests use setupServer, which needs none of it.
+  msw: false
