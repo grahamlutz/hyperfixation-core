@@ -393,13 +393,26 @@ duplicate/unknown errors. `core.api.md` will grow a great deal here; regenerate 
 **Done:** `registry.test.ts` extended for the new kinds; a spec test — scoring against version 2 leaves
 version 1's `hf_score` rows and writes new ones; a schedule under a paused app starts no run.
 
-### C2 — The COPY loader and `hf_source_run` — ⬜ Not started
+### C2 — The COPY loader and `hf_source_run` — ✅ Done (deviated — see note)
 
 In `@hyperfixation/db` (the layout puts "COPY loader" there): `pg-copy-streams` into a per-run `UNLOGGED`
 staging table, `INSERT … SELECT DISTINCT ON (source, external_id) … ON CONFLICT DO UPDATE` into
 `hf_source_record` with `payload_hash`, all inside one `ctx.tx` (the classifier counts `COPY` as a write and
 the tagged client allows it — `fenced-client.test.ts` already proves the classification). `hf_source_run`
 bookkeeping: `rows_in`, `rows_new`, `rows_changed`.
+
+> **Built, and where it differs from the wording above:** the staging table is `CREATE TEMP TABLE … ON COMMIT
+> DROP`, not `UNLOGGED` — the application role holds `USAGE` but not `CREATE` on `public` (`roles.ts`), so
+> `CREATE UNLOGGED TABLE` is refused with 42501; `TEMP` is granted to `PUBLIC`, has the same no-WAL property,
+> and `ON COMMIT DROP` makes the cleanup structural. `loadSource(tx, source, rows)` lives in
+> `packages/db/src/loader.ts` and takes rows structurally (`SourceRowInput`), because `db` cannot import
+> `core`; `core`'s `SourceRow<P>` is assignable. Within a batch the **last** occurrence of an external id
+> wins. `payload_hash` is computed in SQL over `payload::text` (jsonb's canonical form, so key order does not
+> change it), never in TypeScript. A changed payload rewrites `payload`/`payload_hash`/`run_id` and resets the
+> record to `status = 'new'`, `attempts = 0`, `error = NULL` for C3 to re-resolve; an unchanged one moves only
+> `last_seen`, keeping `first_seen`, `status`, `run_id` and `attempts`. `hf_record_link` is never touched. The
+> loader writes only `running` → `ok`: a throw anywhere propagates and `ctx.tx` rolls the whole load back, so
+> `hf_source_run.status = 'error'` stays unused until C3/T2 own retries.
 
 **Done:** `pnpm --filter @hyperfixation/db test loader` — a batch with a duplicate external id loads once;
 the staging table is gone after commit; an unchanged payload leaves `last_seen` moved and `payload_hash`
