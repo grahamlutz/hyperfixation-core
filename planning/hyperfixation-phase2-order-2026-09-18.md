@@ -724,7 +724,7 @@ The gate assertion is end-to-end: a gate at the app default opens the month's ro
 is refused with `BudgetExceeded`, the admin raises the period's budget, and **the same call then goes
 through** — then a budget of 0, below what the period spent, refuses the one after it.
 
-### C6 — The workspace — 🚧 In progress (C6.1–C6.4 landed; C6.5–C6.7 open), **descriptors, template renders**
+### C6 — The workspace — 🚧 In progress (C6.1–C6.6 landed; C6.7 open), **descriptors, template renders**
 
 **Decided (Graham, 2026-09-19):** (1) scope is the **full spec** — home, approval inbox with batch approve and
 inline edit, pipeline board, record page with timeline — **split into PRs**: the core descriptors first, then the
@@ -818,6 +818,29 @@ under a bump race (does a stale attempt get `StaleAttempt` before sending?) and 
 > exist, nothing outside the `hf` CLI provisions them, and it assumes `public` is owned by the migrator, so a plain
 > `CREATE DATABASE` then `pnpm migrate` fails twice first; `RecordView.row` is a raw `Record<string, unknown>` with SQL
 > column names, so a template re-implements labelling — a `draftFields`-style flattening would remove that.
+
+> **C6.6 built (template #20):** `board.tsx`, a read-only board at `/w/:recordType` — a column per registered stage in
+> order, "Other" only when non-empty, per-column counts, cards linking to the record page; columns wrap on a phone.
+> It shows "showing first N" when a full page comes back. Findings for core, open: `BoardView` reports neither the
+> limit used nor whether it was hit, so truncation is inferred from a full page; `DEFAULT_BOARD_LIMIT` is exported from
+> `@hyperfixation/core` but not from the framework-light `/workspace` subpath the template renders from.
+>
+> **C6.5 built (template #21), and its adversary:** `/w/approvals` (batch approve/reject with inline edit, one
+> `workspace.decide` call, a `decisionKey` minted in the browser once per mount but seeded from the server render's
+> uuid so the field is filled before hydration and with JS off) and `/w/approvals/:id` (the page C6.7's email link opens;
+> a decided or invisible approval is a 404). A refusal returns as `?error=` (bounded, rendered as text; only
+> `ApprovalBatchRefused` is caught). The e2e drives the **real draft flow**. **Three breaks were found and fixed before
+> merge:** (1) `draftFields` joins keys with `.` unescaped and the template's `setAtPath` walked the result through the
+> prototype chain, so a draft key `__proto__.polluted` plus an edit set `Object.prototype.polluted` in the server
+> process; (2) two fields with the same path (`{"a.b": …, a: {b: …}}`) shared an input name, so an edit landed in the
+> wrong field; (3) a stored `\r\n` posted back with the CR stripped, turning an untouched field into an edit. The fix is
+> `editablePaths()` in `decide-form.ts`: a field is editable only if its path is unique among the item's fields and
+> resolves through **own** properties to an existing scalar (`__proto__`/`constructor`/`prototype` refused); anything
+> else renders as read-only text (a literal key containing `.` included), and line endings are normalised on both
+> sides of the compare. Everything else held (authorization from the session only, forged/blank/shared keys,
+> `?error=` and `returnTo`, item visibility). **Open finding for core:** `draftFields` should emit unambiguous
+> paths (an additive `segments: readonly (string | number)[]` on `DraftField`), so the template can make a dotted key
+> editable instead of read-only.
 
 **Done:** `pnpm --filter @hyperfixation/core test workspace` (escaping; a batch decision with one edit reaches
 `decide()` with that edit and one `decisionKey`); the template's e2e extended — sign in, see the inbox, approve
@@ -1005,7 +1028,7 @@ number here.
 |---|---|---|---|---|
 | **L — ledger** (L1–L5b) | `ai` (+ one `startWorker` hook in `workflows` for L2) | chunk 0 | T2 needs L1; Exit needs all | ✅ L1–L5b done |
 | **P — approvals and actions** (P1–P4) | `workflows` | chunk 0 | T2 needs P1, P2; Exit needs all | ✅ P1–P4 done |
-| **C — core** (C1–C6) | `core`, `db` (C2), `admin` (C5) | chunk 0 | T2 needs C1–C4; Exit needs C6 | 🚧 C1–C5 and C6.1–C6.4 done; C6.5–C6.7 open (template) |
+| **C — core** (C1–C6) | `core`, `db` (C2), `admin` (C5) | chunk 0 | T2 needs C1–C4; Exit needs C6 | 🚧 C1–C5 and C6.1–C6.6 done; C6.7 open (template) |
 | **T — testing and template** (T1–T3) | `testing`, `hyperfixation-template` | chunk 0 for T1; the others as listed | Exit | 🚧 T1, T0, T2 done; T3 open |
 
 **Execution model.** Chunk 0 is one PR by one head, first. After it the three tracks are genuinely
