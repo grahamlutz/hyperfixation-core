@@ -32,7 +32,7 @@ running the suite: "Done" means built with its gate case committed, not observed
 | `hyperfixation-template` and `compose-envs.test.ts` | ✅ Done |
 | `redeploy.test.ts` | ✅ Done — all twelve cases (case 5 at 51bc37e; case 7 with three deviations — see chunk 14 in the ordering doc) |
 | `fence.test.ts` | ✅ Done (deviated — case (vii)'s `records.archive()` half is in `@hyperfixation/core`'s tests, because `db` cannot import `core`) |
-| Phase 2 | 🚧 In progress — chunks 0, L1–L5b, P1–P3, C1–C5, T1, T0, T2a and T2b landed (open: P4, C6, T2c, T2d, T3, exit); per-chunk status in [hyperfixation-phase2-order-2026-09-18.md](hyperfixation-phase2-order-2026-09-18.md) |
+| Phase 2 | 🚧 In progress — chunks 0, L1–L5b, P1–P4, C1–C5, T1, T0 and T2a–T2c landed (open: C6 — planned as C6.1–C6.7, T2d, T3, exit); per-chunk status in [hyperfixation-phase2-order-2026-09-18.md](hyperfixation-phase2-order-2026-09-18.md) |
 | Phases 3–7 | ⬜ Not started |
 
 ## Adversary findings: disposition
