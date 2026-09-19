@@ -770,8 +770,7 @@ export interface ScorerDefinition<R = unknown, C = unknown> {
     readonly name: string;
     // (undocumented)
     readonly recordType: string;
-    // (undocumented)
-    score(record: R, criteria: C): Promise<Scored>;
+    score(record: R, criteria: C, ctx: StepContext): Promise<Scored>;
     // (undocumented)
     readonly spec: SpecDefinition<C>;
 }

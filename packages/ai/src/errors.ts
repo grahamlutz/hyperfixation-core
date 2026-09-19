@@ -62,6 +62,23 @@ export class UnknownPrompt extends Error {
   }
 }
 
+/**
+ * The fixture provider has no canned answer for this call. Never a default answer, for the same
+ * reason `CassetteExhausted` is not one: a call the fixtures did not arrange is a real gap, and
+ * inventing a plausible draft would hide it.
+ */
+export class FixtureMissing extends Error {
+  readonly model: string;
+  readonly file: string;
+
+  constructor(model: string, file: string, reason: string, options?: { cause?: unknown }) {
+    super(`FixtureMissing: ${model} was called but ${JSON.stringify(file)} ${reason}`, options);
+    this.name = "FixtureMissing";
+    this.model = model;
+    this.file = file;
+  }
+}
+
 export class BudgetExceeded extends Error {
   readonly period: string;
   readonly budgetUsd: string;

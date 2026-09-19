@@ -7,6 +7,7 @@ import {
 import { DuplicateRegistration } from "@hyperfixation/core";
 import { Pool } from "pg";
 import { afterAll, describe, expect, it, vi } from "vitest";
+import { approvalsResource, budgetPeriodsResource, runsResource } from "./machinery.js";
 import { resourceFromTable } from "./resource.js";
 import { ADMIN_BASE_PATH, createAdminRouter } from "./router.js";
 import { usersResource } from "./users.js";
@@ -82,6 +83,22 @@ describe("what the admin router resolves for an admin", () => {
     });
   });
 
+  it("resolves each machinery resource to its list", async () => {
+    await expect(router.route(["approvals"])).resolves.toEqual({
+      kind: "list",
+      resource: approvalsResource,
+    });
+    await expect(router.route(["runs"])).resolves.toEqual({
+      kind: "list",
+      resource: runsResource,
+    });
+    await expect(router.route(["budget-periods", "2026-09"])).resolves.toEqual({
+      kind: "detail",
+      resource: budgetPeriodsResource,
+      id: "2026-09",
+    });
+  });
+
   it("resolves nothing for an unregistered resource or a path too deep", async () => {
     await expect(router.route(["widgets"])).resolves.toBeUndefined();
     await expect(router.route(["users", "u-lost", "edit"])).resolves.toBeUndefined();
@@ -99,6 +116,16 @@ describe("the guard at the admin router's entry point", () => {
       outcome: "not-found",
       refusal: "missing-role",
     });
+  });
+
+  it("refuses a member on every machinery resource, not only on users", async () => {
+    for (const name of ["users", "approvals", "runs", "budget-periods"]) {
+      const { host, router } = routerFor(session("passkey", "member"));
+
+      await expect(router.route([name])).rejects.toBeInstanceOf(AccessRefused);
+      expect(host.notFound).toHaveBeenCalledTimes(1);
+      expect(host.notFound.mock.calls[0]?.[0]).toMatchObject({ outcome: "not-found" });
+    }
   });
 
   it("refuses a stranger with not-found rather than a sign-in redirect", async () => {
@@ -160,7 +187,7 @@ describe("the guard at the admin router's entry point", () => {
 });
 
 describe("the resources the router holds", () => {
-  it("registers users, and whatever else the app hands it", async () => {
+  it("registers the built-in resources, and whatever else the app hands it", async () => {
     const sessions = resourceFromTable(hfSession, { name: "sessions", list: ["token"] });
     const host = hostFor(session("passkey", "admin"));
     const router = createAdminRouter({
@@ -169,7 +196,13 @@ describe("the resources the router holds", () => {
       resources: [sessions],
     });
 
-    expect(router.resources.names()).toEqual(["users", "sessions"]);
+    expect(router.resources.names()).toEqual([
+      "users",
+      "approvals",
+      "runs",
+      "budget-periods",
+      "sessions",
+    ]);
     await expect(router.route(["sessions"])).resolves.toEqual({
       kind: "list",
       resource: sessions,
