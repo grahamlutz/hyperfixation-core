@@ -20,23 +20,23 @@ import { ZodType } from 'zod';
 // @public
 export const ABANDON_LLM_CALLS_STATEMENT: string;
 
-// @public (undocumented)
-export interface ActionChannel {
+// @public
+export interface ActionChannel<Req = unknown> {
     readonly dedupes: boolean;
     // (undocumented)
     readonly name: string;
     // (undocumented)
-    send(dispatch: ActionDispatch): Promise<ActionResult>;
+    send(dispatch: ActionDispatch<Req>): Promise<ActionResult>;
 }
 
 // @public
-export interface ActionDispatch {
+export interface ActionDispatch<Req = unknown> {
     // (undocumented)
     idempotencyKey: string;
     // (undocumented)
     key: string;
     // (undocumented)
-    request: unknown;
+    request: Req;
     // (undocumented)
     runId: string;
 }
@@ -55,16 +55,16 @@ export const actions: {
 };
 
 // @public (undocumented)
-export interface ActionsPerformOptions {
+export interface ActionsPerformOptions<Req = unknown> {
     // (undocumented)
-    channel: ActionChannel;
+    channel: ActionChannel<Req>;
     key: string;
     // (undocumented)
     recordId?: string;
     // (undocumented)
     recordType?: string;
     // (undocumented)
-    request?: unknown;
+    request?: Req;
 }
 
 // @public
@@ -408,7 +408,7 @@ export const PAUSED_QUEUES: readonly ["llm", "actions"];
 export const PAUSED_RUNS_STATEMENT: string;
 
 // @public
-export function perform(ctx: StepContext, options: ActionsPerformOptions): Promise<ActionResult>;
+export function perform<Req>(ctx: StepContext, options: ActionsPerformOptions<Req>): Promise<ActionResult>;
 
 // @public (undocumented)
 export interface PeriodDrift {
