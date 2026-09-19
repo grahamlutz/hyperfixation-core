@@ -1,3 +1,4 @@
+import type { StepContext } from "@hyperfixation/workflows";
 import type { SpecDefinition } from "./specs.js";
 
 /** What a scorer returns; `writeScore` takes the same fields. */
@@ -12,7 +13,8 @@ export interface ScorerDefinition<R = unknown, C = unknown> {
   readonly name: string;
   readonly recordType: string;
   readonly spec: SpecDefinition<C>;
-  score(record: R, criteria: C): Promise<Scored>;
+  /** `ctx` is what an LLM-assigned score needs: `llm.run` ledgers against it. */
+  score(record: R, criteria: C, ctx: StepContext): Promise<Scored>;
 }
 
 export function defineScorer<R, C>(definition: ScorerDefinition<R, C>): ScorerDefinition<R, C> {
