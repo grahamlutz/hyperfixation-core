@@ -167,6 +167,7 @@ function announcing(
 function announcingChannel(): ActionChannel {
   return {
     name: "stub",
+    dedupes: true,
     send: (dispatch) => {
       console.log(`${ACTION_SENT_MARKER} ${dispatch.idempotencyKey}`);
       return Promise.resolve({ externalId: dispatch.idempotencyKey, response: { stub: true } });

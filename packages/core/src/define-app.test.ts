@@ -22,7 +22,7 @@ describe("defineApp", () => {
       resolvers: [{ name: "business" }],
       scorers: [{ name: "buy-box" }],
       approvalTypes: [{ name: "letter" }],
-      channels: [{ name: "email", send: () => Promise.resolve({}) }],
+      channels: [{ name: "email", dedupes: false, send: () => Promise.resolve({}) }],
       records: [{ table: "businesses", recordType: "business" }],
     });
 
@@ -31,9 +31,9 @@ describe("defineApp", () => {
 
     expect(() => app.flows.register(fakeFlow("score"))).toThrow(DuplicateRegistration);
     expect(() => app.sources.register({ name: "ga-filings" })).toThrow(DuplicateRegistration);
-    expect(() => app.channels.register({ name: "email", send: () => Promise.resolve({}) })).toThrow(
-      DuplicateRegistration,
-    );
+    expect(() =>
+      app.channels.register({ name: "email", dedupes: false, send: () => Promise.resolve({}) }),
+    ).toThrow(DuplicateRegistration);
     expect(() => app.records.types.register({ table: "x", recordType: "business" })).toThrow(
       DuplicateRegistration,
     );
