@@ -8,6 +8,15 @@ import { migrateApp } from "./migrate.js";
 import { run } from "./spawn.js";
 import { statusTokenApp, type StatusTokenKind } from "./status-token.js";
 
+/**
+ * What `hf up` seeds `hf_app_state.budget_usd` with when `HF_BOOTSTRAP_BUDGET_USD` isn't set.
+ * Local only: `hf bootstrap` itself still refuses to run without an explicit budget, so a
+ * deployed app never starts under a cap nobody chose.
+ */
+export const DEV_BUDGET_USD = "10";
+
+const BUDGET_ENV = "HF_BOOTSTRAP_BUDGET_USD";
+
 export interface UpOptions {
   dir?: string;
 }
@@ -18,6 +27,8 @@ export interface UpResult {
   composeStarted: boolean;
   /** False when an admin already existed and `hf bootstrap` was skipped rather than rerun. */
   bootstrapped: boolean;
+  /** True when this run seeded `DEV_BUDGET_USD` because the app's `.env` sets no budget. */
+  budgetDefaulted: boolean;
   /** Which token kind(s) were generated this run; empty when both were already set. */
   tokensProvisioned: readonly StatusTokenKind[];
 }
@@ -43,12 +54,20 @@ export async function upApp(options: UpOptions = {}): Promise<UpResult> {
 
   await migrateApp({ dir: app.dir });
 
+  const defaultsBudget = usesDefaultBudget(app);
   const bootstrapped = await bootstrapIfNeeded(app);
 
   const { tokens } = await statusTokenApp({ dir: app.dir });
   const tokensProvisioned = Object.keys(tokens) as StatusTokenKind[];
 
-  return { app, installedDependencies, composeStarted, bootstrapped, tokensProvisioned };
+  return {
+    app,
+    installedDependencies,
+    composeStarted,
+    bootstrapped,
+    budgetDefaulted: bootstrapped && defaultsBudget,
+    tokensProvisioned,
+  };
 }
 
 /** True when `node_modules` isn't there yet — `pnpm install` has never run for this app. */
@@ -60,10 +79,19 @@ export async function needsInstall(dir: string): Promise<boolean> {
   }
 }
 
+/** True when the app's `.env` names no budget, so `hf up` will supply `DEV_BUDGET_USD`. */
+export function usesDefaultBudget(app: ResolvedApp): boolean {
+  const value = app.env[BUDGET_ENV];
+  return value === undefined || value === "";
+}
+
 /** Runs `hf bootstrap`; swallows `BootstrapRefused` since the app already has its one admin. */
 export async function bootstrapIfNeeded(app: ResolvedApp): Promise<boolean> {
   try {
-    await bootstrapApp({ dir: app.dir });
+    await bootstrapApp({
+      dir: app.dir,
+      budgetUsd: usesDefaultBudget(app) ? DEV_BUDGET_USD : undefined,
+    });
     return true;
   } catch (error) {
     if (error instanceof BootstrapRefused) return false;

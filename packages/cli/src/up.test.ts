@@ -4,7 +4,7 @@ import { asRole, createTestDatabase, type TestDatabase } from "@hyperfixation/te
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { resolveApp } from "./app.js";
 import { fakeApp } from "./test-support/fake-app.js";
-import { bootstrapIfNeeded, needsInstall } from "./up.js";
+import { bootstrapIfNeeded, DEV_BUDGET_USD, needsInstall, usesDefaultBudget } from "./up.js";
 
 describe("needsInstall", () => {
   it("is true when node_modules isn't there yet", async () => {
@@ -63,4 +63,48 @@ describe("bootstrapIfNeeded", () => {
     const app = await resolveApp(dir);
     expect(await bootstrapIfNeeded(app)).toBe(false);
   }, 30_000);
+});
+
+describe("bootstrapIfNeeded with no HF_BOOTSTRAP_BUDGET_USD", () => {
+  let db: TestDatabase;
+  let dir: string;
+
+  beforeAll(async () => {
+    db = await createTestDatabase();
+    dir = await fakeApp({
+      appName: db.appName,
+      env: {
+        DATABASE_URL: db.applicationUrl,
+        MIGRATOR_DATABASE_URL: db.migratorUrl,
+        HF_BOOTSTRAP_EMAIL: "graham@example.com",
+      },
+    });
+  }, 90_000);
+
+  afterAll(async () => {
+    if (dir !== undefined) await rm(dir, { recursive: true, force: true });
+    await db?.drop();
+  });
+
+  it("seeds the dev default budget rather than stopping on MissingEnv", async () => {
+    const app = await resolveApp(dir);
+    expect(usesDefaultBudget(app)).toBe(true);
+    expect(await bootstrapIfNeeded(app)).toBe(true);
+
+    const row = await asRole(db.applicationUrl, (pg) =>
+      pg.query("SELECT budget_usd::numeric AS budget FROM hf_app_state WHERE id = 1"),
+    );
+    expect(Number(row.rows[0].budget)).toBe(Number(DEV_BUDGET_USD));
+  }, 30_000);
+});
+
+describe("usesDefaultBudget", () => {
+  it("is false when the app's .env sets a budget", async () => {
+    const dir = await fakeApp({ appName: "demo_app", env: { HF_BOOTSTRAP_BUDGET_USD: "50" } });
+    try {
+      expect(usesDefaultBudget(await resolveApp(dir))).toBe(false);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
