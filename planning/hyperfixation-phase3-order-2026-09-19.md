@@ -242,21 +242,20 @@ only PR that adds the `image` job and have D3 and D4 add steps to it); `planning
 | doctor warnings | E4 | `doctor.test.ts` |
 | restore counts match / mismatch | E5 | `restore-check.test.ts` |
 
-## Open questions (Graham's; answer in one pass)
+## Open questions — all six decided (Graham, 2026-09-19, each as recommended)
 
-1. **Publish `0.1.0` by hand in chunk 0?** *Recommend yes.* Alternatives: build core inside the app image from a
+1. **Publish `0.1.0` by hand in chunk 0? Decided: yes.** Alternatives: build core inside the app image from a
    pinned sha (every deploy rebuilds nine packages, and `link:` semantics inside Docker are fragile) or commit
    `pnpm pack` tarballs to each app (binary churn in every bump PR). Trade-off: a version is on npm before Phase 4's
    api-diff gate exists — acceptable, `0.x`. **Blocks chunk 0.**
-2. **Domain scheme** — `<app>.hyperfixation.ai`, DNS-only (Coolify's proxy terminates TLS)? *Recommend yes*;
+2. **Domain scheme — `<app>.hyperfixation.ai`, DNS-only (Coolify's proxy terminates TLS)? Decided: yes.**
    Cloudflare-proxied would need Full-strict and hides the box from Coolify's ACME challenge. **Blocks E3.**
-3. **Defer the document bucket and scoped key to Phase 6?** *Recommend yes* (no consumer, no env name, and Still-open 1
+3. **Defer the document bucket and scoped key to Phase 6? Decided: yes** (no consumer, no env name, and Still-open 1
    about key scoping is unanswered). Trade-off: Phase 6 gains one provisioning step.
-4. **Metabase: create the `_ro` role and print the connection in the checklist, no Metabase API call?**
-   *Recommend yes*; the API adds a session-auth client for one optional form.
-5. **`downstream.txt`:** `hf new` prints the line; Phase 4 creates the file. *Recommend print* — the CLI runs from npm
+4. **Metabase: create the `_ro` role and print the connection in the checklist, no Metabase API call? Decided: yes;** the API adds a session-auth client for one optional form.
+5. **`downstream.txt`:** `hf new` prints the line; Phase 4 creates the file. **Decided: print** — the CLI runs from npm
    on a laptop and has no core checkout to write into.
-6. **Cloud budget:** `hf new --budget-usd` required with no default? *Recommend required* (matches `hf bootstrap`'s
+6. **Cloud budget:** `hf new --budget-usd` required with no default? **Decided: required** (matches `hf bootstrap`'s
    "a deployed app never starts under a cap nobody chose").
 
 ## Stale or contradicted in the plan
