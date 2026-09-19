@@ -1,6 +1,12 @@
 import { DBOS, type DBOSClient } from "@dbos-inc/dbos-sdk";
-import { checkE002, ControlPlaneInWorkflow } from "@hyperfixation/db";
+import {
+  checkE002,
+  ControlPlaneInWorkflow,
+  createStepPool,
+  type StepPool,
+} from "@hyperfixation/db";
 import { asRole, createTestDatabase, testBuildSha, type TestDatabase } from "@hyperfixation/testing";
+import { sql } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import * as z from "zod";
 import {
@@ -75,6 +81,16 @@ async function workflow(workflowId: string): Promise<Record<string, unknown> | u
   return (
     await query("SELECT status FROM dbos.workflow_status WHERE workflow_uuid = $1", [workflowId])
   )[0];
+}
+
+/** Every attempt of one run, so a count is not confused by the rest of the file's runs. */
+async function workflowsOf(runId: string): Promise<string[]> {
+  const rows = await query<{ workflow_uuid: string }>(
+    "SELECT workflow_uuid FROM dbos.workflow_status WHERE workflow_uuid LIKE $1 " +
+      "ORDER BY workflow_uuid",
+    [`${runId}%`],
+  );
+  return rows.map((row) => row.workflow_uuid);
 }
 
 /** What the app's registry would hand `decide()`: `send-email` is the only type here. */
@@ -198,6 +214,25 @@ describe("approvals.decide", () => {
     ]);
     expect(await run(first)).toMatchObject({ attempt: 2 });
     expect(await run(second)).toMatchObject({ attempt: 2 });
+  });
+
+  /** Adversary 3b, at the `decide()` end: a run's approvals are decided one row at a time. */
+  it("decides the second of a run's two pending approvals and leaves the first pending", async () => {
+    const runId = runIdFor("two-pending");
+    await startRun(runId);
+    const first = await pending(runId, "first");
+    const second = await pending(runId, "second");
+
+    const result = await decision({ ids: [second] });
+
+    expect(result.decided).toEqual([
+      { approvalId: second, runId, key: "second", status: "approved", resumeWorkflowId: `${runId}:2` },
+    ]);
+    expect(await approval(first)).toMatchObject({ status: "pending", resume_workflow_id: null });
+    expect(await approval(second)).toMatchObject({ status: "approved" });
+    // One decision, one bump: the row left pending does not get an attempt of its own.
+    expect(await run(runId)).toMatchObject({ attempt: 2 });
+    expect(await query("SELECT id FROM hf_audit")).toHaveLength(1);
   });
 
   it("returns the earlier result and writes nothing when the decisionKey replays", async () => {
@@ -527,5 +562,169 @@ describe("approvals.decide — batch_id", () => {
 
     expect((await decision({ ids: [id] })).batchId).toBeNull();
     expect(await query("SELECT batch_id FROM hf_approval")).toEqual([{ batch_id: null }]);
+  });
+});
+
+describe("approvals.decide — hf_audit", () => {
+  /** The same rule as `hf_activity`'s: a decision with no record of who made it is not a decision. */
+  it("is fatal: a failed insert leaves the approval pending and a retry succeeds", async () => {
+    const runId = runIdFor("audit-fatal");
+    await startRun(runId);
+    const id = await pending(runId);
+
+    await asRole(database.migratorUrl, async (pg) => {
+      await pg.query(
+        "CREATE FUNCTION refuse_audit() RETURNS trigger AS $$ BEGIN " +
+          "RAISE EXCEPTION 'hf_audit is closed'; END; $$ LANGUAGE plpgsql",
+      );
+      await pg.query(
+        "CREATE TRIGGER refuse_audit BEFORE INSERT ON hf_audit " +
+          "FOR EACH ROW EXECUTE FUNCTION refuse_audit()",
+      );
+    });
+
+    await expect(decision({ ids: [id] })).rejects.toThrow(/hf_audit is closed/);
+
+    expect(await approval(id)).toMatchObject({ status: "pending", decision_key: null });
+    expect(await run(runId)).toMatchObject({ attempt: 1 });
+    expect(await workflow(`${runId}:2`)).toBeUndefined();
+    expect(await query("SELECT id FROM hf_activity")).toHaveLength(0);
+
+    await asRole(database.migratorUrl, async (pg) => {
+      await pg.query("DROP TRIGGER refuse_audit ON hf_audit");
+      await pg.query("DROP FUNCTION refuse_audit()");
+    });
+
+    await decision({ ids: [id] });
+
+    expect(await approval(id)).toMatchObject({ status: "approved", decision_key: `key-${id}` });
+    expect(await query("SELECT id FROM hf_audit")).toHaveLength(1);
+  });
+});
+
+describe("approvals.decide — called twice at once", () => {
+  it("enqueues the resume workflow exactly once when the same decisionKey arrives twice", async () => {
+    const runId = runIdFor("concurrent-replay");
+    await startRun(runId);
+    const id = await pending(runId);
+
+    const results = await Promise.all([decision({ ids: [id] }), decision({ ids: [id] })]);
+
+    // Whichever lost the run's FOR UPDATE read the decision back rather than bumping again.
+    expect(results.map((result) => result.replayed).sort()).toEqual([false, true]);
+    expect(results.map((result) => result.decided[0]!.resumeWorkflowId)).toEqual([
+      `${runId}:2`,
+      `${runId}:2`,
+    ]);
+    expect(await run(runId)).toMatchObject({ attempt: 2 });
+    // Attempt 1 from `runsStart` plus the one resume workflow; a second bump would add `:3`.
+    expect(await workflowsOf(runId)).toEqual([runId, `${runId}:2`]);
+    expect(await query("SELECT id FROM hf_audit")).toHaveLength(1);
+    expect(await query("SELECT id FROM hf_activity")).toHaveLength(1);
+  });
+
+  it("refuses the second of two concurrent decisions carrying different decisionKeys", async () => {
+    const runId = runIdFor("concurrent-distinct");
+    await startRun(runId);
+    const id = await pending(runId);
+
+    const settled = await Promise.allSettled([
+      decide(control.pool, client, {
+        ids: [id],
+        decision: "approved",
+        via: "web",
+        decisionKey: "first-key",
+      }),
+      decide(control.pool, client, {
+        ids: [id],
+        decision: "rejected",
+        via: "web",
+        decisionKey: "second-key",
+      }),
+    ]);
+
+    expect(settled.filter((outcome) => outcome.status === "fulfilled")).toHaveLength(1);
+    const refused = settled.find((outcome) => outcome.status === "rejected");
+    expect((refused as PromiseRejectedResult).reason).toBeInstanceOf(ApprovalBatchRefused);
+    expect(await run(runId)).toMatchObject({ attempt: 2 });
+    expect(await workflowsOf(runId)).toEqual([runId, `${runId}:2`]);
+  });
+});
+
+/**
+ * Round 3's `40P01` case, in `fence.test.ts`'s style: the real statements in the real order on
+ * two connections, no DBOS. `'in-tx'` parks before the `INSERT`, so there is no `killAt` point
+ * that would hold the gate where this needs it held.
+ */
+describe("approvals.decide — the run-first lock order", () => {
+  let steps: StepPool;
+
+  beforeAll(() => {
+    steps = createStepPool({ connectionString: database.applicationUrl, max: 1 });
+  });
+
+  afterAll(async () => {
+    await steps?.end();
+  });
+
+  interface HeldGate {
+    entered: Promise<void>;
+    release: () => Promise<void>;
+  }
+
+  /** `createOrRead`'s two statements, then a park that holds the transaction open. */
+  function holdGate(runId: string, key: string): HeldGate {
+    let entered!: () => void;
+    let go!: () => void;
+    const enteredAt = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const released = new Promise<void>((resolve) => {
+      go = resolve;
+    });
+    const transaction = steps.tx(runId, runId, async (db) => {
+      await db.execute(sql`
+        INSERT INTO hf_approval (run_id, key, workflow_id, type, draft, status)
+        VALUES (${runId}, ${key}, ${runId}, 'send-email', '{"body":"draft"}'::jsonb, 'pending')
+        ON CONFLICT (run_id, key) DO NOTHING
+      `);
+      await db.execute(
+        sql`SELECT id, status FROM hf_approval WHERE run_id = ${runId} AND key = ${key}`,
+      );
+      entered();
+      await released;
+    });
+
+    return {
+      entered: enteredAt,
+      release: async () => {
+        go();
+        await transaction;
+      },
+    };
+  }
+
+  it("waits out the held ctx.tx instead of deadlocking on the approval it is deciding", async () => {
+    const runId = runIdFor("lock-order");
+    await startRun(runId);
+    const id = await pending(runId);
+
+    const held = holdGate(runId, "send");
+    await held.entered;
+
+    const settled = decision({ ids: [id] }).then(
+      (result) => result as unknown,
+      (error: unknown) => error,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    // Still behind the run's FOR UPDATE, which is what keeps it out of hf_approval entirely.
+    expect(await approval(id)).toMatchObject({ status: "pending" });
+
+    await held.release();
+    const outcome = await settled;
+
+    expect(outcome).not.toBeInstanceOf(Error);
+    expect(outcome).toMatchObject({ replayed: false, decided: [{ approvalId: id, runId }] });
+    expect(await approval(id)).toMatchObject({ status: "approved" });
   });
 });
