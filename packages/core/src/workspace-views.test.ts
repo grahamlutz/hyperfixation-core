@@ -14,6 +14,7 @@ import * as z from "zod";
 import { AppNotAttached, defineApp, type App } from "./define-app.js";
 import { UnknownRegistration } from "./registry.js";
 import type { RecordDefinition } from "./records.js";
+import { DEFAULT_BOARD_LIMIT } from "./workspace.js";
 
 const RECORD_TYPE = "business";
 const RECORD_TABLE = "businesses";
@@ -205,7 +206,9 @@ describe("workspace.inbox", () => {
 
     const { items } = await app.workspace.inbox({ userId: "graham" });
     expect(items[0]).toMatchObject({ type: "call-them", editable: false });
-    expect(items[0]!.fields).toEqual([{ path: "value", label: "Value", value: "ring them back" }]);
+    expect(items[0]!.fields).toEqual([
+      { path: "value", segments: [], label: "Value", value: "ring them back" },
+    ]);
   });
 
   it("hands a draft's markup on as the literal string it is", async () => {
@@ -217,7 +220,7 @@ describe("workspace.inbox", () => {
 
     const { items } = await app.workspace.inbox({ userId: "graham" });
     expect(items[0]!.fields).toEqual([
-      { path: "body", label: "Body", value: '<img src=x onerror="alert(1)">' },
+      { path: "body", segments: ["body"], label: "Body", value: '<img src=x onerror="alert(1)">' },
     ]);
     expect(items[0]!.draft).toEqual({ body: '<img src=x onerror="alert(1)">' });
   });
@@ -283,11 +286,27 @@ describe("workspace.board", () => {
     expect(board.columns[0]!.cards[0]!.updatedAt).toBeInstanceOf(Date);
   });
 
-  it("stops at the limit it is given", async () => {
+  it("stops at the limit it is given and says it did", async () => {
     for (const name of ["one", "two", "three"]) await insertRecord(name, { stage: "new" });
 
     const board = await app.workspace.board(RECORD_TYPE, { limit: 2 });
     expect(board.columns[0]!.cards).toHaveLength(2);
+    expect(board).toMatchObject({ limit: 2, truncated: true });
+  });
+
+  it("is not truncated when the rows come to exactly the limit", async () => {
+    for (const name of ["one", "two"]) await insertRecord(name, { stage: "new" });
+
+    const board = await app.workspace.board(RECORD_TYPE, { limit: 2 });
+    expect(board.columns[0]!.cards).toHaveLength(2);
+    expect(board).toMatchObject({ limit: 2, truncated: false });
+  });
+
+  it("reports the default limit when the caller gives none", async () => {
+    await insertRecord("only", { stage: "new" });
+
+    const board = await app.workspace.board(RECORD_TYPE);
+    expect(board).toMatchObject({ limit: DEFAULT_BOARD_LIMIT, truncated: false });
   });
 
   it("refuses a record type this app never registered", async () => {

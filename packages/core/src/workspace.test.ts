@@ -129,11 +129,39 @@ describe("draftFields", () => {
         body: { greeting: "Hi", paragraphs: ["one", "two"] },
       }),
     ).toEqual([
-      { path: "subject", label: "Subject", value: "Q3 update" },
-      { path: "contactEmail", label: "Contact email", value: "a@example.com" },
-      { path: "body.greeting", label: "Greeting", value: "Hi" },
-      { path: "body.paragraphs[0]", label: "Paragraphs 1", value: "one" },
-      { path: "body.paragraphs[1]", label: "Paragraphs 2", value: "two" },
+      { path: "subject", segments: ["subject"], label: "Subject", value: "Q3 update" },
+      {
+        path: "contactEmail",
+        segments: ["contactEmail"],
+        label: "Contact email",
+        value: "a@example.com",
+      },
+      { path: "body.greeting", segments: ["body", "greeting"], label: "Greeting", value: "Hi" },
+      {
+        path: "body.paragraphs[0]",
+        segments: ["body", "paragraphs", 0],
+        label: "Paragraphs 1",
+        value: "one",
+      },
+      {
+        path: "body.paragraphs[1]",
+        segments: ["body", "paragraphs", 1],
+        label: "Paragraphs 2",
+        value: "two",
+      },
+    ]);
+  });
+
+  it("gives colliding display paths distinct segments", () => {
+    expect(draftFields({ "a.b": 1, a: { b: 2 } })).toEqual([
+      { path: "a.b", segments: ["a.b"], label: "A.b", value: "1" },
+      { path: "a.b", segments: ["a", "b"], label: "B", value: "2" },
+    ]);
+  });
+
+  it("walks a literal __proto__ key like any other", () => {
+    expect(draftFields(JSON.parse('{"__proto__": {"x": "own"}}'))).toEqual([
+      { path: "__proto__.x", segments: ["__proto__", "x"], label: "X", value: "own" },
     ]);
   });
 
@@ -141,11 +169,11 @@ describe("draftFields", () => {
     expect(
       draftFields({ count: 3, ratio: 0.5, urgent: false, note: null, missing: undefined }),
     ).toEqual([
-      { path: "count", label: "Count", value: "3" },
-      { path: "ratio", label: "Ratio", value: "0.5" },
-      { path: "urgent", label: "Urgent", value: "false" },
-      { path: "note", label: "Note", value: "" },
-      { path: "missing", label: "Missing", value: "" },
+      { path: "count", segments: ["count"], label: "Count", value: "3" },
+      { path: "ratio", segments: ["ratio"], label: "Ratio", value: "0.5" },
+      { path: "urgent", segments: ["urgent"], label: "Urgent", value: "false" },
+      { path: "note", segments: ["note"], label: "Note", value: "" },
+      { path: "missing", segments: ["missing"], label: "Missing", value: "" },
     ]);
   });
 
@@ -155,14 +183,16 @@ describe("draftFields", () => {
 
   it("names a bare scalar draft", () => {
     expect(draftFields("just text")).toEqual([
-      { path: "value", label: "Value", value: "just text" },
+      { path: "value", segments: [], label: "Value", value: "just text" },
     ]);
-    expect(draftFields(null)).toEqual([{ path: "value", label: "Value", value: "" }]);
+    expect(draftFields(null)).toEqual([
+      { path: "value", segments: [], label: "Value", value: "" },
+    ]);
   });
 
   it("hands markup through as the literal string it is", () => {
     expect(draftFields({ note: "<img src=x>" })).toEqual([
-      { path: "note", label: "Note", value: "<img src=x>" },
+      { path: "note", segments: ["note"], label: "Note", value: "<img src=x>" },
     ]);
   });
 });
