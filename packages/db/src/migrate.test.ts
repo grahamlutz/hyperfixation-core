@@ -164,6 +164,36 @@ describe("the five-step migrator", () => {
       expect((error as Error).message).toContain("records.archive()");
     });
 
+    it.each([
+      [
+        "hf_record_link",
+        "INSERT INTO hf_record_link (source_record_id, record_type, record_id, method) VALUES (1, 'widget', $1, 'exact')",
+      ],
+      [
+        "hf_label",
+        "INSERT INTO hf_label (record_type, record_id, target, value) VALUES ('widget', $1, 'record', 'up')",
+      ],
+      [
+        "hf_outcome",
+        "INSERT INTO hf_outcome (record_type, record_id, outcome) VALUES ('widget', $1, 'won')",
+      ],
+    ])("refuses a hard DELETE of a record %s references", async (table, insert) => {
+      const { rows } = await migrator.query<{ id: string }>(
+        "INSERT INTO widget DEFAULT VALUES RETURNING id",
+      );
+      const id = rows[0]!.id;
+      await migrator.query(insert, [id]);
+
+      const error = await migrator.query("DELETE FROM widget WHERE id = $1", [id]).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      expect((error as { code?: string } | undefined)?.code).toBe("23001");
+      expect((error as Error).message).toContain(table);
+
+      await migrator.query(`DELETE FROM ${table}`);
+    });
+
     it("allows a DELETE of an unreferenced record", async () => {
       const { rows } = await migrator.query<{ id: string }>(
         "INSERT INTO widget DEFAULT VALUES RETURNING id",

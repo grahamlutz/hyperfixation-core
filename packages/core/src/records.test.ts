@@ -21,14 +21,20 @@ beforeAll(async () => {
   pool = new Pool({ max: 4, connectionString: database.applicationUrl });
   client = await getClient({ appName: database.appName, databaseUrl: database.applicationUrl });
 
-  // The app record table a Phase 2 `defineRecord` would generate: a bigint identity `id` and
-  // the mixin's `archived_at`, which is the column `archive()` writes.
+  // An app record table shaped like `hfRecordColumns()` (`archived_at` is the column `archive()` writes).
   await asRole(database.migratorUrl, async (pg) => {
     await pg.query(
       `CREATE TABLE ${RECORD_TABLE} (
          id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
          name text NOT NULL,
-         archived_at timestamptz)`,
+         created_at timestamptz DEFAULT now(),
+         updated_at timestamptz DEFAULT now(),
+         archived_at timestamptz,
+         stage text,
+         score double precision,
+         score_explanation text,
+         spec_version integer,
+         normalized_name text)`,
     );
     await pg.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ${RECORD_TABLE} TO ${database.roles.application}`);
     await pg.query("INSERT INTO hf_app_state (id, paused, budget_usd) VALUES (1, false, '100')");

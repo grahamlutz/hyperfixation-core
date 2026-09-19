@@ -105,6 +105,24 @@ describe("boot checks E001-E006", () => {
       expect(failure.details).toContain('hf_approval: "widget"');
     });
 
+    it.each([
+      ["hf_record_link", "INSERT INTO hf_record_link (source_record_id, record_type, record_id, method) VALUES (1, 'planted', '1', 'exact')"],
+      ["hf_score", "INSERT INTO hf_score (record_type, record_id, spec_version, score) VALUES ('planted', '1', 1, 0.5)"],
+      ["hf_activity", "INSERT INTO hf_activity (record_type, record_id, kind) VALUES ('planted', '1', 'note')"],
+      ["hf_task", "INSERT INTO hf_task (record_type, record_id, title, origin) VALUES ('planted', '1', 't', 'manual')"],
+      ["hf_label", "INSERT INTO hf_label (record_type, record_id, target, value) VALUES ('planted', '1', 'record', 'up')"],
+      ["hf_outcome", "INSERT INTO hf_outcome (record_type, record_id, outcome) VALUES ('planted', '1', 'won')"],
+    ])("scans %s for unregistered record types", async (table, insert) => {
+      await migrator.query(insert);
+      try {
+        const failure = await failureOf(checkE002(migrator, [{ table: "widget", recordType: "widget" }]));
+        expect(failure.code).toBe("E002");
+        expect(failure.details).toContain(`${table}: "planted"`);
+      } finally {
+        await migrator.query(`DELETE FROM ${table}`);
+      }
+    });
+
     it("ignores a row attached to no record at all", async () => {
       await migrator.query(
         `INSERT INTO hf_run (run_id, flow, status, current_workflow_id)
