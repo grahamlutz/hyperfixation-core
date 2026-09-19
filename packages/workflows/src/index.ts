@@ -61,6 +61,7 @@ export {
   DECIDE_OPERATION,
   type ApprovalDecision,
   type ApprovalDecisionKind,
+  type ApprovalDraftSchema,
   type ApprovalNotice,
   type DecideOptions,
   type DecideResult,

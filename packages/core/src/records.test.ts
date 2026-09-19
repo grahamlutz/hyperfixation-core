@@ -1,9 +1,16 @@
 import { DBOS, type DBOSClient } from "@dbos-inc/dbos-sdk";
 import { ControlPlaneInWorkflow } from "@hyperfixation/db";
 import { asRole, createTestDatabase, testBuildSha, type TestDatabase } from "@hyperfixation/testing";
-import { defineFlow, getClient, resetClient, type Flow } from "@hyperfixation/workflows";
+import {
+  ApprovalBatchRefused,
+  defineFlow,
+  getClient,
+  resetClient,
+  type Flow,
+} from "@hyperfixation/workflows";
 import { Pool } from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import * as z from "zod";
 import { defineApp, type App } from "./define-app.js";
 import { UnknownRegistration } from "./registry.js";
 
@@ -49,6 +56,7 @@ beforeAll(async () => {
     applicationVersion: "sha1234567",
     flows: [flow],
     records: [{ table: RECORD_TABLE, recordType: RECORD_TYPE }],
+    approvalTypes: [{ name: "send-letter", schema: z.object({ body: z.string() }) }],
   });
   app.attach({ pool, client });
 }, 120_000);
@@ -69,6 +77,28 @@ async function insertRecord(name: string): Promise<string> {
     [name],
   );
   return rows[0]!.id;
+}
+
+async function pendingApproval(
+  runId: string,
+  recordId: string,
+  assigneeId: string | null = null,
+): Promise<number> {
+  const { rows } = await pool.query<{ id: string }>(
+    "INSERT INTO hf_approval (run_id, key, workflow_id, type, record_type, record_id, draft, " +
+      "status, assignee_id) VALUES ($1, 'send', $1, 'send-letter', $2, $3, '{}'::jsonb, " +
+      "'pending', $4) RETURNING id",
+    [runId, RECORD_TYPE, recordId, assigneeId],
+  );
+  return Number(rows[0]!.id);
+}
+
+async function approvalStatus(approvalId: number): Promise<string> {
+  const { rows } = await pool.query<{ status: string }>(
+    "SELECT status FROM hf_approval WHERE id = $1",
+    [approvalId],
+  );
+  return rows[0]!.status;
 }
 
 async function archivedAt(recordId: string): Promise<Date | null> {
@@ -185,5 +215,68 @@ describe("records.archive()", () => {
       [`${runId}:2`],
     );
     expect(enqueued.rows[0]).toMatchObject({ status: "ENQUEUED" });
+  });
+
+  it("cancels an approval assigned to someone else — archive carries no human decider", async () => {
+    const recordId = await insertRecord("assigned-elsewhere");
+    const runId = `archive-assigned-${testBuildSha()}`;
+    await app.runs.start(flow, { n: 1 }, { runId });
+    await pool.query("UPDATE hf_run SET status = 'waiting' WHERE run_id = $1", [runId]);
+    const approvalId = await pendingApproval(runId, recordId, "dana");
+
+    const result = await app.records.archive({
+      recordType: RECORD_TYPE,
+      recordId,
+      userId: "graham",
+    });
+
+    expect(result.cancelledApprovals).toEqual([approvalId]);
+    expect(await approvalStatus(approvalId)).toBe("cancelled");
+  });
+});
+
+describe("app.approvals.decide — the registry's schemas", () => {
+  it("writes an edit that parses against the registered type's schema", async () => {
+    const recordId = await insertRecord("editable");
+    const runId = `edit-ok-${testBuildSha()}`;
+    await app.runs.start(flow, { n: 1 }, { runId });
+    await pool.query("UPDATE hf_run SET status = 'waiting' WHERE run_id = $1", [runId]);
+    const approvalId = await pendingApproval(runId, recordId);
+
+    await app.approvals.decide({
+      ids: [approvalId],
+      decision: "approved",
+      via: "web",
+      decisionKey: `edit-ok-${approvalId}`,
+      userId: "graham",
+      edits: { [approvalId]: { body: "signed, graham" } },
+    });
+
+    const { rows } = await pool.query<{ edited_draft: unknown }>(
+      "SELECT edited_draft FROM hf_approval WHERE id = $1",
+      [approvalId],
+    );
+    expect(rows[0]!.edited_draft).toEqual({ body: "signed, graham" });
+  });
+
+  it("refuses an edit the registered type's schema rejects", async () => {
+    const recordId = await insertRecord("uneditable");
+    const runId = `edit-bad-${testBuildSha()}`;
+    await app.runs.start(flow, { n: 1 }, { runId });
+    await pool.query("UPDATE hf_run SET status = 'waiting' WHERE run_id = $1", [runId]);
+    const approvalId = await pendingApproval(runId, recordId);
+
+    await expect(
+      app.approvals.decide({
+        ids: [approvalId],
+        decision: "approved",
+        via: "web",
+        decisionKey: `edit-bad-${approvalId}`,
+        userId: "graham",
+        edits: { [approvalId]: { body: 7 } },
+      }),
+    ).rejects.toBeInstanceOf(ApprovalBatchRefused);
+
+    expect(await approvalStatus(approvalId)).toBe("pending");
   });
 });

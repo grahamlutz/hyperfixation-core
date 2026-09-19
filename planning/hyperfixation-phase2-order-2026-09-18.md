@@ -298,7 +298,7 @@ second `send`; a deduping channel re-entered re-sends with the same `idempotency
 now conditional); `reconcile.test.ts` step (4) — one task per orphaned action row, unchanged across three
 passes. Redeploy cases 1 and 8 still green (`stubChannel` is re-declared as deduping).
 
-### P2 — `decide()` completion: Zod, the assignee rule, `hf_activity`, `batch_id` — ⬜ Not started
+### P2 — `decide()` completion: Zod, the assignee rule, `hf_activity`, `batch_id` — ✅ Done (deviated — see note)
 
 Validate the whole batch before writing, as step 2 of the protocol lists it: every edited draft parses against
 the approval type's Zod schema; `assignee_id IS NULL OR assignee_id = userId` or the user is an admin —
@@ -312,11 +312,29 @@ One constraint the plan does not state: **the schemas live in `core`'s `approval
 the schema lookup, the way it is handed the pool and the client; `app.approvals.decide(options)` in
 `defineApp` is where the registry closes over it. The shape is the implementer's; the constraint is not.
 
+> **Built, and where it differs from the wording above:** the lookup is `DecideOptions.schemaFor(type)`, sync and
+> pure, called inside the locked transaction; `ApprovalDraftSchema` (a re-exported `ZodType`) is what `core`'s
+> `ApprovalTypeDefinition.schema` is typed as, so `core` still needs no `zod` of its own. `edits` with no
+> `schemaFor` is a **`TypeError` thrown before the transaction opens** — a wiring bug, not a refused row — which
+> made `wait-for-approval.test.ts`'s one `decide()` call gain a `schemaFor`; it asserts exactly what it asserted.
+> The value written to `edited_draft` is **what the schema returned**, not what the caller sent, so a `z.object`
+> strips what it does not declare. Admin is `DecideOptions.admin`, a boolean the caller's session sets: `via:
+> 'admin'` alone does not clear the assignee rule, the flag does. `via` in {`archive`, `sweep`} is **exempt** from
+> the rule outright — neither carries a human decider, and an assigned row has to stay cancellable and
+> expirable. `hf_activity.run_id` is `NULL` (reading 4), `actor_id` is the decider, `kind` is
+> `approval.<decision>`, and `record_type`/`record_id` fall back to `('hf_approval', id::text)`; the insert is
+> last in the transaction, after every `hf_approval` write, per reading 2. `batch_id` is a `randomUUID()` stamped
+> on every row when the deduped `ids` number more than one, `null` otherwise, and `DecideResult.batchId` carries
+> it (a replay reads the stored one back). `defineApprovalType()` was **not** added — that is C-track's.
+
 **Done:** `approvals.test.ts` — a batch with one edit that parses is written with `edited_draft`; an edit
 that fails the schema refuses the whole batch naming the row; assignee mismatch refused; an admin decides an
 assigned row; one `hf_activity` row per decided approval; a `hf_activity` insert made to fail (a `BEFORE
-INSERT` trigger installed by the test, the same trick the audit case uses) leaves the approval `pending`,
-creates no `dbos.workflow_status` row, and a retry with the same `decisionKey` succeeds.
+INSERT` trigger installed by the test) leaves the approval `pending`, creates no `dbos.workflow_status` row,
+and a retry with the same `decisionKey` succeeds. Adversary target (c) is a test of its own: a `schemaFor`
+that throws rolls the whole transaction back and the throw leaves `decide()` unaltered. `records.test.ts` in
+`core` covers the registry end — a registered schema refusing an edit through `app.approvals.decide`, and
+`records.archive()` still cancelling an approval assigned to someone else.
 
 ### P3 — The approvals negative suite — ⬜ Not started
 
