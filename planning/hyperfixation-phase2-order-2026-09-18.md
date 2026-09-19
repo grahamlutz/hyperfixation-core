@@ -198,7 +198,7 @@ whose id is the row's `trace_id`.
 > `NodeTracerProvider` as the global delegate, and runs workflow and step bodies under real `SpanImpl` spans
 > sharing one trace id. No filtering beyond `LangfuseSpanProcessor`'s default, and the web half is still T3.
 
-### L3 — `ledger-crash.test.ts` (re-scoped) — ⬜ Not started
+### L3 — `ledger-crash.test.ts` (re-scoped) — ✅ Done (deviated — see note)
 
 Same-version only: `killAt(key, 'after-checkpoint')` → zero extra calls; `'before-checkpoint'` → one extra,
 `possible_double_charge = true`; a 1,000-record loop yields 1,000 rows; a second `llm.run` in one run with the
@@ -207,6 +207,18 @@ of these across a relaunch and `ledger-branches` the last in-process; this file 
 Phase 2 verification names it, and it should **reuse** case 3's fixture rather than duplicate it.
 
 **Done:** `pnpm --filter @hyperfixation/ai test ledger-crash`.
+
+> **Built, and where it differs from the wording above:** only the two crash cases use case 3's fixture
+> (`llmFlow` + `spawnWorker`/`killAt`, both workers on one explicit `version`, 12 keys rather than 24 — the
+> kill point is what the case turns on, not the loop's length); the 1,000-record loop and the collision drive
+> `llm.run` in-process through a `createStepPool` `ctx.tx`, the way `ledger-branches` does, because neither
+> needs a worker and a spawned one would cost a DBOS checkpoint per record. No test-support file was added.
+> Three test databases in the file, one per `describe`: the loop asserts `hf_budget_period.spent_usd` as an
+> absolute figure (1,000 × $0.001), which only holds on a database no other case has spent against. The
+> same-version `before-checkpoint` crash needs no `reconcile()` bump — worker B is not a new SHA, so DBOS's
+> own recovery re-executes the uncheckpointed step, the gate finds the `started` row and flags it, and the run
+> finishes at `attempt = 1`. Whole file: 4 tests in ~14 s (the loop ~4 s), stable over three runs; the loop's
+> timeout is 60 s, the crash cases' 240 s as in case 3.
 
 ### L4 — `kill-switch.test.ts` — ⬜ Not started
 
