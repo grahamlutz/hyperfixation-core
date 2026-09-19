@@ -445,7 +445,7 @@ bookkeeping: `rows_in`, `rows_new`, `rows_changed`.
 the staging table is gone after commit; an unchanged payload leaves `last_seen` moved and `payload_hash`
 equal; a `COPY` from outside `ctx.tx` is refused with `UnfencedWrite`.
 
-### C3 — Resolution — ⬜ Not started
+### C3 — Resolution — ✅ Done (deviated — see note)
 
 A flow on queue `resolve` (concurrency 1). In-batch exact-key grouping first, so duplicates within a batch
 produce one record; exact-key join (plus phone and email candidates); then fuzzy, record by record so later
@@ -454,11 +454,48 @@ records see earlier creates, the candidate query under `SET LOCAL pg_trgm.simila
 'review'`; each record in a `SAVEPOINT`, a throw marks it `error` with `attempts + 1` and the batch completes;
 a `manual`/`human_confirmed` link is never re-decided; a changed payload updates the linked record in place.
 
+> **Built, and where it differs from the wording above:** what ships is `resolveBatch(tx, { resolver, table,
+> source, limit = 500, maxAttempts = 3 })` in `packages/core/src/resolution.ts` — **step-side**, taking the
+> caller's open `ctx.tx`, and **chunked by `limit`**: one call is one batch and one transaction, and the caller
+> loops until `ResolveBatchResult.done`. One transaction for a whole load would hold `hf_run FOR SHARE` for
+> however long 200k rows take to resolve, which is what the fence exists to make impossible. The flow on queue
+> `resolve` is **not** here: `defineFlow` registers globally, so a second `defineApp` in a test throws
+> `DuplicateFlow`, and the flow over the existing `resolve` queue is T2's wiring in the template's `worker.ts`,
+> beside the schedule loop. `app.resolution.batch(tx, { resolver, source, … })` is the registry-resolving
+> wrapper: it looks the resolver up and takes `table` from `records.types.require(def.recordType)`.
+>
+> The exact pass joins **app-table columns named like the payload keys** — `exactKeys` are payload field names
+> and the columns they join against carry the same names, with `$n` passed as text so Postgres coerces; there
+> are no separate "phone and email candidates", those are just exact keys. A row with a null or missing value in
+> any exact key groups with nothing and joins on nothing. The link method for a record the resolver **created**
+> is a new `'created'` (confidence `NULL`), so "which link did resolution invent" is a query and not a guess;
+> `hf_record_link.method` is plain `text`, so widening `recordLinkMethods` is a TypeScript-only change and
+> `drizzle-kit generate` still finds no pending diff. `ResolverFuzzy` gains `payloadKey?: string` (defaults to
+> `field`) — the payload side of the compare, already normalized, because the payload key and the record column
+> are rarely spelled the same. The re-rank is a built-in dependency-free **bigram Dice** score (`bigramDice`,
+> exported): Postgres's `similarity()` orders the candidates, Dice picks among them on one scale that a
+> `review()` threshold can be written against without moving under a Postgres upgrade. There is no `score` hook.
+>
+> A row that already carries a link is updated and **never** re-linked, whatever the method — `manual` and
+> `human_confirmed` are not special-cased, because only linkless rows ever enter matching. An in-batch duplicate
+> takes its group leader's outcome (`method = 'exact'`, confidence 1) and does **not** get its own `update()`:
+> the leader's payload represents the group. `review` rows are **re-scanned every batch** (the scan is
+> `status <> 'linked' AND attempts < maxAttempts`), so a parked row comes back when the resolver's thresholds
+> change; nothing retries an `error` row past `maxAttempts`. `SET LOCAL pg_trgm.similarity_threshold` is issued
+> once before the loop — transaction-scoped, so it survives every `ROLLBACK TO SAVEPOINT` — as an interpolated
+> `toFixed(10)` literal, since `SET` takes no bind parameters. `SAVEPOINT` / `ROLLBACK TO` / `RELEASE` need no
+> change to the fence: `classify()` already calls all three writes, so they pass inside `ctx.tx` and are refused
+> outside it, which is exactly right.
+
 **Done:** `pnpm --filter @hyperfixation/core test resolution` — v1's four cases (in-batch duplicates → one
 record; changed payload on a manual link updates the record and leaves the link; a throwing `create()` marks
 that record `error` and the batch completes; `EXPLAIN` of the candidate query at 200k rows shows the GIN
 index and no seq scan). Give the 200k case its own `describe` and timeout, and measure it once — it is the
-first test in the suite whose cost is the data, not the DBOS launch.
+first test in the suite whose cost is the data, not the DBOS launch. **Measured:** 12 tests, 2.2s for the
+file; the 200k fixture (`generate_series` + the GIN index + `ANALYZE`) is ~0.9s of it, so it carries a 60s
+`describe` timeout and no `skipIf` gate. The plan is Limit → Sort → Bitmap Heap Scan → **Bitmap Index Scan on
+`big_businesses_normalized_name_idx`**, no `Seq Scan`; the 200k rows live in a table of that describe's own so
+the other cases' `beforeEach` truncation cannot take them out from under it.
 
 ### C4 — Activity, tasks, labels, outcomes, scores — ⬜ Not started
 

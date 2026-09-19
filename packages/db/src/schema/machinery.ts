@@ -22,7 +22,9 @@ export type SourceRunStatus = (typeof sourceRunStatuses)[number];
 export const sourceRecordStatuses = ["new", "linked", "review", "error"] as const;
 export type SourceRecordStatus = (typeof sourceRecordStatuses)[number];
 
-export const recordLinkMethods = ["exact", "fuzzy", "manual", "human_confirmed"] as const;
+// `created` is the link for a record the resolver made for this source row; the column is
+// plain `text`, so widening the union is a TypeScript change with no migration behind it.
+export const recordLinkMethods = ["exact", "fuzzy", "created", "manual", "human_confirmed"] as const;
 export type RecordLinkMethod = (typeof recordLinkMethods)[number];
 
 export const taskOrigins = ["flow", "manual", "sweep"] as const;
