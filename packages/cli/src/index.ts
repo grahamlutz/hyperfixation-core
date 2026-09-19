@@ -49,3 +49,39 @@ export {
 } from "./gen.js";
 export { dev, devBuildSha, DEV_COMPOSE_FILE, type DevOptions, type DevResult } from "./dev.js";
 export { run, CommandFailed, type RunOptions } from "./spawn.js";
+export {
+  createLocalRunner,
+  createSshRunner,
+  shellQuote,
+  sshExecArgv,
+  sshTunnelArgv,
+  RunnerError,
+  DEFAULT_TUNNEL_READY_TIMEOUT_MS,
+  type ExecOptions,
+  type ExecResult,
+  type LocalRunner,
+  type LocalRunnerOptions,
+  type Runner,
+  type SshRunnerOptions,
+  type Tunnel,
+} from "./runner.js";
+export {
+  openDatabase,
+  openDatabaseUrl,
+  redactPasswords,
+  DatabaseTransportError,
+  DEFAULT_POSTGRES_PORT,
+  type AdminCredentials,
+  type Database,
+  type DatabaseTransport,
+  type OpenDatabaseOptions,
+  type QueryOptions,
+  type QueryResult,
+} from "./database.js";
+export {
+  provisionDatabase,
+  ProvisionDatabaseError,
+  REQUIRED_EXTENSIONS,
+  type ProvisionDatabaseOptions,
+  type ProvisionDatabaseResult,
+} from "./provision-database.js";
