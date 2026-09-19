@@ -13,8 +13,31 @@ import {
   type ReconcileReport,
   type RunsStartOptions,
   type StartedRun,
+  type StepContext,
 } from "@hyperfixation/workflows";
 import type { Pool } from "pg";
+import {
+  listActivity,
+  recordActivity,
+  type ActivityListOptions,
+  type ActivityRecordOptions,
+  type ActivityRecorded,
+  type ActivityRow,
+} from "./activity.js";
+import {
+  addLabel,
+  listLabels,
+  type LabelAddOptions,
+  type LabelListOptions,
+  type LabelRow,
+} from "./labels.js";
+import {
+  listOutcomes,
+  recordOutcome,
+  type OutcomeListOptions,
+  type OutcomeRecordOptions,
+  type OutcomeRow,
+} from "./outcomes.js";
 import type { PageDefinition } from "./pages.js";
 import { pauseApp, resumeApp, type PauseOptions, type PauseResult, type ResumeResult } from "./pause.js";
 import { archiveRecord, type ArchiveOptions, type ArchiveResult } from "./records.js";
@@ -28,10 +51,25 @@ import {
   type ScheduleFired,
 } from "./schedules.js";
 import type { ScorerDefinition } from "./scorers.js";
+import { writeStepScore, type ScoreWritten, type StepWriteScoreOptions } from "./scores.js";
 import type { SourceDefinition } from "./sources.js";
 import type { SpecDefinition } from "./specs.js";
 import { createStatusHandler, STATUS_TOKEN_ACTOR } from "./status-route.js";
 import { appStatus, type StatusReport } from "./status.js";
+import {
+  cancelTask,
+  completeTask,
+  createManualTask,
+  createTask,
+  listTasks,
+  type TaskCloseOptions,
+  type TaskClosed,
+  type TaskCreateManualOptions,
+  type TaskCreateOptions,
+  type TaskCreated,
+  type TaskListOptions,
+  type TaskRow,
+} from "./tasks.js";
 
 /**
  * A flow of any shape. `Flow<never, unknown>` is the bottom of the family: its input is
@@ -101,6 +139,40 @@ export interface AppRecords {
   archive(options: ArchiveOptions): Promise<ArchiveResult>;
 }
 
+/**
+ * The write helpers split by where they run, not by what they write: `record` takes the step's
+ * context and writes inside `ctx.tx`, `list` is a control-plane read. There is no one entry point
+ * that sniffs the handle — a flow and the web reach different functions on purpose.
+ */
+export interface AppActivity {
+  record(ctx: StepContext, options: ActivityRecordOptions): Promise<ActivityRecorded>;
+  list(options: ActivityListOptions): Promise<ActivityRow[]>;
+}
+
+export interface AppTasks {
+  /** A flow's follow-up, keyed by the step so a replay finds its own task. */
+  create(ctx: StepContext, options: TaskCreateOptions): Promise<TaskCreated>;
+  createManual(options: TaskCreateManualOptions): Promise<TaskCreated>;
+  complete(options: TaskCloseOptions): Promise<TaskClosed>;
+  cancel(options: TaskCloseOptions): Promise<TaskClosed>;
+  list(options?: TaskListOptions): Promise<TaskRow[]>;
+}
+
+export interface AppLabels {
+  add(options: LabelAddOptions): Promise<{ id: number }>;
+  list(options: LabelListOptions): Promise<LabelRow[]>;
+}
+
+export interface AppOutcomes {
+  record(options: OutcomeRecordOptions): Promise<{ id: number }>;
+  list(options: OutcomeListOptions): Promise<OutcomeRow[]>;
+}
+
+export interface AppScores {
+  /** The `hf_score` row, the record's mixin columns and the timeline entry, in one transaction. */
+  write(ctx: StepContext, options: StepWriteScoreOptions): Promise<ScoreWritten>;
+}
+
 export interface AppResolutionBatchOptions {
   resolver: string;
   source: string;
@@ -133,6 +205,11 @@ export interface App {
   readonly approvalTypes: Registry<ApprovalTypeDefinition>;
   readonly channels: Registry<ActionChannel>;
   readonly records: AppRecords;
+  readonly activity: AppActivity;
+  readonly tasks: AppTasks;
+  readonly labels: AppLabels;
+  readonly outcomes: AppOutcomes;
+  readonly scores: AppScores;
   readonly resolution: AppResolution;
   /** Keyed by `path`, not by a name: the path is what a workspace link points at. */
   readonly pages: Registry<PageDefinition>;
@@ -245,6 +322,56 @@ export function defineApp(options: DefineAppOptions): App {
         const { pool, client } = controlPlane("records.archive");
         return archiveRecord(pool, client, recordTypes, archiveOptions);
       },
+    },
+    activity: {
+      // No `controlPlane()`: a step-side write runs on the step pool `ctx.tx` already holds.
+      record: (ctx, recordOptions) => recordActivity(ctx, recordOptions),
+      async list(listOptions) {
+        const { pool } = controlPlane("activity.list");
+        return listActivity(pool, listOptions);
+      },
+    },
+    tasks: {
+      create: (ctx, createOptions) => createTask(ctx, recordTypes, createOptions),
+      async createManual(createOptions) {
+        const { pool } = controlPlane("tasks.createManual");
+        return createManualTask(pool, recordTypes, createOptions);
+      },
+      async complete(closeOptions) {
+        const { pool } = controlPlane("tasks.complete");
+        return completeTask(pool, closeOptions);
+      },
+      async cancel(closeOptions) {
+        const { pool } = controlPlane("tasks.cancel");
+        return cancelTask(pool, closeOptions);
+      },
+      async list(listOptions = {}) {
+        const { pool } = controlPlane("tasks.list");
+        return listTasks(pool, listOptions);
+      },
+    },
+    labels: {
+      async add(addOptions) {
+        const { pool } = controlPlane("labels.add");
+        return addLabel(pool, recordTypes, addOptions);
+      },
+      async list(listOptions) {
+        const { pool } = controlPlane("labels.list");
+        return listLabels(pool, listOptions);
+      },
+    },
+    outcomes: {
+      async record(outcomeOptions) {
+        const { pool } = controlPlane("outcomes.record");
+        return recordOutcome(pool, recordTypes, outcomeOptions);
+      },
+      async list(listOptions) {
+        const { pool } = controlPlane("outcomes.list");
+        return listOutcomes(pool, listOptions);
+      },
+    },
+    scores: {
+      write: (ctx, writeOptions) => writeStepScore(ctx, recordTypes, writeOptions),
     },
     resolution: {
       batch(tx, batchOptions) {

@@ -5,6 +5,7 @@
     "0002_approvals",
     "0003_auth_invitation",
     "0004_machinery",
-    "0005_nullable_activity_task_record"
+    "0005_nullable_activity_task_record",
+    "0006_activity_score_key"
   ]
 }

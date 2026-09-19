@@ -43,6 +43,13 @@
       "when": 1789824245385,
       "tag": "0005_nullable_activity_task_record",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1789826886512,
+      "tag": "0006_activity_score_key",
+      "breakpoints": true
     }
   ]
 }
