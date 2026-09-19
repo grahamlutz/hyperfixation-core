@@ -50,7 +50,12 @@ export class BootstrapRefused extends Error {
 }
 
 export interface BootstrapAdminOptions {
-  email: string;
+  /**
+   * The address to bootstrap. Defaults to the designation in force — `designatedEmail`, else
+   * `HF_BOOTSTRAP_EMAIL` — so a deploy that names its owner need not name it twice. Neither is
+   * a `no-designation` refusal, not a crash.
+   */
+  email?: string;
   name?: string;
   /**
    * Overrides `HF_BOOTSTRAP_EMAIL`. Pass `null` to run the first-user branch with the
@@ -90,7 +95,13 @@ export async function bootstrapAdmin(
     options.designatedEmail === undefined
       ? (process.env[BOOTSTRAP_EMAIL_ENV] ?? null)
       : options.designatedEmail;
-  const email = options.email.trim();
+  const email = trimmed(options.email) ?? trimmed(designated);
+  if (email === undefined) {
+    throw new BootstrapRefused(
+      "no-designation",
+      `no address to bootstrap: pass an email or set ${BOOTSTRAP_EMAIL_ENV}`,
+    );
+  }
 
   const client = await pool.connect();
   try {
@@ -106,6 +117,11 @@ export async function bootstrapAdmin(
   } finally {
     client.release();
   }
+}
+
+function trimmed(value: string | null | undefined): string | undefined {
+  const text = value?.trim();
+  return text === undefined || text === "" ? undefined : text;
 }
 
 async function bootstrap(

@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -6,8 +7,9 @@ import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { BootCheckFailure } from "./boot-checks.js";
 import { GRANT_RO_EXCLUDED_TABLES } from "./grant-ro.js";
-import { CORE_MIGRATIONS_DIR, migrate } from "./migrate.js";
-import { createTestDatabase, type TestDatabase } from "./test-support/database.js";
+import { CORE_MIGRATIONS_DIR, migrate, MigratorError } from "./migrate.js";
+import { quoteIdent, withDatabase } from "./roles.js";
+import { ADMIN_URL, asRole, createTestDatabase, type TestDatabase } from "./test-support/database.js";
 
 /**
  * What drizzle would insert into `drizzle.hf_core_migrations` for the committed
@@ -232,5 +234,68 @@ describe("the five-step migrator", () => {
       });
       expect(result.grantRo.applied).toBe(false);
     });
+  });
+});
+
+/**
+ * `CREATE DATABASE` and nothing else — the state someone is in who ran `pnpm migrate` without
+ * `hf`. Every check has to report in the first run, since the point of the preflight is that
+ * this stops costing one run per missing grant.
+ */
+describe("the provisioning preflight", () => {
+  const appName = `bare_${randomBytes(6).toString("hex")}`;
+  const databaseName = `hf_${appName}`;
+  const plainRole = `${databaseName}_migrator`;
+  let superuserUrl: string;
+  let plainUrl: string;
+
+  beforeAll(async () => {
+    await asRole(ADMIN_URL, async (admin) => {
+      await admin.query(`CREATE DATABASE ${quoteIdent(databaseName)}`);
+      await admin.query(`CREATE ROLE ${quoteIdent(plainRole)} LOGIN PASSWORD 'preflight'`);
+      await admin.query(
+        `GRANT CONNECT ON DATABASE ${quoteIdent(databaseName)} TO ${quoteIdent(plainRole)}`,
+      );
+    });
+    superuserUrl = withDatabase(ADMIN_URL, databaseName);
+    const url = new URL(superuserUrl);
+    url.username = plainRole;
+    url.password = "preflight";
+    plainUrl = url.toString();
+  }, 90_000);
+
+  afterAll(async () => {
+    await asRole(ADMIN_URL, async (admin) => {
+      await admin.query(`DROP DATABASE IF EXISTS ${quoteIdent(databaseName)} WITH (FORCE)`);
+      await admin.query(`DROP ROLE IF EXISTS ${quoteIdent(plainRole)}`);
+    });
+  });
+
+  it("names the missing application role and the command that provisions it", async () => {
+    const error = await migrate(superuserUrl, { appName }).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(MigratorError);
+    expect((error as MigratorError).message).toContain(
+      `the application role "hf_${appName}" does not exist`,
+    );
+    expect((error as MigratorError).message).toContain("hf migrate");
+  });
+
+  it("refuses before step 1 rather than half-migrating", async () => {
+    await asRole(superuserUrl, async (client) => {
+      const { rows } = await client.query<{ applied: string | null }>(
+        "SELECT to_regclass('drizzle.hf_core_migrations')::text AS applied",
+      );
+      expect(rows[0]!.applied).toBeNull();
+    });
+  });
+
+  it("reports every missing grant at once, not one run at a time", async () => {
+    const error = await migrate(plainUrl, { appName }).catch((e: unknown) => e);
+
+    const message = (error as MigratorError).message;
+    expect(message).toContain(`the application role "hf_${appName}" does not exist`);
+    expect(message).toContain(`may not CREATE in database "${databaseName}"`);
+    expect(message).toContain('may not CREATE in schema "public"');
   });
 });

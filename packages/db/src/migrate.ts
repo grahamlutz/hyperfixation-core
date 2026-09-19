@@ -76,6 +76,8 @@ export async function migrate(
   const client = new Client({ connectionString: migratorConnectionString });
   await client.connect();
   try {
+    await assertProvisioned(client, options.appName, applicationRole);
+
     const db = drizzle(client);
 
     await drizzleMigrate(db, {
@@ -107,6 +109,56 @@ export async function migrate(
   } finally {
     await client.end();
   }
+}
+
+const PROVISION_STATEMENT = `
+  SELECT current_user AS connected_role,
+         current_database() AS database_name,
+         EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1) AS application_role_exists,
+         has_database_privilege(current_user, current_database(), 'CREATE') AS create_on_database,
+         coalesce(
+           has_schema_privilege(current_user, to_regnamespace('public'), 'CREATE'),
+           false
+         ) AS create_on_public`;
+
+/**
+ * The state `provisionRoles` leaves behind and the migrator cannot create for itself: a role
+ * cannot grant itself `CREATE`, and granting `dbos` to an application role that does not exist
+ * is not something a migration can fix. Each of these otherwise surfaces one at a time, several
+ * steps apart — the `CREATE SCHEMA "drizzle"` of step 1, then `public`, then step 3's `-r` —
+ * so a plain `CREATE DATABASE` costs three runs to discover what one message can say.
+ */
+async function assertProvisioned(
+  client: Client,
+  appName: string,
+  applicationRole: string,
+): Promise<void> {
+  const { rows } = await client.query<{
+    connected_role: string;
+    database_name: string;
+    application_role_exists: boolean;
+    create_on_database: boolean;
+    create_on_public: boolean;
+  }>(PROVISION_STATEMENT, [applicationRole]);
+  const state = rows[0]!;
+
+  const missing: string[] = [];
+  if (!state.application_role_exists) {
+    missing.push(`the application role "${applicationRole}" does not exist`);
+  }
+  if (!state.create_on_database) {
+    missing.push(`"${state.connected_role}" may not CREATE in database "${state.database_name}"`);
+  }
+  if (!state.create_on_public) {
+    missing.push(`"${state.connected_role}" may not CREATE in schema "public"`);
+  }
+  if (missing.length === 0) return;
+
+  throw new MigratorError(
+    `database "${state.database_name}" is not provisioned for ${appName}: ${missing.join("; ")}. ` +
+      "Run `hf migrate` in the app directory, which provisions the roles before running this; " +
+      "a deployed database is provisioned by provisionRoles() from @hyperfixation/db/migrator.",
+  );
 }
 
 /**
