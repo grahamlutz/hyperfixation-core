@@ -1,6 +1,7 @@
 {
   "name": "@hyperfixation/testing",
   "version": "0.1.0",
+  "license": "MIT",
   "description": "Vitest helpers: per-run database, recorded LLM, runFlowSync, and the spawnWorker/killAt crash harness",
   "repository": {
     "type": "git",

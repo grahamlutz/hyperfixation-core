@@ -1,6 +1,7 @@
 {
   "name": "@hyperfixation/core",
   "version": "0.1.0",
+  "license": "MIT",
   "description": "defineApp, registries, resolution, records, activity, tasks, labels, outcomes, and the status endpoint",
   "repository": {
     "type": "git",

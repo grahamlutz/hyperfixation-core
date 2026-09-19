@@ -1,6 +1,7 @@
 {
   "name": "@hyperfixation/workflows",
   "version": "0.1.0",
+  "license": "MIT",
   "description": "startWorker, defineFlow and the run lifecycle, the step wrapper, approvals, actions, queues, and the reconciler",
   "repository": {
     "type": "git",

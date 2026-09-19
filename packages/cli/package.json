@@ -1,6 +1,7 @@
 {
   "name": "@hyperfixation/cli",
   "version": "0.1.0",
+  "license": "MIT",
   "description": "The hf binary and its Turborepo generator templates",
   "repository": {
     "type": "git",
