@@ -21,6 +21,12 @@ export function reportWorkerFailure(error: unknown): void;
 // @public (undocumented)
 export function runWorkerModule<C extends WorkerControl = WorkerControl>(options: WorkerModuleOptions<C>): Promise<void>;
 
+// @public
+export function setWorkerClock(at: string | Date): void;
+
+// @public
+export function workerClock(): () => Date;
+
 // @public (undocumented)
 export function workerControl<C extends WorkerControl = WorkerControl>(): C;
 

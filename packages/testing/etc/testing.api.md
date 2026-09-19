@@ -222,6 +222,7 @@ export interface SpawnedWorker {
     readyAt(): number | undefined;
     release(): void;
     send(line: string): void;
+    setClock(at: string | Date): void;
     shutdown(): Promise<WorkerExit>;
     // (undocumented)
     readonly version: string;
@@ -257,6 +258,11 @@ export const TEST_BUILD_SHA_PREFIX = "test-";
 // @public
 export function testBuildSha(): string;
 
+// @public
+export type TestClock = (() => Date) & {
+    set(at: string | Date): void;
+};
+
 // @public (undocumented)
 export interface TestDatabase {
     // (undocumented)
@@ -278,7 +284,13 @@ export interface TestDatabase {
 }
 
 // @public (undocumented)
+export function withClock(at: string | Date): TestClock;
+
+// @public (undocumented)
 export const WORKER_APP_NAME_ENV = "HF_APP_NAME";
+
+// @public
+export const WORKER_CLOCK = "clock";
 
 // @public (undocumented)
 export const WORKER_CONTROL_ENV = "HF_WORKER_CONTROL";
@@ -308,6 +320,7 @@ export const WORKER_SHUTDOWN = "shutdown";
 export interface WorkerControl {
     // (undocumented)
     [knob: string]: unknown;
+    clockAt?: string;
     drainMs?: number;
     killAt?: KillAtControl;
 }

@@ -58,6 +58,7 @@ export function createLlm(input: CreateLlmOptions): Llm;
 
 // @public (undocumented)
 export interface CreateLlmOptions {
+    clock?: () => Date;
     promptsDir: string;
     // (undocumented)
     providers: ProviderRegistry;
