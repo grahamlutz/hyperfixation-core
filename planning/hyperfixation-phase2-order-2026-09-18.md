@@ -23,8 +23,8 @@ Phase 1 actually built; this document assumes it and does not restate it.
 | 🚧 In progress | partially built |
 | ⬜ Not started | nothing built yet |
 
-**Landed so far (main at `efcfdeb`, 2026-09-19):** chunk 0 (#8), L1 (#10), C1 (#11), P1 (#13), L2 (#14), L3 (#17),
-C2 (#18), P2 (#19). Their
+**Landed so far (main at `e64f7bb`, 2026-09-19):** chunk 0 (#8), L1 (#10), C1 (#11), P1 (#13), L2 (#14), L3 (#17),
+C2 (#18), P2 (#19), L4 (#21), P3 (#22), C3 (#23), T1 (#24), C4 (#25), L5a (#26). Their
 "Built, and where it differs" notes below record every place the build departed from this document's wording;
 the markers on the remaining chunks are unchanged.
 
@@ -65,7 +65,7 @@ Phase 2 "adds the rest of each protocol rather than introducing it". What "the r
    in chunk 0**, before the fork, so no track ever appends to the journal — the one shared surface Phase 1's
    merge-friction section identified. Any later column is its own nullable `ADD COLUMN` migration and bumps
    `migrate.test.ts`'s count literal, the same cost Phase 1 paid four times.
-3. **The workspace's package boundary is undecided, and it is the largest chunk.** The plan routes
+3. **The workspace's package boundary was undecided, and it is the largest chunk** (decided since: descriptors, template renders — open question 2). The plan routes
    `(workspace)/w/[[...path]]` to `@hyperfixation/core/workspace`, which reads as core shipping React. Every
    Phase 1 package that faced this (`auth`, `admin`) chose the other shape — resolve a route, return a
    descriptor, let the template render — precisely because a package "cannot depend on `next`". A workspace
@@ -747,10 +747,10 @@ number here.
 
 | Track | Package(s) | Can start | Must land by | Status |
 |---|---|---|---|---|
-| **L — ledger** (L1–L5b) | `ai` (+ one `startWorker` hook in `workflows` for L2) | chunk 0 | T2 needs L1; Exit needs all | 🚧 L1–L4 done |
-| **P — approvals and actions** (P1–P4) | `workflows` | chunk 0 | T2 needs P1, P2; Exit needs all | 🚧 P1, P2 done |
-| **C — core** (C1–C6) | `core`, `db` (C2), `admin` (C5) | chunk 0 | T2 needs C1–C4; Exit needs C6 | 🚧 C1, C2 done |
-| **T — testing and template** (T1–T3) | `testing`, `hyperfixation-template` | chunk 0 for T1; the others as listed | Exit | 🚧 T1 done |
+| **L — ledger** (L1–L5b) | `ai` (+ one `startWorker` hook in `workflows` for L2) | chunk 0 | T2 needs L1; Exit needs all | 🚧 L1–L5a done; L5b open |
+| **P — approvals and actions** (P1–P4) | `workflows` | chunk 0 | T2 needs P1, P2; Exit needs all | 🚧 P1–P3 done; P4 open |
+| **C — core** (C1–C6) | `core`, `db` (C2), `admin` (C5) | chunk 0 | T2 needs C1–C4; Exit needs C6 | 🚧 C1–C4 done; C5, C6 open |
+| **T — testing and template** (T1–T3) | `testing`, `hyperfixation-template` | chunk 0 for T1; the others as listed | Exit | 🚧 T1 done; T2, T3 open |
 
 **Execution model.** Chunk 0 is one PR by one head, first. After it the three tracks are genuinely
 independent — they touch disjoint packages, and the one shared file each will touch is its own package's
@@ -853,11 +853,11 @@ orders against, to be overturned cheaply if wrong.
    deterministic. The provider registry hands out a **fixture provider** — a `MockLanguageModel` fed from
    `fixtures/llm/*.json` — when no key is set, and the demo's fixtures ship with the template. This is what
    keeps the exit-bar e2e running in CI without a real key.
-6. **Defaulted (P1) — `hf_task` needs an idempotency key for "one task per uncertain row, once".** v1's
+6. **Resolved in chunk 0 — `hf_task` needed an idempotency key for "one task per uncertain row, once".** v1's
    columns (`record_type`, `record_id`, `title`, `due_at`, `owner_id`, `done_at`, `cancelled_at`, `origin`)
    give `reconcile()` nothing to `ON CONFLICT` on. Default: an `origin_ref text null` column with a partial
-   unique index `(origin, origin_ref) WHERE origin_ref IS NOT NULL`, set to the action-log row's id. Decide
-   it in chunk 0 so it is in the one migration.
+   unique index `(origin, origin_ref) WHERE origin_ref IS NOT NULL`, set to the action-log row's id — shipped
+   in chunk 0's migration. C4 adds `"<runId>:<key>"` refs for flow-created tasks on the same index.
 7. **Defaulted — Sentry is not Phase 2's.** The template's `instrumentation.ts` says `TODO(phase 2)` for
    both Sentry and Langfuse; the plan's Phase 2 text names only Langfuse, and Phase 3's `hf new` provisions
    the DSN. Change the TODO's label, not the phase.
@@ -878,7 +878,7 @@ orders against, to be overturned cheaply if wrong.
 
 Core, at every chunk: `pnpm -w typecheck && pnpm -w lint && npx turbo run test --force && pnpm -w
 api-extractor` against a real pg17 (`HF_TEST_DATABASE_URL` as CI sets it). Baseline at `4d08ac2`: 61 files,
-360 tests, ~3m16s, all green; `redeploy-case-1` is load-sensitive (Phase 1's note) — rerun it alone before
+360 tests, ~3m16s, all green (since grown well past 70 files and 450 tests; CI takes about 6 minutes); `redeploy-case-1` is load-sensitive (Phase 1's note) — rerun it alone before
 chasing it. Named gates, from the plan's verification line as amended by open question 8:
 `pnpm --filter @hyperfixation/ai test ledger-crash budget kill-switch`,
 `pnpm --filter @hyperfixation/workflows test approvals actions reconcile`,
