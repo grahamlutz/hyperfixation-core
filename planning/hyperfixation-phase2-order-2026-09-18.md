@@ -23,8 +23,9 @@ Phase 1 actually built; this document assumes it and does not restate it.
 | 🚧 In progress | partially built |
 | ⬜ Not started | nothing built yet |
 
-Nothing Phase-2-scoped has landed since Phase 1 closed. The only markers other than ⬜ below are on pieces
-Phase 1 pulled forward and that Phase 2 completes rather than introduces.
+**Landed so far (main at `c242a86`, 2026-09-19):** chunk 0 (#8), L1 (#10), C1 (#11), P1 (#13), L2 (#14). Their
+"Built, and where it differs" notes below record every place the build departed from this document's wording;
+the markers on the remaining chunks are unchanged.
 
 ## Where Phase 2 starts from — verified against the tree
 
@@ -198,7 +199,7 @@ whose id is the row's `trace_id`.
 > `NodeTracerProvider` as the global delegate, and runs workflow and step bodies under real `SpanImpl` spans
 > sharing one trace id. No filtering beyond `LangfuseSpanProcessor`'s default, and the web half is still T3.
 
-### L3 — `ledger-crash.test.ts` (re-scoped) — ⬜ Not started
+### L3 — `ledger-crash.test.ts` (re-scoped) — ✅ Done (deviated — see note)
 
 Same-version only: `killAt(key, 'after-checkpoint')` → zero extra calls; `'before-checkpoint'` → one extra,
 `possible_double_charge = true`; a 1,000-record loop yields 1,000 rows; a second `llm.run` in one run with the
@@ -207,6 +208,18 @@ of these across a relaunch and `ledger-branches` the last in-process; this file 
 Phase 2 verification names it, and it should **reuse** case 3's fixture rather than duplicate it.
 
 **Done:** `pnpm --filter @hyperfixation/ai test ledger-crash`.
+
+> **Built, and where it differs from the wording above:** only the two crash cases use case 3's fixture
+> (`llmFlow` + `spawnWorker`/`killAt`, both workers on one explicit `version`, 12 keys rather than 24 — the
+> kill point is what the case turns on, not the loop's length); the 1,000-record loop and the collision drive
+> `llm.run` in-process through a `createStepPool` `ctx.tx`, the way `ledger-branches` does, because neither
+> needs a worker and a spawned one would cost a DBOS checkpoint per record. No test-support file was added.
+> Three test databases in the file, one per `describe`: the loop asserts `hf_budget_period.spent_usd` as an
+> absolute figure (1,000 × $0.001), which only holds on a database no other case has spent against. The
+> same-version `before-checkpoint` crash needs no `reconcile()` bump — worker B is not a new SHA, so DBOS's
+> own recovery re-executes the uncheckpointed step, the gate finds the `started` row and flags it, and the run
+> finishes at `attempt = 1`. Whole file: 4 tests in ~14 s (the loop ~4 s), stable over three runs; the loop's
+> timeout is 60 s, the crash cases' 240 s as in case 3.
 
 ### L4 — `kill-switch.test.ts` — ⬜ Not started
 
@@ -540,9 +553,9 @@ number here.
 
 | Track | Package(s) | Can start | Must land by | Status |
 |---|---|---|---|---|
-| **L — ledger** (L1–L5b) | `ai` (+ one `startWorker` hook in `workflows` for L2) | chunk 0 | T2 needs L1; Exit needs all | ⬜ |
-| **P — approvals and actions** (P1–P4) | `workflows` | chunk 0 | T2 needs P1, P2; Exit needs all | ⬜ |
-| **C — core** (C1–C6) | `core`, `db` (C2), `admin` (C5) | chunk 0 | T2 needs C1–C4; Exit needs C6 | ⬜ |
+| **L — ledger** (L1–L5b) | `ai` (+ one `startWorker` hook in `workflows` for L2) | chunk 0 | T2 needs L1; Exit needs all | 🚧 L1, L2 done |
+| **P — approvals and actions** (P1–P4) | `workflows` | chunk 0 | T2 needs P1, P2; Exit needs all | 🚧 P1 done |
+| **C — core** (C1–C6) | `core`, `db` (C2), `admin` (C5) | chunk 0 | T2 needs C1–C4; Exit needs C6 | 🚧 C1 done |
 | **T — testing and template** (T1–T3) | `testing`, `hyperfixation-template` | chunk 0 for T1; the others as listed | Exit | ⬜ |
 
 **Execution model.** Chunk 0 is one PR by one head, first. After it the three tracks are genuinely
