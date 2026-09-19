@@ -1,5 +1,5 @@
 import { DBOS, type DBOSClient } from "@dbos-inc/dbos-sdk";
-import { appPaused, ControlPlaneInWorkflow } from "@hyperfixation/db";
+import { appPaused, checkE002, ControlPlaneInWorkflow } from "@hyperfixation/db";
 import { asRole, createTestDatabase, testBuildSha, type TestDatabase } from "@hyperfixation/testing";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getClient, resetClient } from "./client.js";
@@ -423,7 +423,7 @@ describe("reconcile() step (4) — ledger hygiene", () => {
     ]);
   });
 
-  it("targets the action row itself when it carries no record", async () => {
+  it("leaves the task's record columns null when the action carries no record", async () => {
     const runId = runIdFor("action-no-record");
     await startRun(runId);
     await query("UPDATE hf_run SET status = 'failed' WHERE run_id = $1", [runId]);
@@ -431,9 +431,14 @@ describe("reconcile() step (4) — ledger hygiene", () => {
 
     await pass();
 
+    // A stand-in record type would fail E002 at the next boot; `origin_ref` is the back-pointer.
     expect(await tasksFor(actionLogId)).toMatchObject([
-      { record_type: "hf_action_log", record_id: actionLogId, origin: "sweep" },
+      { record_type: null, record_id: null, origin: "sweep", origin_ref: actionLogId },
     ]);
+    expect(
+      await query("SELECT record_type, record_id FROM hf_activity WHERE run_id = $1", [runId]),
+    ).toEqual([{ record_type: null, record_id: null }]);
+    await expect(checkE002(control.pool, [])).resolves.toBeUndefined();
   });
 });
 

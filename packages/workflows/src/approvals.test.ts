@@ -1,5 +1,5 @@
 import { DBOS, type DBOSClient } from "@dbos-inc/dbos-sdk";
-import { ControlPlaneInWorkflow } from "@hyperfixation/db";
+import { checkE002, ControlPlaneInWorkflow } from "@hyperfixation/db";
 import { asRole, createTestDatabase, testBuildSha, type TestDatabase } from "@hyperfixation/testing";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import * as z from "zod";
@@ -439,16 +439,19 @@ describe("approvals.decide — hf_activity", () => {
     ]);
   });
 
-  it("falls back to the approval itself when the row names no record", async () => {
-    const runId = runIdFor("activity-fallback");
+  it("leaves the record columns null when the approval names no record, so E002 passes", async () => {
+    const runId = runIdFor("activity-no-record");
     await startRun(runId);
     const id = await pending(runId);
 
     await decision({ ids: [id] });
 
+    // A stand-in such as `'hf_approval'` would fail E002 at the next worker boot; the audit
+    // row's `target_id` is where the approval id is already recorded.
     expect(await query("SELECT record_type, record_id FROM hf_activity")).toEqual([
-      { record_type: "hf_approval", record_id: String(id) },
+      { record_type: null, record_id: null },
     ]);
+    await expect(checkE002(control.pool, [])).resolves.toBeUndefined();
   });
 
   it("writes nothing on a replay", async () => {

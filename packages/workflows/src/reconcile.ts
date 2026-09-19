@@ -301,16 +301,13 @@ export async function reconcile(
  * tier is the last one, after the `hf_action_log` update the same transaction just made.
  */
 async function openUncertainTask(client: PoolClient, row: UncertainActionRow): Promise<void> {
-  // `hf_task`'s target columns are NOT NULL; the action row's are not, so the row itself stands in.
-  const target =
-    row.record_type !== null && row.record_id !== null
-      ? { recordType: row.record_type, recordId: row.record_id }
-      : { recordType: "hf_action_log", recordId: row.id };
+  // The target columns follow the action row's, NULL included: a stand-in record type would fail
+  // E002 at the next boot, and `origin_ref` is what points the task back at the row.
   const title = `Confirm ${row.channel} send ${row.key} for run ${row.run_id}`;
 
   const inserted = await client.query<{ id: string }>(UNCERTAIN_TASK_STATEMENT, [
-    target.recordType,
-    target.recordId,
+    row.record_type,
+    row.record_id,
     title,
     row.id,
   ]);
@@ -320,8 +317,8 @@ async function openUncertainTask(client: PoolClient, row: UncertainActionRow): P
   const taskId = existing === undefined ? null : Number(existing.id);
 
   await client.query(UNCERTAIN_ACTIVITY_STATEMENT, [
-    target.recordType,
-    target.recordId,
+    row.record_type,
+    row.record_id,
     row.run_id,
     JSON.stringify({
       actionLogId: Number(row.id),

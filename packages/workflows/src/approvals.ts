@@ -410,11 +410,12 @@ async function decideOnce(
         meta,
       ]);
       // Last, because `hf_activity` is in the last lock tier and every `hf_approval` write is
-      // already behind us. Fatal under the same rule as the audit row above.
+      // already behind us. Fatal under the same rule as the audit row above. The record columns
+      // follow the approval's, NULL included — a stand-in type would fail E002 at the next boot.
       const target = byId.get(row.approvalId)!;
       await client.query(ACTIVITY_STATEMENT, [
-        target.record_type ?? "hf_approval",
-        target.record_id ?? String(row.approvalId),
+        target.record_type,
+        target.record_id,
         `approval.${options.decision}`,
         options.userId ?? null,
         meta,

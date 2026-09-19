@@ -4,6 +4,7 @@
     "0001_llm_call_reservation_index",
     "0002_approvals",
     "0003_auth_invitation",
-    "0004_machinery"
+    "0004_machinery",
+    "0005_nullable_activity_task_record"
   ]
 }
