@@ -1,4 +1,5 @@
 import type { DBOSClient } from "@dbos-inc/dbos-sdk";
+import type { StepDatabase } from "@hyperfixation/db";
 import type { Flow } from "@hyperfixation/workflows";
 import type { Pool } from "pg";
 import { describe, expect, it } from "vitest";
@@ -106,6 +107,28 @@ describe("defineApp", () => {
     expect(() =>
       defineApp({ name: "demo", flows: [fakeFlow("score")], schedules: [schedule] }),
     ).not.toThrow();
+  });
+
+  it("resolves resolution.batch's resolver and table through the registries", () => {
+    const resolver = fakeResolver("business");
+    const tx = {} as StepDatabase;
+
+    const wired = defineApp({
+      name: "demo",
+      resolvers: [resolver],
+      records: [{ table: "businesses", recordType: "business" }],
+    });
+    // No statement is issued: `resolveBatch` reads `$client` off the handle it is given, and
+    // the names are looked up before that, which is all this case is about.
+    expect(() => wired.resolution.batch(tx, { resolver: "nobody", source: "filings" })).toThrow(
+      UnknownRegistration,
+    );
+
+    // The record type the resolver names, not the resolver's own name, is what has to resolve.
+    const unmapped = defineApp({ name: "demo", resolvers: [resolver] });
+    expect(() =>
+      unmapped.resolution.batch(tx, { resolver: "business", source: "filings" }),
+    ).toThrow(/no record type named "business"/);
   });
 
   it("refuses a fuzzy threshold outside (0, 1]", () => {

@@ -1,5 +1,5 @@
 import type { DBOSClient } from "@dbos-inc/dbos-sdk";
-import type { RecordTable } from "@hyperfixation/db";
+import type { RecordTable, StepDatabase } from "@hyperfixation/db";
 import {
   reconcile,
   runsStart,
@@ -19,6 +19,7 @@ import type { PageDefinition } from "./pages.js";
 import { pauseApp, resumeApp, type PauseOptions, type PauseResult, type ResumeResult } from "./pause.js";
 import { archiveRecord, type ArchiveOptions, type ArchiveResult } from "./records.js";
 import { createRegistry, UnknownRegistration, type Registry } from "./registry.js";
+import { resolveBatch, type ResolveBatchResult } from "./resolution.js";
 import type { ResolverDefinition } from "./resolvers.js";
 import {
   fireSchedule,
@@ -100,6 +101,21 @@ export interface AppRecords {
   archive(options: ArchiveOptions): Promise<ArchiveResult>;
 }
 
+export interface AppResolutionBatchOptions {
+  resolver: string;
+  source: string;
+  limit?: number | undefined;
+  maxAttempts?: number | undefined;
+}
+
+export interface AppResolution {
+  /**
+   * Step-side, so it takes the open `ctx.tx` and not the control plane: resolution is a write
+   * inside a run's transaction, and the table comes from the resolver's registered record type.
+   */
+  batch(tx: StepDatabase, options: AppResolutionBatchOptions): Promise<ResolveBatchResult>;
+}
+
 export interface AppSchedules extends Registry<AnySchedule> {
   /** Starts the schedule's flow now, unless the app is paused. */
   fire(name: string): Promise<ScheduleFired>;
@@ -117,6 +133,7 @@ export interface App {
   readonly approvalTypes: Registry<ApprovalTypeDefinition>;
   readonly channels: Registry<ActionChannel>;
   readonly records: AppRecords;
+  readonly resolution: AppResolution;
   /** Keyed by `path`, not by a name: the path is what a workspace link points at. */
   readonly pages: Registry<PageDefinition>;
   readonly schedules: AppSchedules;
@@ -227,6 +244,18 @@ export function defineApp(options: DefineAppOptions): App {
       async archive(archiveOptions) {
         const { pool, client } = controlPlane("records.archive");
         return archiveRecord(pool, client, recordTypes, archiveOptions);
+      },
+    },
+    resolution: {
+      batch(tx, batchOptions) {
+        const resolver = resolvers.require(batchOptions.resolver);
+        return resolveBatch(tx, {
+          resolver,
+          table: recordTypes.require(resolver.recordType).table,
+          source: batchOptions.source,
+          limit: batchOptions.limit,
+          maxAttempts: batchOptions.maxAttempts,
+        });
       },
     },
 

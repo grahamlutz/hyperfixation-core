@@ -19,7 +19,7 @@ import { RecordTable } from '@hyperfixation/db';
 import { RunsStartOptions } from '@hyperfixation/workflows';
 import type { RunStatus } from '@hyperfixation/db';
 import { StartedRun } from '@hyperfixation/workflows';
-import type { StepDatabase } from '@hyperfixation/db';
+import { StepDatabase } from '@hyperfixation/db';
 
 // @public
 export type AnyFlow = Flow<never, unknown>;
@@ -64,6 +64,8 @@ export interface App {
     // (undocumented)
     readonly records: AppRecords;
     // (undocumented)
+    readonly resolution: AppResolution;
+    // (undocumented)
     readonly resolvers: Registry<ResolverDefinition>;
     // (undocumented)
     resume(options?: PauseOptions): Promise<ResumeResult>;
@@ -96,6 +98,23 @@ export interface AppRecords {
     // (undocumented)
     archive(options: ArchiveOptions): Promise<ArchiveResult>;
     readonly types: Registry<RecordTable>;
+}
+
+// @public (undocumented)
+export interface AppResolution {
+    batch(tx: StepDatabase, options: AppResolutionBatchOptions): Promise<ResolveBatchResult>;
+}
+
+// @public (undocumented)
+export interface AppResolutionBatchOptions {
+    // (undocumented)
+    limit?: number | undefined;
+    // (undocumented)
+    maxAttempts?: number | undefined;
+    // (undocumented)
+    resolver: string;
+    // (undocumented)
+    source: string;
 }
 
 // @public (undocumented)
@@ -153,6 +172,9 @@ export interface ArchiveResult {
 export function bearerToken(request: Request): string | null;
 
 // @public
+export function bigramDice(a: string, b: string): number;
+
+// @public
 export interface ControlPlane {
     // (undocumented)
     client: DBOSClient;
@@ -168,6 +190,12 @@ export function createRegistry<T>(kind: string, keyOf?: (entry: T) => string): R
 
 // @public
 export function createStatusHandler(options: StatusHandlerOptions): (request: Request) => Promise<Response>;
+
+// @public (undocumented)
+export const DEFAULT_RESOLVE_LIMIT = 500;
+
+// @public (undocumented)
+export const DEFAULT_RESOLVE_MAX_ATTEMPTS = 3;
 
 // @public
 export function defineApp(options: DefineAppOptions): App;
@@ -224,6 +252,12 @@ export class DuplicateRegistration extends Error {
 
 // @public
 export function fireSchedule(pool: Pool, schedule: AnySchedule, start: (flow: Flow<unknown, unknown>, input: unknown) => Promise<StartedRun>): Promise<ScheduleFired>;
+
+// @public
+export const FUZZY_CANDIDATE_LIMIT = 20;
+
+// @public
+export function fuzzyCandidateStatement(table: string, field: string): string;
 
 // @public
 export function hashStatusToken(token: string): string;
@@ -317,6 +351,39 @@ export interface Registry<T> {
     readonly size: number;
 }
 
+// @public
+export function resolveBatch(tx: StepDatabase, options: ResolveBatchOptions): Promise<ResolveBatchResult>;
+
+// @public (undocumented)
+export interface ResolveBatchOptions {
+    limit?: number | undefined;
+    // (undocumented)
+    maxAttempts?: number | undefined;
+    // (undocumented)
+    resolver: ResolverDefinition;
+    // (undocumented)
+    source: string;
+    table: string;
+}
+
+// @public (undocumented)
+export interface ResolveBatchResult {
+    // (undocumented)
+    created: number;
+    done: boolean;
+    // (undocumented)
+    error: number;
+    // (undocumented)
+    linkedExact: number;
+    // (undocumented)
+    linkedFuzzy: number;
+    // (undocumented)
+    review: number;
+    // (undocumented)
+    scanned: number;
+    updated: number;
+}
+
 // @public (undocumented)
 export interface ResolverDefinition<P = unknown> {
     // (undocumented)
@@ -338,6 +405,7 @@ export interface ResolverDefinition<P = unknown> {
 // @public (undocumented)
 export interface ResolverFuzzy {
     readonly field: string;
+    readonly payloadKey?: string;
     readonly threshold: number;
 }
 
