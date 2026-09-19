@@ -724,7 +724,7 @@ The gate assertion is end-to-end: a gate at the app default opens the month's ro
 is refused with `BudgetExceeded`, the admin raises the period's budget, and **the same call then goes
 through** — then a budget of 0, below what the period spent, refuses the one after it.
 
-### C6 — The workspace — 🚧 In progress (C6.1–C6.3 landed; C6.4–C6.7 open), **descriptors, template renders**
+### C6 — The workspace — 🚧 In progress (C6.1–C6.4 landed; C6.5–C6.7 open), **descriptors, template renders**
 
 **Decided (Graham, 2026-09-19):** (1) scope is the **full spec** — home, approval inbox with batch approve and
 inline edit, pipeline board, record page with timeline — **split into PRs**: the core descriptors first, then the
@@ -801,6 +801,23 @@ under a bump race (does a stale attempt get `StaleAttempt` before sending?) and 
 > `inbox({ userId: null })` counted every unassigned row as `mine`. Everything else held: `decide` with `via` smuggled in
 > the options, a truthy non-boolean `admin`, a leaked `decisionKey` and a mixed batch all refuse; identifiers go
 > through `quoteIdent`; `record()` deliberately shows every pending approval on the record regardless of assignee.
+
+> **C6.4 built (template #19), and where it differs from the plan:** the demo record type is registered as a
+> `RecordDefinition` with a title, `displayColumn` and ordered `stages` (C6.6 needs them). `src/workspace.ts`'s
+> `workspaceRequest()` is the one boundary the page and its server actions share: it still calls `src/auth.ts`'s
+> `requireSession` and maps the session to `{ userId, admin }`. The screens are in `app/(workspace)/w/[[...path]]/views.tsx`
+> with the two server actions (add a label, one-click archive) passed as props, so `react-dom/server` can render them;
+> `vitest.config.ts` gained `tests/**/*.test.tsx`. `board`, `inbox`, `approval` and `page` routes render a placeholder
+> until C6.5/C6.6. Plain server components, no Tailwind or shadcn; an ESLint `no-restricted-syntax` forbids
+> `dangerouslySetInnerHTML` under `app/(workspace)/**` (`eslint.config.js` repeats the shared `sendInTransaction`
+> selector, because that rule replaces rather than merges). The workspace e2e is a second `describe` in
+> `exit-bar.e2e.ts` and seeds its record in SQL; it was run against a generated app because the template itself
+> cannot migrate (`__APP_NAME__` fails the role-name rule) — sign in, home, record page, label, archive, the `manual`
+> timeline group, 404s. Findings for core, open: `bootstrapAdmin` takes `{ email }` while `BootstrapAdminOptions` also
+> advertises `designatedEmail` (passing only that crashes on `options.email.trim()`); `migrate()` needs the roles to
+> exist, nothing outside the `hf` CLI provisions them, and it assumes `public` is owned by the migrator, so a plain
+> `CREATE DATABASE` then `pnpm migrate` fails twice first; `RecordView.row` is a raw `Record<string, unknown>` with SQL
+> column names, so a template re-implements labelling — a `draftFields`-style flattening would remove that.
 
 **Done:** `pnpm --filter @hyperfixation/core test workspace` (escaping; a batch decision with one edit reaches
 `decide()` with that edit and one `decisionKey`); the template's e2e extended — sign in, see the inbox, approve
@@ -988,7 +1005,7 @@ number here.
 |---|---|---|---|---|
 | **L — ledger** (L1–L5b) | `ai` (+ one `startWorker` hook in `workflows` for L2) | chunk 0 | T2 needs L1; Exit needs all | ✅ L1–L5b done |
 | **P — approvals and actions** (P1–P4) | `workflows` | chunk 0 | T2 needs P1, P2; Exit needs all | ✅ P1–P4 done |
-| **C — core** (C1–C6) | `core`, `db` (C2), `admin` (C5) | chunk 0 | T2 needs C1–C4; Exit needs C6 | 🚧 C1–C5 and C6.1–C6.3 done; C6.4–C6.7 open (template) |
+| **C — core** (C1–C6) | `core`, `db` (C2), `admin` (C5) | chunk 0 | T2 needs C1–C4; Exit needs C6 | 🚧 C1–C5 and C6.1–C6.4 done; C6.5–C6.7 open (template) |
 | **T — testing and template** (T1–T3) | `testing`, `hyperfixation-template` | chunk 0 for T1; the others as listed | Exit | 🚧 T1, T0, T2 done; T3 open |
 
 **Execution model.** Chunk 0 is one PR by one head, first. After it the three tracks are genuinely
