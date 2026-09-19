@@ -23,9 +23,10 @@ Phase 1 actually built; this document assumes it and does not restate it.
 | 🚧 In progress | partially built |
 | ⬜ Not started | nothing built yet |
 
-**Landed so far (core main at `451e086`, 2026-09-19):** chunk 0 (#8), L1 (#10), C1 (#11), P1 (#13), L2 (#14), L3 (#17),
+**Landed so far (core main at `1f3a857`, 2026-09-19):** chunk 0 (#8), L1 (#10), C1 (#11), P1 (#13), L2 (#14), L3 (#17),
 C2 (#18), P2 (#19), L4 (#21), P3 (#22), C3 (#23), T1 (#24), C4 (#25), L5a (#26), C5 (#28), the T2 core prerequisite
-C0 (#30), L5b (#29); in `hyperfixation-template`, T0 (#12) and the `replace-demo` drop-step fix (#13). Their
+C0 (#30), L5b (#29); in `hyperfixation-template`, T0 (#12), the `replace-demo` drop-step fix (#13), T2a (#14) and T2b
+(#15). Their
 "Built, and where it differs" notes below record every place the build departed from this document's wording;
 the markers on the remaining chunks are unchanged.
 
@@ -792,7 +793,7 @@ with `attempts: 2`; a fixture flow with a plain `INSERT` rejects with `RestartCh
 (`UnfencedWrite`) in ~1 s, not a timeout; `restart: { skip }` runs one attempt. `flow-restart.test.ts` in the
 template green over it — T2's half, the template being a separate repo.
 
-### T2 — The demo registrations and `tests/contract.test.ts` — 🚧 In progress (C0 and T0 landed; split into T2a–T2d)
+### T2 — The demo registrations and `tests/contract.test.ts` — 🚧 In progress (C0, T0, T2a, T2b landed; T2c, T2d open)
 
 **Split, as planned 2026-09-19 (each its own PR, across two repos):** C0 (core: the fixture provider, `score()` with a
 step context — landed, #30) and T0 (template: `demo_note` adopts the mixin — landed, template #12) first; **T2a**
@@ -804,6 +805,20 @@ replace-demo skill. The template's CI builds core's `main`, so each core change 
 needs it. Decisions taken: fixtures are served only when **no** provider key is set (never per provider — a missing
 OpenAI key must not silently produce fake drafts); the email channel uses nodemailer's `jsonTransport` when
 `SMTP_URL` is unset (mailpit stays the exit bar's); the allowlist is a constant, not a new env var.
+
+> **T2a and T2b built (template #14, #15), and where they differ from the plan:** `flow-restart.test.ts` runs
+> `runFlowSync` over `app.flows.all()` with `it.each`, plus a values test (`runFlowSync` counts rows, so a scorer
+> that found nothing to score would pass identically). `recordDemoNote` is **retired**; the three flows take
+> registration names as input (`{ source }`, `{ resolver, source }`, `{ scorer }`); `demo_note` gains a nullable
+> `contact_email` (template migration `0002`); the schedule tick is 30 s against three 10-minute schedules and is
+> per-process (`lastFired` is not persisted; every flow it starts is keyed); the test worker does not run it; the
+> test seeds `hf_app_state.budget_usd` because a fresh database has no row and the gate refuses outright.
+> Findings for core, none fixed yet: (1) `hf_source_run` grows on every restart by design (`loadSource` books each
+> call), so keep it out of `runFlowSync`'s counted tables; (2) `llm.run` returns only the output, so
+> `hf_score.llm_call_id` stays null for LLM-assigned scores; (3) `LlmRunOptions.schema`'s `JSONSchema7` is not
+> re-exported from `@hyperfixation/ai`, so a template cannot type a hoisted schema constant without deriving it;
+> (4) `resolveBatch` leaves `done` false forever when a batch fills its `limit` with `review` rows (they stay
+> scannable), so a `while (!done)` loop never ends — the demo flow caps at 1000 batches.
 
 The shape doc's loop, one registered example per file: a sample **source** (fixture JSON → the COPY loader),
 the **resolver** on `normalized_name`, a sample **spec** and a **scorer** (`llm.run`, `score:<record_id>`),
@@ -882,7 +897,7 @@ number here.
 | **L — ledger** (L1–L5b) | `ai` (+ one `startWorker` hook in `workflows` for L2) | chunk 0 | T2 needs L1; Exit needs all | ✅ L1–L5b done |
 | **P — approvals and actions** (P1–P4) | `workflows` | chunk 0 | T2 needs P1, P2; Exit needs all | 🚧 P1–P3 done; P4 open (decided: callback handler only) |
 | **C — core** (C1–C6) | `core`, `db` (C2), `admin` (C5) | chunk 0 | T2 needs C1–C4; Exit needs C6 | 🚧 C1–C5 done; C6 open (decided: full spec, split; app-registered stages) |
-| **T — testing and template** (T1–T3) | `testing`, `hyperfixation-template` | chunk 0 for T1; the others as listed | Exit | 🚧 T1, T0 done; T2 in progress (T2a, T2b started); T3 open |
+| **T — testing and template** (T1–T3) | `testing`, `hyperfixation-template` | chunk 0 for T1; the others as listed | Exit | 🚧 T1, T0, T2a, T2b done; T2c, T2d, T3 open |
 
 **Execution model.** Chunk 0 is one PR by one head, first. After it the three tracks are genuinely
 independent — they touch disjoint packages, and the one shared file each will touch is its own package's
