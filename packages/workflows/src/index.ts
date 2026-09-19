@@ -19,6 +19,7 @@ export {
   type StartWorkerOptions,
   type Worker,
 } from "./start-worker.js";
+export { registerLangfuse, LANGFUSE_ENV, type LangfuseRegistration } from "./langfuse.js";
 export { getClient, resetClient, CLIENT_POOL_SIZE, type GetClientOptions } from "./client.js";
 export {
   setPausedQueueConcurrency,
