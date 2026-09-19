@@ -724,7 +724,7 @@ The gate assertion is end-to-end: a gate at the app default opens the month's ro
 is refused with `BudgetExceeded`, the admin raises the period's budget, and **the same call then goes
 through** — then a budget of 0, below what the period spent, refuses the one after it.
 
-### C6 — The workspace — 🚧 In progress (C6.1–C6.6 landed; C6.7 open), **descriptors, template renders**
+### C6 — The workspace — ✅ Done (C6.1–C6.7), **descriptors, template renders**
 
 **Decided (Graham, 2026-09-19):** (1) scope is the **full spec** — home, approval inbox with batch approve and
 inline edit, pipeline board, record page with timeline — **split into PRs**: the core descriptors first, then the
@@ -824,6 +824,18 @@ under a bump race (does a stale attempt get `StaleAttempt` before sending?) and 
 > It shows "showing first N" when a full page comes back. Findings for core, open: `BoardView` reports neither the
 > limit used nor whether it was hit, so truncation is inferred from a full page; `DEFAULT_BOARD_LIMIT` is exported from
 > `@hyperfixation/core` but not from the framework-light `/workspace` subpath the template renders from.
+
+> **C6.7 built (template #23):** `src/notify.ts` — `approvalRecipients()` (the assignee's `hf_user.email`, else every
+> `role = 'admin'` user, read through the step's `ctx.tx`) and `approvalNotifier(send?)`, built with core's
+> `createApprovalNotifier`, `appUrl` from `requireEnv("APP_URL")` (no new env var) — passed as `approvalNotifier` in
+> `worker.ts` and `tests/worker-fixture.ts`. `tests/notify.test.ts` opens a real gate through `draftDemoOutreach` on a
+> spawned worker (`notified_at` stamped), then runs the notifier with a capturing `send`: one message, both admins,
+> `${APP_URL}/w/approvals/<id>`; the assignee alone when named; no recipients → one warn, no send. The e2e asserts one
+> mailpit message to the admin whose link, signed in as the admin, opens that approval. Where it differs: the notifier
+> builds its own lazy nodemailer transport (`jsonTransport` when `SMTP_URL` is unset) because `src/email.ts` hard-requires
+> `SMTP_URL` for OTPs; `tests/worker-fixture.ts` defaults `APP_URL` to `http://localhost:3000` because `pnpm test`
+> and CI set none and a worker would die on `MissingEnv`. **Open:** a **banned admin is still a recipient** (the decided
+> rule taken verbatim); decide whether the recipient read should filter banned users.
 >
 > **C6.5 built (template #21), and its adversary:** `/w/approvals` (batch approve/reject with inline edit, one
 > `workspace.decide` call, a `decisionKey` minted in the browser once per mount but seeded from the server render's
@@ -988,7 +1000,7 @@ registrations:
 **Done:** `pnpm test` in a generated app — `contract.test.ts`, `flow-restart.test.ts` over every registered
 flow, `compose-envs.test.ts` — green; `hf check` green; `rg -i demo` finds only the allowed files.
 
-### T3 — The template's telemetry half — ⬜ Not started (with L2)
+### T3 — The template's telemetry half — ✅ Done (template #22)
 
 `instrumentation.ts` registers Langfuse's span processor when the keys are set; `REQUIRED_ENV` is unchanged
 (the three vars are already in it).
@@ -996,9 +1008,18 @@ flow, `compose-envs.test.ts` — green; `hf check` green; `rg -i demo` finds onl
 **Done:** `compose-envs.test.ts` unchanged and green; `next build --webpack` with the keys empty still
 prerenders.
 
+> **Built (template #22):** `instrumentation.ts` gates on the three `LANGFUSE_*` names being non-empty and then
+> `await import("@hyperfixation/workflows")` for `registerLangfuse`, below the existing `NEXT_RUNTIME === "nodejs"`
+> guard, with a module-level flag so a second `register()` cannot register twice. The env names are repeated locally
+> rather than imported as `LANGFUSE_ENV`, because importing the constant would load the OTel SDK into every web process to
+> learn telemetry is off (`registerLangfuse` re-checks, so core stays the authority). `tests/instrumentation.test.ts`
+> spies on `registerLangfuse` with `vi.mock` (OTel registration is process-wide and would leak across files that run real
+> workers). `next build --webpack` prerenders with empty keys and with dummy keys, with no Langfuse network attempt.
+> Sentry's `TODO` is left. No core findings.
+
 ---
 
-## Exit — Phase 2 exit assembly — ⬜ Not started
+## Exit — Phase 2 exit assembly — 🚧 In progress
 
 The bar, from the plan: *the demo run approves two drafts with one edit, mailpit receives the send, a
 follow-up task appears, a label is recorded; pausing mid-run stops the next flow at its next step and resuming
@@ -1028,8 +1049,8 @@ number here.
 |---|---|---|---|---|
 | **L — ledger** (L1–L5b) | `ai` (+ one `startWorker` hook in `workflows` for L2) | chunk 0 | T2 needs L1; Exit needs all | ✅ L1–L5b done |
 | **P — approvals and actions** (P1–P4) | `workflows` | chunk 0 | T2 needs P1, P2; Exit needs all | ✅ P1–P4 done |
-| **C — core** (C1–C6) | `core`, `db` (C2), `admin` (C5) | chunk 0 | T2 needs C1–C4; Exit needs C6 | 🚧 C1–C5 and C6.1–C6.6 done; C6.7 open (template) |
-| **T — testing and template** (T1–T3) | `testing`, `hyperfixation-template` | chunk 0 for T1; the others as listed | Exit | 🚧 T1, T0, T2 done; T3 open |
+| **C — core** (C1–C6) | `core`, `db` (C2), `admin` (C5) | chunk 0 | T2 needs C1–C4; Exit needs C6 | ✅ C1–C6 done |
+| **T — testing and template** (T1–T3) | `testing`, `hyperfixation-template` | chunk 0 for T1; the others as listed | Exit | ✅ T1–T3 done |
 
 **Execution model.** Chunk 0 is one PR by one head, first. After it the three tracks are genuinely
 independent — they touch disjoint packages, and the one shared file each will touch is its own package's
