@@ -509,7 +509,7 @@ two drafts with one edit, see the task and label on the record page.
 
 ## Track T — testing and the template
 
-### T1 — `runFlowSync` — ⬜ Not started (needs chunk 0)
+### T1 — `runFlowSync` — ✅ Done (deviated — see note)
 
 Extract what `hyperfixation-template/tests/flow-restart.test.ts` already does into `@hyperfixation/testing`:
 spawn a worker (DBOS cannot relaunch in-process — Phase 1's reason), start the run, wait, bump through the one
@@ -518,10 +518,46 @@ identical `hf_activity`/`hf_task` counts — are all **row counts**, because the
 process: "zero new provider calls" is *no new `hf_llm_call` row and no `possible_double_charge` flipped*.
 `{ restart: false }` opts out with a reason string. The template's test becomes a call to it.
 
-**Done:** `pnpm --filter @hyperfixation/testing test run-flow-sync` — a keyed upsert flow passes; a fixture
-flow with a plain `INSERT` fails on the second attempt with the count diff in the message; a fixture flow
-writing outside `ctx.tx` fails with the fencing failure, not a timeout. `flow-restart.test.ts` in the
-template green over it.
+> **Built, and where it differs from the wording above:** the harness is
+> `packages/testing/src/run-flow-sync.ts` but its **test and fixtures are in `workflows`**
+> (`packages/workflows/src/run-flow-sync.test.ts`, `src/test-support/{insert,unfenced}-flow.ts` and
+> `run-flow-sync-fixture.ts`), because a fixture flow needs `defineFlow`/`step`/`startWorker` and `testing`
+> cannot import `workflows` — that dependency only runs the other way (`spawn-worker.ts`). So the file the
+> spec named, `packages/testing/src/run-flow-sync.test.ts`, does not exist and `--filter @hyperfixation/testing
+> test run-flow-sync` matches nothing; the command is
+> `pnpm --filter @hyperfixation/workflows test run-flow-sync`.
+>
+> `runFlowSync(harness, flow, input, options?)` takes the caller's already-built handles
+> (`{ pool, client, worker, start, tables? }`) for the same reason: starting a run needs `runsStart` and
+> `getClient`. `harness.start` is typed on a structural `FlowRef` (`{ name, queue }`), so a caller widens its
+> `Flow<I, O>` once — the cast the template's loop already carries. Opting out is
+> `restart: { skip: "<reason>" }`, not `{ restart: false }`: the reason is mandatory by type.
+>
+> **The second fencing channel is a name-prefix match on text.** A refusal a flow *caught* arrives as
+> `spawnWorker`'s marker and is checked with `assertNoFencingFailure` after each attempt. One it did **not**
+> catch propagates out of the workflow and only reaches the parent as `hf_run.error`, which `defineFlow` wrote
+> as `${name}: ${message}` — so the harness matches `/^(UnfencedWrite|ControlPlaneInWorkflow): /` on that
+> string and raises `FencingFailureInTest` with an empty `detail`. **Verified:** an uncaught `UnfencedWrite`
+> inside a step reaches `defineFlow`'s catch with `name` intact through `DBOS.runStep`; no rewrap, no fallback
+> to message matching needed.
+>
+> Counted: `RESTART_COUNTED_TABLES` (`hf_llm_call`, `hf_action_log`, `hf_activity`, `hf_task`, `hf_audit`,
+> `hf_approval`) plus `harness.tables`, plus one non-table key `hf_llm_call.possible_double_charge` — the
+> "zero new provider calls" half. Counts are read on `harness.pool`; there is no `applicationUrl` field.
+> Attempt 1's workflow id is the bare run id (`attemptWorkflowId` only suffixes from 2), and the wait keys on
+> `current_workflow_id` with `status <> 'running'` rather than the template's `finished_at IS NOT NULL`, so a
+> `waiting` or `paused` flow settles too; both attempts must settle at the same status.
+>
+> **The harness counts rows, not values.** `upsert-flow.ts`, reused as the passing fixture, upserts
+> `count = count + 1`: its row count is unchanged across the restart (which is what `runFlowSync` asserts) but
+> the counter reads 2, because a bumped attempt is a new workflow id and every step body genuinely re-runs. A
+> flow that must be value-idempotent needs its own assertion on top of `runFlowSync`.
+
+**Done:** `pnpm --filter @hyperfixation/workflows test run-flow-sync` — 4 tests: a keyed upsert flow passes
+with `attempts: 2`; a fixture flow with a plain `INSERT` rejects with `RestartChangedCounts` naming
+`test_insert: 1 -> 2`; a fixture flow writing outside `ctx.tx` rejects with `FencingFailureInTest`
+(`UnfencedWrite`) in ~1 s, not a timeout; `restart: { skip }` runs one attempt. `flow-restart.test.ts` in the
+template green over it — T2's half, the template being a separate repo.
 
 ### T2 — The demo registrations and `tests/contract.test.ts` — ⬜ Not started (needs L1, P1, P2, C1–C4, T1)
 
@@ -583,7 +619,7 @@ number here.
 | **L — ledger** (L1–L5b) | `ai` (+ one `startWorker` hook in `workflows` for L2) | chunk 0 | T2 needs L1; Exit needs all | 🚧 L1–L3 done |
 | **P — approvals and actions** (P1–P4) | `workflows` | chunk 0 | T2 needs P1, P2; Exit needs all | 🚧 P1, P2 done |
 | **C — core** (C1–C6) | `core`, `db` (C2), `admin` (C5) | chunk 0 | T2 needs C1–C4; Exit needs C6 | 🚧 C1, C2 done |
-| **T — testing and template** (T1–T3) | `testing`, `hyperfixation-template` | chunk 0 for T1; the others as listed | Exit | ⬜ |
+| **T — testing and template** (T1–T3) | `testing`, `hyperfixation-template` | chunk 0 for T1; the others as listed | Exit | 🚧 T1 done |
 
 **Execution model.** Chunk 0 is one PR by one head, first. After it the three tracks are genuinely
 independent — they touch disjoint packages, and the one shared file each will touch is its own package's
