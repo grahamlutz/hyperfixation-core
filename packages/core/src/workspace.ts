@@ -50,6 +50,13 @@ export type {
 /** Where the template mounts the workspace. Only the default; `route()` takes what it is given. */
 export const WORKSPACE_BASE_PATH = "/w";
 
+/**
+ * How many cards a board reads per record type before it stops. Declared here rather than beside
+ * `workspaceBoard` so a template can name the default it is about to override without importing
+ * the reads — `workspace-views.ts` re-exports it for `.`.
+ */
+export const DEFAULT_BOARD_LIMIT = 500;
+
 export type WorkspaceRoute =
   | { kind: "home" }
   | { kind: "inbox" }
@@ -145,6 +152,13 @@ export function workspaceNav(registries: WorkspaceRegistries): WorkspaceNavItem[
 export interface DraftField {
   /** Dotted through objects and bracketed through arrays: `contacts[0].email`. */
   readonly path: string;
+  /**
+   * The walk from the draft root: object keys verbatim, array indexes as numbers. `path` is a
+   * display string and two different leaves can share one — `{"a.b": 1}` and `{a: {b: 2}}` both
+   * read `a.b` — so anything writing a value back follows this instead. Empty for a bare scalar
+   * draft, which is its own root.
+   */
+  readonly segments: readonly (string | number)[];
   readonly label: string;
   readonly value: string;
 }
@@ -181,20 +195,32 @@ function labelOf(key: string): string {
   return sentence.length === 0 ? key : sentence[0]!.toUpperCase() + sentence.slice(1);
 }
 
-function flatten(value: unknown, path: string, label: string, into: DraftField[]): void {
+function flatten(
+  value: unknown,
+  path: string,
+  segments: readonly (string | number)[],
+  label: string,
+  into: DraftField[],
+): void {
   if (Array.isArray(value)) {
     value.forEach((item, index) => {
-      flatten(item, `${path}[${index}]`, `${label} ${index + 1}`, into);
+      flatten(item, `${path}[${index}]`, [...segments, index], `${label} ${index + 1}`, into);
     });
     return;
   }
   if (isPlainRecord(value)) {
     for (const [key, nested] of Object.entries(value)) {
-      flatten(nested, path === "" ? key : `${path}.${key}`, labelOf(key), into);
+      flatten(
+        nested,
+        path === "" ? key : `${path}.${key}`,
+        [...segments, key],
+        labelOf(key),
+        into,
+      );
     }
     return;
   }
-  into.push({ path, label, value: leafText(value) });
+  into.push({ path, segments, label, value: leafText(value) });
 }
 
 /**
@@ -208,9 +234,9 @@ function flatten(value: unknown, path: string, label: string, into: DraftField[]
 export function draftFields(draft: unknown): DraftField[] {
   if (Array.isArray(draft) || isPlainRecord(draft)) {
     const fields: DraftField[] = [];
-    flatten(draft, "", "Value", fields);
+    flatten(draft, "", [], "Value", fields);
     return fields;
   }
   // A bare scalar draft has no key to name it, and `value` is the field name a form would post.
-  return [{ path: "value", label: "Value", value: leafText(draft) }];
+  return [{ path: "value", segments: [], label: "Value", value: leafText(draft) }];
 }
