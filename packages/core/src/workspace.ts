@@ -6,11 +6,46 @@
  * to a stranger only if one guard covers every route.
  */
 
+import type { ActivityRow } from "./activity.js";
+import type { LabelRow } from "./labels.js";
+import type { OutcomeRow } from "./outcomes.js";
 import type { PageDefinition } from "./pages.js";
 import type { RecordDefinition, StageDefinition } from "./records.js";
 import type { Registry } from "./registry.js";
+import type { TaskRow } from "./tasks.js";
+import type { WorkspaceViews } from "./workspace-views.js";
 
-export type { PageDefinition, RecordDefinition, Registry, StageDefinition };
+export type {
+  ActivityRow,
+  LabelRow,
+  OutcomeRow,
+  PageDefinition,
+  RecordDefinition,
+  Registry,
+  StageDefinition,
+  TaskRow,
+};
+
+/**
+ * The reads themselves are `@hyperfixation/core`'s — they need the pool — but their types are
+ * the template's to name, so they are re-exported here with the descriptors.
+ */
+export type {
+  BoardCard,
+  BoardColumn,
+  BoardOptions,
+  BoardView,
+  HomeOptions,
+  HomeView,
+  InboxItem,
+  InboxOptions,
+  InboxView,
+  RecordView,
+  ReviewQueueCount,
+  TimelineGroup,
+  WorkspaceDecideOptions,
+  WorkspaceViews,
+} from "./workspace-views.js";
 
 /** Where the template mounts the workspace. Only the default; `route()` takes what it is given. */
 export const WORKSPACE_BASE_PATH = "/w";
@@ -34,7 +69,7 @@ export interface WorkspaceRegistries {
   readonly pages: Registry<PageDefinition>;
 }
 
-export interface AppWorkspace {
+export interface AppWorkspace extends WorkspaceViews {
   /**
    * The catch-all's body: the segments below the mount point, resolved. `undefined` is a path the
    * workspace does not serve. No guard and no `await` — unlike the admin's `route()`, this one

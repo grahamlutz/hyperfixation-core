@@ -82,6 +82,13 @@ import {
   type AppWorkspace,
   type WorkspaceRegistries,
 } from "./workspace.js";
+import {
+  workspaceBoard,
+  workspaceHome,
+  workspaceInbox,
+  workspaceRecord,
+  type WorkspaceViewDeps,
+} from "./workspace-views.js";
 
 /**
  * A flow of any shape. `Flow<never, unknown>` is the bottom of the family: its input is
@@ -323,6 +330,11 @@ export function defineApp(options: DefineAppOptions): App {
   };
 
   const workspaceRegistries: WorkspaceRegistries = { records: recordTypes, pages };
+  const viewDeps = (operation: string): WorkspaceViewDeps => ({
+    pool: controlPlane(operation).pool,
+    records: recordTypes,
+    hasSchema: (type) => approvalTypes.get(type)?.schema !== undefined,
+  });
 
   const app: App = {
     name: options.name,
@@ -339,6 +351,21 @@ export function defineApp(options: DefineAppOptions): App {
     workspace: {
       route: (path) => workspaceRoute(workspaceRegistries, path),
       nav: () => workspaceNav(workspaceRegistries),
+      async inbox(inboxOptions) {
+        return workspaceInbox(viewDeps("workspace.inbox"), inboxOptions);
+      },
+      async home(homeOptions) {
+        return workspaceHome(viewDeps("workspace.home"), homeOptions);
+      },
+      async board(recordType, boardOptions) {
+        return workspaceBoard(viewDeps("workspace.board"), recordType, boardOptions);
+      },
+      async record(recordType, id) {
+        return workspaceRecord(viewDeps("workspace.record"), recordType, id);
+      },
+      // The one workspace write, and no second implementation of it: the web's decision is
+      // `decide()`'s, with the `via` the session already fixes.
+      decide: (decideOptions) => app.approvals.decide({ ...decideOptions, via: "web" }),
     },
     records: {
       types: recordTypes,

@@ -27,11 +27,14 @@ const CANCEL_OPEN_TASKS_STATEMENT =
   "UPDATE hf_task SET cancelled_at = now() WHERE record_type = $1 AND record_id = $2 " +
   "AND done_at IS NULL AND cancelled_at IS NULL RETURNING id";
 
+/** The columns `taskRowOf` maps, shared with the workspace's own `hf_task` reads. */
+export const TASK_COLUMNS =
+  "id, record_type, record_id, title, due_at, owner_id, done_at, cancelled_at, origin, created_at";
+
 // One statement for every filter combination: a null parameter is "no filter", which keeps the
 // shape of the query — and so its plan — the same however the workspace calls it.
 const LIST_TASKS_STATEMENT =
-  "SELECT id, record_type, record_id, title, due_at, owner_id, done_at, cancelled_at, origin, " +
-  "created_at FROM hf_task WHERE ($1::text IS NULL OR record_type = $1) " +
+  `SELECT ${TASK_COLUMNS} FROM hf_task WHERE ($1::text IS NULL OR record_type = $1) ` +
   "AND ($2::text IS NULL OR record_id = $2) AND ($3::text IS NULL OR owner_id = $3) " +
   "AND ($4::boolean IS NULL OR (done_at IS NULL AND cancelled_at IS NULL) = $4) ORDER BY id";
 
@@ -93,7 +96,7 @@ export interface TaskRow {
   createdAt: Date;
 }
 
-interface TaskQueryRow {
+export interface TaskQueryRow {
   id: string;
   record_type: string | null;
   record_id: string | null;
@@ -180,7 +183,11 @@ export async function listTasks(pool: Pool, options: TaskListOptions = {}): Prom
     options.ownerId ?? null,
     options.open ?? null,
   ]);
-  return rows.map((row) => ({
+  return rows.map(taskRowOf);
+}
+
+export function taskRowOf(row: TaskQueryRow): TaskRow {
+  return {
     id: Number(row.id),
     recordType: row.record_type,
     recordId: row.record_id,
@@ -191,7 +198,7 @@ export async function listTasks(pool: Pool, options: TaskListOptions = {}): Prom
     cancelledAt: row.cancelled_at,
     origin: row.origin,
     createdAt: row.created_at,
-  }));
+  };
 }
 
 /**
