@@ -126,10 +126,15 @@ export {
 export {
   archiveRecord,
   archiveDecisionKey,
+  assertRecordStages,
+  displayColumnOf,
   ARCHIVED_MARKER,
   ARCHIVE_OPERATION,
+  DEFAULT_DISPLAY_COLUMN,
   type ArchiveOptions,
   type ArchiveResult,
+  type RecordDefinition,
+  type StageDefinition,
 } from "./records.js";
 export {
   appStatus,
@@ -153,3 +158,14 @@ export {
   statusTokenMatches,
   STATUS_TOKEN_DIGEST,
 } from "./status-token.js";
+/**
+ * The workspace's types only — its functions are `@hyperfixation/core/workspace`. They are here
+ * because `App.workspace` names them.
+ */
+export type {
+  AppWorkspace,
+  DraftField,
+  WorkspaceNavItem,
+  WorkspaceRegistries,
+  WorkspaceRoute,
+} from "./workspace.js";
