@@ -1072,11 +1072,36 @@ the template's e2e suite. What is still open, none of it blocking:
 - **Decided (Graham, 2026-09-19):** the bar's "flat connection count" is **restated as "bounded: no upward drift and a
   peak under the limit"** (the soak measured a peak of 9 against a budget of 24 and a limit of 25, and cannot be flat
   because `pg.Pool` closes idle clients after 10 s); and the notifier's recipient read **excludes banned users**.
-- **In flight (2026-09-19), one PR each:** core `draftFields` gains `segments` and `BoardView` reports `limit` and
-  `truncated` (and `DEFAULT_BOARD_LIMIT` on the `/workspace` subpath); core `hf_score.spec_name` (migration 0007) and
-  `waitForRun` in `@hyperfixation/testing`; core `bootstrapAdmin`'s `designatedEmail` contract and `migrate()`'s
-  role/ownership assumption; template banned-recipient exclusion and the C5 budget form.
-- **Template, unrelated:** the template's own open PR #11 (the $10 dev budget note).
+- **Landed (2026-09-19), one PR each:**
+  - **Core #46:** `DraftField` gains `segments: readonly (string | number)[]` (object keys verbatim, indexes as numbers);
+    `BoardView` gains `limit` and `truncated` (`LIMIT limit + 1`, then trim, so it is the same snapshot as the cards);
+    `DEFAULT_BOARD_LIMIT` is on the `/workspace` subpath too (declared in `workspace.ts`, re-exported from
+    `workspace-views.ts`, because the other direction would pull `pg` into the framework-light subpath).
+  - **Core #48:** `bootstrapAdmin`'s `email` is now optional and falls back to the designation in force
+    (`designatedEmail`, else `HF_BOOTSTRAP_EMAIL`), and `BootstrapRefused("no-designation")` is finally thrown;
+    `migrate()` **refuses once** (it does not provision) with a preflight for the application role, `CREATE` on the
+    database and `CREATE` on `public`, naming every missing item and `hf migrate` / `provisionRoles()` — a bare
+    database used to cost three runs (`drizzle` schema, `public`, the `dbos -r` role).
+  - **Core #49:** migration `0007_score_spec_name` adds a nullable `hf_score.spec_name` and replaces
+    `hf_score_run_key_uq` with `(run_id, key, spec_name)`; `writeScore` fills it, and the replay and timeline keys now
+    include the spec name (two specs scored in one step used to collapse into one row); `latestScores()` is
+    `DISTINCT ON (spec_name)`. `@hyperfixation/testing` gains `waitForRun(pool, runId, status | predicate, { timeoutMs, intervalMs })`
+    whose `RunNeverMatched` prints the last observed row. **Known and accepted, nothing being deployed yet:** a run in
+    flight across the deploy has pre-0007 rows with `spec_name` NULL, so a replay writes a duplicate score row and
+    timeline entry; the record mixin's `score`/`score_explanation`/`spec_version` still hold whichever spec wrote last
+    (`latestScores` works around it); legacy NULL-spec rows bucket together and order by `id`.
+  - **Template #25 and #26:** the notifier excludes a user only while `banned IS TRUE AND (ban_expires IS NULL OR ban_expires > now())`
+    — a banned assignee falls through to the admins, an `assigneeId` with no row still notifies nobody; the C5 admin
+    budget form sits on a `budget-periods` row (`scope: "row"`), refuses a blank input (`Number("")` is 0, a zeroed
+    ceiling being the kill-lever), and is covered by `admin-budget`, `admin-budget-render` and an e2e over period
+    `1999-01`. **Template #27:** the board reads `view.truncated`/`view.limit` and drops its local `BOARD_LIMIT`.
+  - **A lesson recorded:** core #46 made the two `BoardView` fields required, which turned template main red (the
+    template's CI builds core's `main`, and `tests/board-render.test.tsx` built a `BoardView` literal), and #26 and #11
+    merged into it. **Before merging a core PR that changes an exported type, run the template's typecheck and tests
+    against the PR's build** (check out the branch in the core checkout, `pnpm turbo build`, then the template).
+- **Open finding for core:** `packages/auth/src/policy.ts:91` refuses on `banned === true` alone and ignores
+  `ban_expires`, so a lapsed ban still 404s the user out of `/admin` and `/w` — the opposite of what the notifier now
+  does. **Template, unrelated:** PR #11 (the $10 dev budget note) merged.
 
 ---
 
