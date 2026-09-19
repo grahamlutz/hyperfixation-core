@@ -338,9 +338,9 @@ expression changed under them).
 > owned by `createLlm` in `packages/ai/src/llm-run.ts`** — not `ControlPlane.attach`. `attach()` lives in
 > `@hyperfixation/core`, which `@hyperfixation/ai` does not and cannot depend on (the dependency runs the
 > other way), so the gate had no way to read a clock passed there. The *intent* of the decision is unchanged:
-> one optional injected clock defaulting to `() => new Date()`, constructible only by
-> `@hyperfixation/testing`, never passed by any production path, no SQL `now()` override, no new function and
-> no migration. The alternatives considered and rejected for the same reason the doc rejects the GUC:
+> one optional injected clock, unset on every production path and in practice constructed only by
+> `@hyperfixation/testing`, no SQL `now()` override, no new function and no migration. Unset, the gate reads
+> the period from Postgres exactly as before — see the trade-off below. The alternatives considered and rejected for the same reason the doc rejects the GUC:
 > `LedgerContext`/`StepContext` would have routed a test knob through `workflows`' `step()` and
 > `startWorker()`, which is production surface.
 >
@@ -363,13 +363,18 @@ expression changed under them).
 > assertions untouched. The worker-side plumbing (`clockAt` + the `clock <iso>` line) is under test once, in
 > `packages/testing/src/spawn-worker.test.ts`.
 >
-> **Inside the gate**, the period is read **once per transaction** in JS (`periodOf(clock())`) and that one
-> value binds every statement of the gate — the `hf_budget_period` upsert, the `FOR UPDATE`, the insert, the
-> reservation query and the re-entry `UPDATE` — so a gate can no longer straddle two months, and a retry
-> still gets a fresh read. The completion keeps billing `gate.period`, and `finished_at = now()` stays real
-> time: it is audit time, not a billing period. `status.ts` and `reconcile()` are untouched for the same
-> reason — the invariant "billed to the period on its own row" makes drift exact regardless of which month
-> the reader is in.
+> **Postgres is still the production time authority.** The gate's `SELECT` is byte-for-byte `origin/main`'s,
+> `to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM')` included, and the period comes from it whenever no clock is
+> injected; `periodOf(clock())` is taken *only* on the injected branch. A first cut defaulted the option to
+> `() => new Date()` and dropped the SQL, which was wrong: with N workers and host-clock skew S, for S
+> seconds around a month boundary two workers would stamp different periods, lock different
+> `hf_budget_period` rows and be unable to see each other's reservations. One database clock is precisely
+> what the SQL expression was buying, so "production never passes a clock" has to mean the production SQL is
+> unchanged too. There is **no** new single-read property to claim — `origin/main` already read the stamp
+> once per gate transaction into JS and bound it to every later statement, and that is untouched. The
+> completion still bills `gate.period`, `finished_at = now()` stays real time (audit time, not a billing
+> period), and `status.ts` and `reconcile()` are untouched — the invariant "billed to the period on its own
+> row" makes drift exact regardless of which month the reader is in.
 >
 > **Worth knowing:** the re-entry `UPDATE` re-stamps `period` to the *replaying* gate's month, by design. A
 > September `started` row re-entered in October bills October, and the row carries `possible_double_charge`
