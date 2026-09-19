@@ -29,7 +29,18 @@ export interface ApprovalNotice {
   key: string;
   type: string;
   draft: unknown;
+  /** The four below are read back from the row, so `expires_at` is the one the database computed. */
+  assigneeId: string | null;
+  recordType: string | null;
+  recordId: string | null;
+  expiresAt: Date | null;
 }
+
+/**
+ * The step context is the notifier's only database handle: a recipient read goes through
+ * `ctx.tx`, so it is fenced by the same `FOR SHARE` on `hf_run` as the rest of the step.
+ */
+export type ApprovalNotifier = (notice: ApprovalNotice, ctx: StepContext) => Promise<void>;
 
 export interface WaitForApprovalOptions {
   /** Unique within the run and stable across attempts, exactly as a ledger key is. */
@@ -42,8 +53,8 @@ export interface WaitForApprovalOptions {
   recordId?: string;
   /** From the row's creation; `reconcile()` step (5) expires the row once it is past. */
   expiresInMs?: number;
-  /** The minimum slice's whole notification story: whatever the app hands it. */
-  notify?(notice: ApprovalNotice): Promise<void>;
+  /** Overrides the worker's `approvalNotifier`, which is what the gate falls back to. */
+  notify?: ApprovalNotifier;
 }
 
 export interface ApprovalDecision {
@@ -64,6 +75,11 @@ interface ApprovalRow extends Record<string, unknown> {
   decided_by: string | null;
   decided_via: ApprovalVia | null;
   notified_at: Date | null;
+  assignee_id: string | null;
+  record_type: string | null;
+  record_id: string | null;
+  /** ISO 8601: `db.execute` hands a timestamp back as the driver's own string, not a `Date`. */
+  expires_at: string | null;
 }
 
 /**
@@ -86,7 +102,10 @@ export async function waitForApproval(
   const row = await step("approval", (ctx) => createOrRead(ctx, options), { key: options.key });
   if (row.status !== "pending") return decisionOf(row, options.key);
 
-  await step("approval:notify", (ctx) => notify(ctx, options, row), { key: options.key });
+  const notifier = options.notify ?? runtime.approvalNotifier;
+  await step("approval:notify", (ctx) => notify(ctx, options, row, notifier), {
+    key: options.key,
+  });
 
   await concludeRun(runtime.control.pool, run.runId, run.workflowId, "waiting", null);
   throw new Suspend(run.runId, "waiting", `approval ${options.key} is pending`);
@@ -114,7 +133,8 @@ async function createOrRead(
       ON CONFLICT (run_id, key) DO NOTHING
     `);
     const read = await db.execute<ApprovalRow>(sql`
-      SELECT id, status, draft, edited_draft, decided_by, decided_via, notified_at
+      SELECT id, status, draft, edited_draft, decided_by, decided_via, notified_at,
+             assignee_id, record_type, record_id, to_json(expires_at) #>> '{}' AS expires_at
       FROM hf_approval WHERE run_id = ${ctx.runId} AND key = ${options.key}
     `);
     return read.rows[0]!;
@@ -126,15 +146,23 @@ async function notify(
   ctx: StepContext,
   options: WaitForApprovalOptions,
   row: ApprovalRow,
+  notifier: ApprovalNotifier | undefined,
 ): Promise<void> {
   if (row.notified_at !== null) return;
-  await options.notify?.({
-    approvalId: Number(row.id),
-    runId: ctx.runId,
-    key: options.key,
-    type: options.type,
-    draft: row.draft,
-  });
+  await notifier?.(
+    {
+      approvalId: Number(row.id),
+      runId: ctx.runId,
+      key: options.key,
+      type: options.type,
+      draft: row.draft,
+      assigneeId: row.assignee_id,
+      recordType: row.record_type,
+      recordId: row.record_id,
+      expiresAt: row.expires_at === null ? null : new Date(row.expires_at),
+    },
+    ctx,
+  );
   await ctx.tx(async (db) => {
     await db.execute(sql`
       UPDATE hf_approval SET notified_at = now()

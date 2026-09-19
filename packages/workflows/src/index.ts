@@ -63,11 +63,18 @@ export {
   type ApprovalDecisionKind,
   type ApprovalDraftSchema,
   type ApprovalNotice,
+  type ApprovalNotifier,
   type DecideOptions,
   type DecideResult,
   type DecidedApproval,
   type WaitForApprovalOptions,
 } from "./approvals.js";
+export {
+  createApprovalNotifier,
+  NO_RECIPIENTS_MARKER,
+  type ApprovalMessage,
+  type ApprovalNotifierOptions,
+} from "./approval-notifier.js";
 export { UnknownFlow } from "./bump.js";
 export { Suspend, SUSPEND_STATUSES, type SuspendStatus } from "./suspend.js";
 export { currentRun, OutsideRun, type RunContext } from "./run-context.js";

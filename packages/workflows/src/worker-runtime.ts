@@ -1,4 +1,5 @@
 import type { StepPool } from "@hyperfixation/db";
+import type { ApprovalNotifier } from "./approvals.js";
 import type { ControlPool } from "./control-pool.js";
 
 /** What a running flow needs from the worker that launched it. */
@@ -7,6 +8,8 @@ export interface WorkerRuntime {
   applicationVersion: string;
   steps: StepPool;
   control: ControlPool;
+  /** What `waitForApproval` notifies through when the call passes no `notify` of its own. */
+  approvalNotifier?: ApprovalNotifier;
 }
 
 export class WorkerNotStarted extends Error {

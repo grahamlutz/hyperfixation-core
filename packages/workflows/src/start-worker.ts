@@ -6,6 +6,7 @@ import {
   type RecordTable,
   type StepPool,
 } from "@hyperfixation/db";
+import type { ApprovalNotifier } from "./approvals.js";
 import { createControlPool, type ControlPool } from "./control-pool.js";
 import { registerLangfuse, type LangfuseRegistration } from "./langfuse.js";
 import { setPausedQueueConcurrency } from "./queue-concurrency.js";
@@ -91,6 +92,8 @@ export interface StartWorkerOptions {
   recordTables?: readonly RecordTable[];
   /** The app's own migrations directory, for E005. */
   appMigrationsDir?: string;
+  /** The gate's notifier for every `waitForApproval` that passes none itself. */
+  approvalNotifier?: ApprovalNotifier;
 }
 
 export interface Worker {
@@ -133,7 +136,13 @@ export async function startWorker(options: StartWorkerOptions): Promise<Worker> 
 
   // Before the lock and launch: DBOS recovery can run a flow the instant `launch()` returns,
   // and a recovered flow reaches `workerRuntime()` the same as a freshly dispatched one.
-  setWorkerRuntime({ appName: options.appName, applicationVersion, steps, control });
+  setWorkerRuntime({
+    appName: options.appName,
+    applicationVersion,
+    steps,
+    control,
+    approvalNotifier: options.approvalNotifier,
+  });
 
   let client: DBOSClient | undefined;
   try {
