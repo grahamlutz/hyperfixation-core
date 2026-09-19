@@ -375,27 +375,42 @@ that throws rolls the whole transaction back and the throw leaves `decide()` una
 green after a decision and after an uncertain action on rows that carry no record, in `approvals.test.ts`,
 `actions.test.ts` and `reconcile.test.ts` — the regression `redeploy-case-1` caught.
 
-### P3 — The approvals negative suite — ⬜ Not started
+### P3 — The approvals negative suite — ✅ Done (deviated — see note)
 
 The plan's list, mapped against what `approvals.test.ts` and `wait-for-approval.test.ts` already prove:
 
 | Case | At `4d08ac2` | Lands at |
 |---|---|---|
 | batch with one edit | edit stored, unvalidated | ✅ P2 (#19): parsed against the type's Zod schema, the parsed value stored |
-| stale row refuses the whole batch with per-row reasons | ✅ | — |
+| stale row refuses the whole batch with per-row reasons | ✅ | — (`approvals.test.ts` "refuses the whole batch, writing nothing, when one row is not pending") |
 | assignee mismatch refused | ⬜ | ✅ P2 (#19) |
-| replayed `decisionKey` returns the first result, writes nothing | ✅ | — |
-| crash inside `waitForApproval` creates no second row | ⬜ (`killAt('approval', 'in-tx')` on the step, then a second attempt) | P3 |
-| two pending approvals on one run; deciding the second resumes with the second's decision, leaves the first pending (3b) | ⬜ | P3 |
-| `dbos workflow delete` on the run's rows before deciding loses nothing (3c) | ⬜ | P3 |
-| resume workflow runs under the current version and is enqueued exactly once when `decide()` is called twice concurrently | ⬜ | P3 |
-| `hf_audit` insert made to fail → throw, `pending`, no DBOS row, retry succeeds | ⬜ (P2 wrote the `BEFORE INSERT` trigger technique for `hf_activity` in `approvals.test.ts`; reuse it) | P3 |
-| `decide()` on X while a step holds `ctx.tx` inside `waitForApproval`'s `INSERT … ON CONFLICT` on X: no `40P01` | ⬜ | P3 |
+| replayed `decisionKey` returns the first result, writes nothing | ✅ | — (`approvals.test.ts` "returns the earlier result and writes nothing when the decisionKey replays") |
+| crash inside `waitForApproval` creates no second row | ⬜ (`killAt('approval', 'in-tx')` on the step, then a second attempt) | ✅ P3: `wait-for-approval.test.ts` "creates no second row when the gate is re-entered, and resumes under the live version" |
+| two pending approvals on one run; deciding the second resumes with the second's decision, leaves the first pending (3b) | ⬜ | ✅ P3: `wait-for-approval.test.ts` "resumes with the decided row's own decision and leaves the run's other approval pending"; `approvals.test.ts` "decides the second of a run's two pending approvals and leaves the first pending" |
+| `dbos workflow delete` on the run's rows before deciding loses nothing (3c) | ⬜ | ✅ P3: `wait-for-approval.test.ts` "loses nothing when the run's DBOS workflow rows are deleted before the decision" |
+| resume workflow runs under the current version and is enqueued exactly once when `decide()` is called twice concurrently | ⬜ | ✅ P3: the version half in `wait-for-approval.test.ts` "creates no second row …"; the concurrency half in `approvals.test.ts` "enqueues the resume workflow exactly once when the same decisionKey arrives twice" and "refuses the second of two concurrent decisions carrying different decisionKeys" |
+| `hf_audit` insert made to fail → throw, `pending`, no DBOS row, retry succeeds | ⬜ (P2 wrote the `BEFORE INSERT` trigger technique for `hf_activity` in `approvals.test.ts`; reuse it) | ✅ P3: `approvals.test.ts` "hf_audit > is fatal: a failed insert leaves the approval pending and a retry succeeds" |
+| `decide()` on X while a step holds `ctx.tx` inside `waitForApproval`'s `INSERT … ON CONFLICT` on X: no `40P01` | ⬜ | ✅ P3: `approvals.test.ts` "the run-first lock order > waits out the held ctx.tx instead of deadlocking on the approval it is deciding" |
 
 The last one has no `killAt` park point: `'in-tx'` parks after the fence statement, before the `INSERT`.
 Either add a park point after the insert, or write it in `fence.test.ts`'s style — two raw connections issuing
 the real statements in the real order, no DBOS — which is what that case is actually about. Prefer the
 latter; it lives in `workflows` (it needs `decide()`), not in `db`.
+
+> **Built, and where it differs from the wording above:** P3 is test-only — no production file changed.
+> `killAt('approval', 'in-tx')` is **not reachable**: `parkFor()` is honoured only where a fixture calls it, and
+> both of `waitForApproval`'s steps are production code that parks nowhere, so a test-only chunk cannot hold the
+> gate inside `createOrRead`. The crash is arranged from the one point inside the gate a fixture owns — the
+> `notify` callback, which runs in the `approval:notify` step — reached with the approval row **committed** and
+> `notified_at` still NULL. That is the stronger half of the negative anyway: it is the state in which a
+> re-entry without `ON CONFLICT DO NOTHING` would open the second row. Worker A (parked there, then `SIGKILL`ed)
+> and worker B (a fresh `HF_BUILD_SHA`, whose boot `reconcile()` bumps to `:2`) also give the "current version"
+> row for free: `dbos.workflow_status.application_version` is A's on `:1` and B's on `:2` and `:3`.
+> The `40P01` case took the `fence.test.ts` route as the document prefers, on a `createStepPool` connection
+> inside `approvals.test.ts` rather than a file of its own. Two rows were already green and are cited above
+> rather than duplicated. `test-support/approval-flow.ts` grew an optional `extraKey` input (a second pending
+> row on the run, opened by a step before the gate, for 3b), the `NOTIFY_PARK_KEY` park point, and a decision
+> marker that now carries `runId` and `key` so one worker's log can serve several runs.
 
 **Done:** `pnpm --filter @hyperfixation/workflows test approvals` — every row of the table green.
 
