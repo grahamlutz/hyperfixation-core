@@ -12,6 +12,7 @@
     "api-diff": "tsx src/api-diff.ts",
     "release-publish": "tsx src/publish.ts",
     "release-rehearse": "tsx src/rehearse.ts",
+    "release-ci": "tsx src/publish-ci.ts",
     "release-verify": "tsx src/verify.ts",
     "plan-sync": "tsx src/plan-sync.ts",
     "dev-doctor": "tsx src/dev-doctor.ts",

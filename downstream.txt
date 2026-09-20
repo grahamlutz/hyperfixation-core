@@ -1,0 +1,4 @@
+# Every repo that consumes @hyperfixation/* from npm, one owner/repo per line. A release opens a
+# core-bump/<version> PR on each (packages/tools/src/publish-ci.ts), and release.yml's app token
+# has to list the same repositories.
+grahamlutz/hyperfixation-template

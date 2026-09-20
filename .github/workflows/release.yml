@@ -1,0 +1,83 @@
+name: Release
+
+# `push: main` only, and deliberately never `pull_request`: the publish step holds
+# `id-token: write`, and a fork PR must have no path to it. A fork that pushes to its own `main`
+# runs this in the fork, where the `if` below stops it before the token is minted.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Build, pack and `npm publish --dry-run` — nothing published, no tag, no bump PRs
+        type: boolean
+        default: false
+
+# Two releases in flight would publish the same version twice and race on the tag. Never
+# cancelled: a half-published run has to finish or be re-run, not be killed.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    if: github.repository == 'grahamlutz/hyperfixation-core'
+    # On the job, not the workflow: `id-token` is the credential for the whole npm registry here,
+    # so any job added later must ask for it on purpose.
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write
+    steps:
+      # Before the checkout, so `persist-credentials` stores the App's token: the tag push and the
+      # `Version Packages` PR both need it. A PR opened with GITHUB_TOKEN triggers no workflows,
+      # and this repo's ruleset requires `test`, `downstream` and `changeset` — so that PR could
+      # never merge. `repositories` must list core plus every line of `downstream.txt`.
+      - uses: actions/create-github-app-token@v2
+        id: app-token
+        with:
+          app-id: ${{ secrets.HF_BOT_APP_ID }}
+          private-key: ${{ secrets.HF_BOT_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: |
+            hyperfixation-core
+            hyperfixation-template
+
+      # fetch-depth: 0 for the tags — `release:ci` skips a `v<version>` that already exists.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.4.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      # npm >= 11.5.1 is the documented OIDC client and node 22 ships npm 10, so trusted
+      # publishing needs this. Pinned to the major: `npm@latest` is a moving part of a release.
+      - run: npm install -g npm@11
+      - run: pnpm install --frozen-lockfile
+
+      # No NPM_TOKEN: `npm publish --provenance` inside `release:ci` mints an OIDC token per run
+      # against the trusted publishers configured per package for this workflow file.
+      - name: Version or publish
+        if: ${{ !inputs.dry_run }}
+        uses: changesets/action@v2
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          version-script: pnpm changeset version && pnpm install --lockfile-only --ignore-scripts
+          publish-script: pnpm release:ci
+          # `release:ci` tags and reports for itself; the action cannot see what a custom
+          # publish script published, so leaving these on would mean no tags at all.
+          push-git-tags: false
+          create-github-releases: false
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+
+      - name: Dry run
+        if: ${{ inputs.dry_run }}
+        run: pnpm release:ci --dry-run

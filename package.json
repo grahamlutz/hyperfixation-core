@@ -16,6 +16,7 @@
     "api:diff": "pnpm --filter @hyperfixation/tools run api-diff",
     "release:publish": "pnpm --filter @hyperfixation/tools run release-publish",
     "release:rehearse": "pnpm --filter @hyperfixation/tools run release-rehearse",
+    "release:ci": "pnpm --filter @hyperfixation/tools run release-ci",
     "release:verify": "pnpm --filter @hyperfixation/tools run release-verify",
     "plan:sync": "pnpm --filter @hyperfixation/tools run plan-sync",
     "dev:doctor": "pnpm --filter @hyperfixation/tools run dev-doctor",
