@@ -143,6 +143,7 @@ export {
 export {
   appStatus,
   CORE_VERSION,
+  type LlmMode,
   type PeriodStatus,
   type QueueStatus,
   type StatusOptions,

@@ -12,7 +12,7 @@ export const CORE_VERSION = (
  * budget row, which is the one thing the lock order forbids any of these paths to take.
  */
 const STATE_STATEMENT =
-  "SELECT paused, paused_by, budget_usd::text AS budget_usd FROM hf_app_state WHERE id = 1";
+  "SELECT paused, paused_by, budget_usd::text AS budget_usd, llm_mode FROM hf_app_state WHERE id = 1";
 
 const PERIODS_STATEMENT =
   "SELECT to_char(date_trunc('month', now() AT TIME ZONE 'UTC'), 'YYYY-MM') AS current_period, " +
@@ -80,6 +80,14 @@ export interface PeriodStatus {
   driftUsd: string;
 }
 
+/**
+ * What the app's LLM calls are being answered by, as the process that built the registry
+ * reported it. `unknown` means no process has reported — not that a key is missing.
+ */
+export type LlmMode = "live" | "fixtures" | "unknown";
+
+const LLM_MODES: readonly LlmMode[] = ["live", "fixtures"];
+
 export interface StatusReport {
   /** `degraded` when there are anomalies or any period's spend disagrees with its ledger. */
   health: "ok" | "degraded";
@@ -88,6 +96,8 @@ export interface StatusReport {
   coreVersion: string;
   paused: boolean;
   pausedBy: string | null;
+  /** A deploy with no provider key serves fixture drafts; this is where that is visible. */
+  llm: { mode: LlmMode };
   runs: Record<RunStatus, number>;
   queues: QueueStatus[];
   approvals: Record<string, number>;
@@ -109,9 +119,12 @@ export interface StatusOptions {
 export async function appStatus(pool: Pool, options: StatusOptions): Promise<StatusReport> {
   const [state, periods, runs, approvals, llmCalls, actions, queues, anomalies] = await Promise.all(
     [
-      pool.query<{ paused: boolean; paused_by: string | null; budget_usd: string }>(
-        STATE_STATEMENT,
-      ),
+      pool.query<{
+        paused: boolean;
+        paused_by: string | null;
+        budget_usd: string;
+        llm_mode: string | null;
+      }>(STATE_STATEMENT),
       pool.query<{ current_period: string; previous_period: string }>(PERIODS_STATEMENT),
       counts(pool, RUN_COUNTS_STATEMENT),
       counts(pool, APPROVAL_COUNTS_STATEMENT),
@@ -159,6 +172,7 @@ export async function appStatus(pool: Pool, options: StatusOptions): Promise<Sta
     coreVersion: CORE_VERSION,
     paused: state.rows[0]?.paused ?? false,
     pausedBy: state.rows[0]?.paused_by ?? null,
+    llm: { mode: llmMode(state.rows[0]?.llm_mode ?? null) },
     runs: Object.fromEntries(
       RUN_STATUSES.map((status) => [status, runs[status] ?? 0]),
     ) as Record<RunStatus, number>,
@@ -176,6 +190,11 @@ export async function appStatus(pool: Pool, options: StatusOptions): Promise<Sta
     anomalies: anomalyCount,
     at: new Date().toISOString(),
   };
+}
+
+/** A stored mode this core does not know reads as `unknown`, the same as none at all. */
+function llmMode(stored: string | null): LlmMode {
+  return LLM_MODES.find((mode) => mode === stored) ?? "unknown";
 }
 
 async function counts(pool: Pool, statement: string): Promise<Record<string, number>> {

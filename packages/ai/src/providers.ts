@@ -6,10 +6,18 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
 import type { LanguageModelV4 } from "@ai-sdk/provider";
+import { SET_LLM_MODE_STATEMENT } from "@hyperfixation/db";
+import type { Pool } from "pg";
 import { UnknownModel } from "./errors.js";
 import { createFixtureModel } from "./fixture-model.js";
 
 export type CostProvider = "anthropic" | "openai";
+
+/**
+ * What this process serves: a real provider, canned fixture answers, or — before any registry is
+ * built — nothing anyone can tell from here.
+ */
+export type ProvidersMode = "live" | "fixtures" | "unknown";
 
 /** What the gate knows before the call: the bytes going out, and the cap on what comes back. */
 export interface CostEstimateCall {
@@ -102,6 +110,29 @@ export const DEFAULT_COSTS: Record<string, ModelCost> = {
 /** Once per process, however many registries are built: this is a startup condition, not a call. */
 let warnedAboutFixtures = false;
 
+/**
+ * Module state, like the warning above: the question is what the *process* serves, not what one
+ * registry does. Fixtures never downgrade to `live` — a process holding one fixture registry can
+ * build a real approval out of a canned draft, whatever else it holds.
+ */
+let mode: ProvidersMode = "unknown";
+
+/** Whether this process is serving fixture answers. `unknown` until a registry is built. */
+export function providersMode(): ProvidersMode {
+  return mode;
+}
+
+/**
+ * Records `providersMode()` where `/api/status` reads it. Called at worker boot, because the
+ * registry lives in the worker and the status route is served by the web.
+ *
+ * A process that has built no registry reports nothing rather than erasing what the worker said.
+ */
+export async function reportProvidersMode(pool: Pool): Promise<ProvidersMode> {
+  if (mode !== "unknown") await pool.query(SET_LLM_MODE_STATEMENT, [mode]);
+  return mode;
+}
+
 export function createProviders(options: CreateProvidersOptions = {}): ProviderRegistry {
   const costs = { ...DEFAULT_COSTS, ...options.costs };
   const models = options.models ?? {};
@@ -118,6 +149,11 @@ export function createProviders(options: CreateProvidersOptions = {}): ProviderR
 
   const fixturesDir = clients.size === 0 ? options.fixtures?.dir : undefined;
   const servingFixtures = fixturesDir !== undefined;
+
+  if (servingFixtures) mode = "fixtures";
+  // A registry with neither a key nor a fixtures dir serves nothing — every `model()` throws —
+  // so it leaves the mode alone rather than claiming this process is live.
+  else if (clients.size > 0 && mode === "unknown") mode = "live";
 
   function fixtureModel(dir: string, name: string): LanguageModelV4 {
     if (!warnedAboutFixtures) {

@@ -35,6 +35,7 @@ export {
   AppStateMissing,
   APP_PAUSED_STATEMENT,
   SET_APP_PAUSED_STATEMENT,
+  SET_LLM_MODE_STATEMENT,
 } from "./app-state.js";
 /** `runBootChecks` takes these, so the type travels with `.` even though the guards do not. */
 export type { RecordTable } from "./delete-guard.js";

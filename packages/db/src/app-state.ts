@@ -11,6 +11,13 @@ export const APP_PAUSED_STATEMENT =
 export const SET_APP_PAUSED_STATEMENT =
   "UPDATE hf_app_state SET paused = $1, paused_by = $2 WHERE id = 1";
 
+/**
+ * What a process that has built an LLM registry reports about it, for `/api/status` to read in
+ * whichever other process serves that route. A single column rather than a log: the only
+ * question it answers is what this deploy is serving now.
+ */
+export const SET_LLM_MODE_STATEMENT = "UPDATE hf_app_state SET llm_mode = $1 WHERE id = 1";
+
 export class AppStateMissing extends Error {
   constructor(operation: string) {
     super(

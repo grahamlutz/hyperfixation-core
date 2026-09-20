@@ -57,6 +57,13 @@
       "when": 1789852481614,
       "tag": "0007_score_spec_name",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1789863017152,
+      "tag": "0008_app_state_llm_mode",
+      "breakpoints": true
     }
   ]
 }
