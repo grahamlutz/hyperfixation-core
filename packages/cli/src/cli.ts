@@ -6,6 +6,7 @@ import { doctor, doctorLines } from "./doctor.js";
 import { generate } from "./gen.js";
 import { migrateApp } from "./migrate.js";
 import { newApp } from "./new.js";
+import { formatRestoreCheck, restoreCheckApp } from "./restore-check.js";
 import { statusTokenApp, type StatusTokenKind } from "./status-token.js";
 import { requireTemplateSource } from "./template-source.js";
 import { DEV_BUDGET_USD, upApp } from "./up.js";
@@ -20,6 +21,7 @@ export const COMMANDS = [
   "dev",
   "up",
   "doctor",
+  "restore-check",
 ] as const;
 
 export type Command = (typeof COMMANDS)[number];
@@ -61,7 +63,12 @@ export const USAGE = `hf — the hyperfixation CLI
       --no-compose            leave the dev infrastructure alone
       --compose-only          bring the infrastructure up and stop
 
-Every command but \`new\` runs against the app at or above the working directory, or --dir.
+  hf restore-check <name>   restore the newest hf_<name> dump beside the live database and
+                            compare row counts; exits 1 on any mismatch
+      --backup-dir <dir>      where the dumps are (default: Coolify's on the box)
+      --from-s3               read the dump from object storage (not implemented)
+
+Every command but \`new\`, \`doctor\` and \`restore-check\` runs against the app at or above the working directory, or --dir.
 `;
 
 export interface Io {
@@ -122,6 +129,8 @@ async function dispatch(command: Command, argv: readonly string[], io: Io): Prom
       return await commandUp(argv, io);
     case "doctor":
       return await commandDoctor(argv, io);
+    case "restore-check":
+      return await commandRestoreCheck(argv, io);
   }
 }
 
@@ -293,6 +302,31 @@ async function commandDev(argv: readonly string[], io: Io): Promise<number> {
     buildSha,
   });
   return 0;
+}
+
+async function commandRestoreCheck(argv: readonly string[], io: Io): Promise<number> {
+  const { values, positionals } = parseArgs({
+    args: [...argv],
+    options: {
+      "backup-dir": { type: "string" },
+      "from-s3": { type: "boolean", default: false },
+    },
+    allowPositionals: true,
+  });
+
+  const name = positionals[0];
+  if (name === undefined) {
+    io.err("hf restore-check needs a name: hf restore-check <name>");
+    return 1;
+  }
+
+  const result = await restoreCheckApp({
+    app: name,
+    backupDir: values["backup-dir"],
+    fromS3: values["from-s3"],
+  });
+  for (const line of formatRestoreCheck(result)) io.out(line);
+  return result.ok ? 0 : 1;
 }
 
 async function commandUp(argv: readonly string[], io: Io): Promise<number> {
