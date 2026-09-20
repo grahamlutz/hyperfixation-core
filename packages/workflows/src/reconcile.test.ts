@@ -564,11 +564,11 @@ describe("reconcile()'s drift read", () => {
     const report = await pass();
 
     expect(report.drift).toEqual([
-      { period: "2026-09", spentUsd: "3.0000", ledgerUsd: "2.500000", driftUsd: "0.500000" },
+      { period: "2026-09", spentUsd: "3.000000", ledgerUsd: "2.500000", driftUsd: "0.500000" },
     ]);
     expect(
       await query("SELECT spent_usd FROM hf_budget_period WHERE period = '2026-09'"),
-    ).toEqual([{ spent_usd: "3.0000" }]);
+    ).toEqual([{ spent_usd: "3.000000" }]);
   });
 
   it("completes a pass while another transaction holds the period row", async () => {

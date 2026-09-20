@@ -775,7 +775,6 @@ export interface PeriodStatus {
     ledgerUsd: string;
     // (undocumented)
     period: string;
-    // (undocumented)
     spentUsd: string;
 }
 

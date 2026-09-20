@@ -120,7 +120,7 @@ particular commit instead. `hf doctor` is what notices the gap (`applicationVers
 
 ## 4. Verify
 
-1. `hf doctor demo-app` → `OK` for `status` (health ok), `runs`, `version` (`applicationVersion <sha7> is main`), `budget` (current period, no drift), `E006`, `connections`, `lock`, `core-bump`; one `WARN restore-check: never run`, exit 1. Anything else is a finding.
+1. `hf doctor demo-app` → `OK` for `status` (health ok), `runs`, `version` (`applicationVersion <sha7> is main`), `budget` (current period, no drift — since core 0.1.8 `spent_usd` and `cost_usd` are both `numeric(12,6)`, so a settled period's `driftUsd` is exactly `"0.000000"` and any other value is a real disagreement, not a rounding artefact), `E006`, `connections`, `lock`, `core-bump`; one `WARN restore-check: never run`, exit 1. Anything else is a finding.
    - `OK   connections: hf_demo_app <n>/25, box <total>/<max_connections> on hf_ roles` — every `hf_*` role on the box against the one `max_connections` they share; `WARN` past 80% of it, which is the step-8 soak read continuously rather than for half an hour.
    - `OK   lock: one worker holds hf-worker:demo_app in hf_demo_app` — exactly one advisory lock in the app's database, under the key `acquireWorkerLock` takes. `FAIL` on none (no live worker) and on two or more, which is step 6's `pg_locks` read without the SIGTERM.
 2. `/api/status` with the read token (`jq -r .statusTokens.read ~/.config/hf/state/demo-app.json`): `applicationVersion` equals `git -C ~/Code/demo-app rev-parse HEAD`; `coreVersion` `0.1.1`; `llm.mode` (see Gap 3: `unknown` until the template's worker reports, then `fixtures`). Without a token it must be `401`.
@@ -141,7 +141,7 @@ particular commit instead. `hf doctor` is what notices the gap (`applicationVers
 7. **Memory limits.** `docker inspect -f '{{.Name}} {{.HostConfig.Memory}}'` of web, worker (and migrate if present): web `536870912`, worker `805306368`, migrate `268435456`; `docker stats --no-stream` shows usage under each.
 8. **30-minute soak.** Sample `select count(*) from pg_stat_activity where usename = 'hf_demo_app'` every 10 s for 30 minutes on the box. **Bounded** means the peak stays under 24 (the role limit is 25); it moves because `pg.Pool` idles out after 10 s, so it is not flat.
 9. **E006 as the app role** (tunnel, database `hf_demo_app`): `SET ROLE hf_demo_app; SELECT has_schema_privilege('dbos','USAGE'), has_table_privilege('dbos.workflow_status','INSERT');` → `t | t`.
-10. **First-of-month** — a calendar item for 1 Oct: `/api/status` `budget.current.spentUsd = "0"`, `previous` unchanged, both `driftUsd = "0"`. Mark "later".
+10. **First-of-month** — a calendar item for 1 Oct: `/api/status` `budget.current.spentUsd = "0.000000"`, `previous` unchanged, both `driftUsd = "0.000000"`. Mark "later".
 
 Evidence table to paste into the Phase 3 doc's Exit section: `hf new` exit 0 + checklist; `applicationVersion` = pushed sha; whether the `hf-build:` fallback fired (Coolify build log); `llm.mode`; `hf restore-check` table and exit code; passkey from the phone (`hf_passkey` count, screenshot); the batch approval rows; SIGTERM drain (`FinishedAt` minus signal, exit code); `pg_locks` at exit; memory limits; soak peak; E006 `t t`; first-of-month (later).
 

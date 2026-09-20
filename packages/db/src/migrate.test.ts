@@ -31,6 +31,30 @@ const countCoreMigrations = async (client: Client): Promise<string | undefined> 
   return rows[0]?.count;
 };
 
+/**
+ * A throwaway copy of the committed migrations through `tag`, so the one after it can be
+ * applied to a database that already carries rows.
+ */
+async function migrationsThrough(tag: string): Promise<string> {
+  const target = await mkdtemp(path.join(tmpdir(), "hf-core-migrations-"));
+  await mkdir(path.join(target, "meta"), { recursive: true });
+  const journal = JSON.parse(
+    await readFile(path.join(CORE_MIGRATIONS_DIR, "meta", "_journal.json"), "utf8"),
+  ) as { entries: { tag: string }[] };
+  const entries = journal.entries.slice(0, journal.entries.findIndex((e) => e.tag === tag) + 1);
+  for (const entry of entries) {
+    await copyFile(
+      path.join(CORE_MIGRATIONS_DIR, `${entry.tag}.sql`),
+      path.join(target, `${entry.tag}.sql`),
+    );
+  }
+  await writeFile(
+    path.join(target, "meta", "_journal.json"),
+    JSON.stringify({ ...journal, entries }),
+  );
+  return target;
+}
+
 async function writeMigrationSet(dir: string, tag: string, sql: string): Promise<void> {
   await mkdir(path.join(dir, "meta"), { recursive: true });
   await writeFile(path.join(dir, `${tag}.sql`), sql);
@@ -242,30 +266,6 @@ describe("0007_score_spec_name", () => {
   let migrator: Client;
   let dir: string;
 
-  /**
-   * A throwaway copy of the committed migrations through `tag`, so the one after it can be
-   * applied to a database that already carries rows.
-   */
-  async function migrationsThrough(tag: string): Promise<string> {
-    const target = await mkdtemp(path.join(tmpdir(), "hf-core-migrations-"));
-    await mkdir(path.join(target, "meta"), { recursive: true });
-    const journal = JSON.parse(
-      await readFile(path.join(CORE_MIGRATIONS_DIR, "meta", "_journal.json"), "utf8"),
-    ) as { entries: { tag: string }[] };
-    const entries = journal.entries.slice(0, journal.entries.findIndex((e) => e.tag === tag) + 1);
-    for (const entry of entries) {
-      await copyFile(
-        path.join(CORE_MIGRATIONS_DIR, `${entry.tag}.sql`),
-        path.join(target, `${entry.tag}.sql`),
-      );
-    }
-    await writeFile(
-      path.join(target, "meta", "_journal.json"),
-      JSON.stringify({ ...journal, entries }),
-    );
-    return target;
-  }
-
   beforeAll(async () => {
     db = await createTestDatabase();
     migrator = new Client({ connectionString: db.migratorUrl });
@@ -303,6 +303,68 @@ describe("0007_score_spec_name", () => {
     ]);
     expect(indexes[2]?.indexdef).toContain("spec_name");
   });
+});
+
+describe("0009_budget_spent_scale", () => {
+  let db: TestDatabase;
+  let migrator: Client;
+  let dir: string;
+
+  beforeAll(async () => {
+    db = await createTestDatabase();
+    migrator = new Client({ connectionString: db.migratorUrl });
+    await migrator.connect();
+    dir = await migrationsThrough("0008_app_state_llm_mode");
+    await migrate(db.migratorUrl, { appName: db.appName, coreMigrationsDir: dir });
+  }, 90_000);
+
+  afterAll(async () => {
+    await migrator?.end();
+    await db?.drop();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  async function seed(period: string, spentUsd: string, costs: string[]): Promise<void> {
+    await migrator.query(
+      "INSERT INTO hf_budget_period (period, budget_usd, spent_usd) VALUES ($1, 100, $2)",
+      [period, spentUsd],
+    );
+    for (const [i, cost] of costs.entries()) {
+      await migrator.query(
+        "INSERT INTO hf_llm_call (run_id, key, workflow_id, period, input_hash, status, " +
+          "estimated_cost_usd, cost_usd) VALUES ($1, 'x', $1, $2, 'hash', 'ok', $3, $3)",
+        [`${period}-${i}`, period, cost],
+      );
+    }
+  }
+
+  it("widens the column and repairs only the drift the old scale can account for", async () => {
+    // The X1 box: two Haiku calls, a counter that could only hold four decimals.
+    await seed("2099-05", "0.0017", ["0.000838", "0.000855"]);
+    // Drift far past what N settles could have rounded away — reconcile()'s to report, not this
+    // migration's to erase.
+    await seed("2099-06", "3", ["1.000000"]);
+    // No settled call at all, so nothing to compare against.
+    await seed("2099-07", "0.5", []);
+
+    await migrate(db.migratorUrl, { appName: db.appName });
+
+    const { rows: column } = await migrator.query<{ precision: number; scale: number }>(
+      "SELECT numeric_precision AS precision, numeric_scale AS scale FROM information_schema.columns " +
+        "WHERE table_name = 'hf_budget_period' AND column_name = 'spent_usd'",
+    );
+    expect(column).toEqual([{ precision: 12, scale: 6 }]);
+
+    const { rows } = await migrator.query<{ period: string; spent_usd: string }>(
+      "SELECT period, spent_usd::text AS spent_usd FROM hf_budget_period " +
+        "WHERE period LIKE '2099-%' ORDER BY period",
+    );
+    expect(rows).toEqual([
+      { period: "2099-05", spent_usd: "0.001693" },
+      { period: "2099-06", spent_usd: "3.000000" },
+      { period: "2099-07", spent_usd: "0.500000" },
+    ]);
+  }, 90_000);
 });
 
 /**

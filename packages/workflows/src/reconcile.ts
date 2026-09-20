@@ -50,10 +50,13 @@ const LIVE_DBOS_STATUSES = ["PENDING", "ENQUEUED", "DELAYED"];
  * period stamped on its own row.
  */
 export const DRIFT_STATEMENT =
-  "SELECT b.period, b.spent_usd::text AS spent_usd, " +
-  "COALESCE((SELECT SUM(l.cost_usd) FROM hf_llm_call l " +
-  "WHERE l.period = b.period AND l.status = 'ok'), 0)::text AS ledger_usd " +
-  "FROM hf_budget_period b ORDER BY b.period";
+  "SELECT b.period, b.spent_usd::numeric(12,6)::text AS spent_usd, " +
+  "l.ledger::numeric(12,6)::text AS ledger_usd, " +
+  "(b.spent_usd - l.ledger)::numeric(12,6)::text AS drift_usd " +
+  "FROM hf_budget_period b CROSS JOIN LATERAL (" +
+  "SELECT COALESCE(SUM(c.cost_usd), 0) AS ledger FROM hf_llm_call c " +
+  "WHERE c.period = b.period AND c.status = 'ok') l " +
+  "ORDER BY b.period";
 
 /**
  * Step (1)'s scan. A plain `SELECT`, joined against `dbos.workflow_status` rather than asking
@@ -280,14 +283,17 @@ export async function reconcile(
 
   await reconcileQueueConcurrency(pool, dbosClient, report);
 
-  const drift = await pool.query<{ period: string; spent_usd: string; ledger_usd: string }>(
-    DRIFT_STATEMENT,
-  );
+  const drift = await pool.query<{
+    period: string;
+    spent_usd: string;
+    ledger_usd: string;
+    drift_usd: string;
+  }>(DRIFT_STATEMENT);
   report.drift = drift.rows.map((row) => ({
     period: row.period,
     spentUsd: row.spent_usd,
     ledgerUsd: row.ledger_usd,
-    driftUsd: (Number(row.spent_usd) - Number(row.ledger_usd)).toFixed(6),
+    driftUsd: row.drift_usd,
   }));
 
   await expireApprovals(pool, dbosClient, options, report);

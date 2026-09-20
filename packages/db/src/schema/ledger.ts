@@ -24,7 +24,10 @@ export const hfBudgetPeriod = pgTable(
   {
     period: text("period").primaryKey(),
     budgetUsd: numeric("budget_usd", { precision: 12, scale: 4 }).notNull(),
-    spentUsd: numeric("spent_usd", { precision: 12, scale: 4 }).notNull().default("0"),
+    // Scale 6, matching `hf_llm_call.cost_usd`: every settle is `spent_usd = spent_usd + cost`,
+    // so a narrower column would round the running total once per call and the rounding would
+    // accumulate — drift the design promises is zero, and a cap compared against a wrong total.
+    spentUsd: numeric("spent_usd", { precision: 12, scale: 6 }).notNull().default("0"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .defaultNow(),
