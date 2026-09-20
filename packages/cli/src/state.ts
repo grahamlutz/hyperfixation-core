@@ -82,6 +82,14 @@ export interface AppState {
    * earlier `hf new --local` looks exactly like a lost run.
    */
   templateStartedAt?: string;
+  /**
+   * ISO 8601, written just before the `template` step fetches into the scratch directory beside
+   * the app's path.
+   *
+   * The same proof one step earlier: a scratch directory the state does not vouch for is refused
+   * rather than deleted, and a fetch that died half way is this run's own to clear and redo.
+   */
+  templateFetchStartedAt?: string;
   /** `owner/name` of the app's GitHub repository. */
   repo?: string;
   coolify?: CoolifyState;
@@ -271,6 +279,7 @@ function parseAppState(contents: string, file: string): AppState {
         break;
       case "repo":
       case "templateStartedAt":
+      case "templateFetchStartedAt":
       case "sentryDsn":
       case "betterAuthSecret":
       case "lastRestoreCheckAt":
