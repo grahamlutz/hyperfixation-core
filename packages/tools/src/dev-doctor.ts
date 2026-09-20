@@ -17,13 +17,14 @@ import {
   PG_CONTAINER,
   PG_PORT,
 } from "./docker.js";
+import { findOrphans } from "./orphans.js";
 import { mainCheckout, templateDir } from "./proc.js";
 import { classifyRepo } from "./worktrees.js";
 
 const USAGE = `Usage: pnpm dev:doctor
 
 What is wrong with this machine's dev infrastructure, one line per finding: colima, the docker
-data disk, the hyperfixation-pg container, the test cluster on ${PG_PORT}, buildx, leaked test
+data disk, the hyperfixation-pg container, the test cluster on ${PG_PORT}, buildx, orphaned busy shells (PPID 1), leaked test
 and scratch databases, and how many git worktrees are merged-PR leftovers. Mutates nothing;
 \`pnpm dev:clean\` and \`pnpm worktrees:clean\` are what act on the findings.
 
@@ -134,6 +135,24 @@ async function checkWorktrees(): Promise<void> {
   }
 }
 
+function checkOrphans(): void {
+  const orphans = findOrphans();
+  if (orphans === undefined) {
+    report("orphans", "warn", "could not read the process table");
+    return;
+  }
+  if (orphans.length === 0) {
+    report("orphans", "ok", "no orphaned shells or node processes spinning");
+    return;
+  }
+  const worst = orphans.reduce((a, b) => (b.cpu > a.cpu ? b : a));
+  report(
+    "orphans",
+    "fail",
+    `${orphans.length} launchd-adopted shell/node processes above 25% CPU (worst pid ${worst.pid}, ${worst.cpu}%, up ${worst.etime}): \`kill ${orphans.map((o) => o.pid).join(" ")}\` after \`lsof -p ${worst.pid}\` says whose they are`,
+  );
+}
+
 async function main(): Promise<number> {
   const { values } = parseArgs({ options: { help: { type: "boolean", default: false } } });
   if (values.help) {
@@ -141,6 +160,7 @@ async function main(): Promise<number> {
     return 0;
   }
 
+  checkOrphans();
   checkDocker();
   await checkCluster();
   await checkWorktrees();

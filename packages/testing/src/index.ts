@@ -39,6 +39,11 @@ export {
   type RunState,
   type WaitForRunOptions,
 } from "./wait-for-run.js";
+export {
+  waitForWorkflowStatus,
+  WorkflowNeverMatched,
+  type WorkflowState,
+} from "./wait-for-workflow.js";
 export { killAt, killWhenParked } from "./kill-at.js";
 export {
   parkedMarker,

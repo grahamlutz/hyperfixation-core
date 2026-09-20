@@ -258,6 +258,52 @@ describe("the cloud repo step", () => {
     expect(state.isDone("repo")).toBe(false);
   });
 
+  /** GitHub's answer to a token that is not a GitHub App user-to-server token. */
+  const listingRefused = (status: number): StubRoute => ({
+    spec: "github",
+    method: "get",
+    url: `${GITHUB}/user/installations`,
+    status,
+    json: {
+      message:
+        "You must authenticate with an access token authorized to a GitHub App in order to " +
+        "list installations",
+    },
+  });
+
+  it.each([403, 401, 404])(
+    "finishes the step with a warning when the token may not list installations (%i)",
+    async (status) => {
+      harness.server.use(harness.handler(listingRefused(status)));
+      const ctx = context();
+
+      await runSteps([repoStep], ctx);
+
+      const warning = ctx.lines.find((line) => line.startsWith("WARNING:"))!;
+      expect(warning).toContain("could not be verified with this token");
+      expect(warning).toContain(`HTTP ${String(status)}`);
+      for (const slug of ["coolify", "hyperfixation-bump"]) {
+        expect(warning).toContain(`${slug} (https://github.com/apps/${slug}/installations/new)`);
+      }
+      // The same sentence again in the run's closing checklist, which is `fromSteps` there.
+      expect(ctx.checklist).toEqual([warning.slice(`WARNING: ${APP}: `.length)]);
+      expect(paths()).not.toContain("GET /user/installations/{installation_id}/repositories");
+      expect(ran()).toContain("git push --set-upstream origin main");
+      expect(state.isDone("repo")).toBe(true);
+      expect(state.state.repo).toBe(FULL_NAME);
+    },
+  );
+
+  it("still fails when listing the installations breaks for another reason", async () => {
+    harness.server.use(harness.handler(listingRefused(500)));
+    const ctx = context();
+
+    await expect(runSteps([repoStep], ctx)).rejects.toThrow(/HTTP 500/);
+    expect(ctx.checklist).toEqual([]);
+    expect(state.isDone("repo")).toBe(false);
+    expect(state.state.repo).toBeUndefined();
+  });
+
   it("records nothing when the create fails, and the rerun starts with the lookup", async () => {
     harness.server.use(
       harness.handler({

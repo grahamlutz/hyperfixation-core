@@ -47,9 +47,9 @@ USAGE with `hf new <name>` and `--budget-usd`, `--email`, `--from`, `--into`. Be
 | `HF_CLOUDFLARE_TOKEN` | Cloudflare → My Profile → API Tokens → Create → "Edit zone DNS", scoped to the zone |
 | `HF_CLOUDFLARE_ZONE_ID` | Cloudflare → the zone → Overview → right column "Zone ID" |
 | `HF_BASE_DOMAIN` | `hyperfixation.ai` (decided) |
-| `HF_GITHUB_TOKEN` | GitHub → Settings → Developer settings → Tokens (classic) → `repo`. Used for `POST /user/repos`, push, `GET /user/installations` (**UNVERIFIED** that a classic PAT may call it — pre-flight), refs, pulls, statuses |
+| `HF_GITHUB_TOKEN` | any token works for the repo create and the push — classic PAT, fine-grained PAT or a `gh` OAuth token — with scopes `repo` **and** `workflow`, the latter because the template carries `.github/workflows` and a push without it is rejected. `GET /user/installations` cannot run with any of them (it needs a GitHub App user-to-server token), so the repo step warns instead of failing: verify by hand that both apps in `HF_GITHUB_APP_SLUGS` are installed on **All repositories** |
 | `HF_GITHUB_OWNER` | `grahamlutz` |
-| `HF_GITHUB_APP_SLUGS` | comma-separated slugs of Coolify's GitHub App and `hyperfixation-bot`, from `github.com/settings/apps/<slug>`; both must be installed with access to the new repo, or the repo step fails naming the URL (`repo.ts:119-129`). Install with "All repositories" to avoid a chicken-and-egg on a repo that does not exist yet |
+| `HF_GITHUB_APP_SLUGS` | comma-separated slugs of Coolify's GitHub App and `hyperfixation-bot`, from `github.com/settings/apps/<slug>`; both must be installed with access to the new repo. With a token that can list installations the repo step asserts that and fails naming the install URL; with a personal token it can only name them in a warning, so the list is what the message is built from. Install with "All repositories" to avoid a chicken-and-egg on a repo that does not exist yet |
 | `HF_SENTRY_TOKEN` | Sentry → Settings → Auth Tokens → Create; scopes `project:write`, `project:read` |
 | `HF_SENTRY_ORG` | the org slug from the Sentry URL |
 | `HF_LANGFUSE_URL` | `https://cloud.langfuse.com` (or the region host) |
@@ -74,7 +74,7 @@ Tokens are pulled from the config with `jq` so none is typed or echoed.
 3. `PGPASSWORD` over the tunnel: read the container's address with `ssh <host> 'docker inspect -f "{{range \$k,\$v := .NetworkSettings.Networks}}{{\$k}}={{\$v.IPAddress}} {{end}}" <container>'` (this is the command `hf` itself runs), open `ssh -L 15432:<that IP>:5432 <host>` and run `psql "postgresql://postgres@127.0.0.1:15432/postgres" -c 'select 1'` → `1`. A box that does publish 5432 can use `127.0.0.1` instead.
 4. Coolify API: `curl -sf -H "Authorization: Bearer <token>" <url>/api/v1/projects | jq 'map({name, uuid})'` → the existing projects (no `demo-app`). List one project's environments (`…/projects/<uuid>/environments | jq 'map(.name)'`) → `["production"]`; anything else makes step 9 fail with "has no production environment" (X1 question 2).
 5. Cloudflare: `GET /client/v4/zones/<zone>` → `success: true` and your base domain.
-6. GitHub installations: `curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer <token>" https://api.github.com/user/installations` → `200`. `403`/`404` means a classic PAT cannot list installations; step 3 would fail after creating the repo — switch to a fine-grained token first.
+6. GitHub apps, by hand: `GET /user/installations` answers `403` to every personal token (it is a GitHub App user-to-server endpoint), so there is nothing to curl and nothing `hf` can check — step 3 prints a `WARNING:` line naming each slug and repeats it in the closing checklist. Open `github.com/settings/installations` and confirm that Coolify's GitHub App and `hyperfixation-bot` are both installed with access to **All repositories**; a Coolify app that cannot see the new repo makes step 10's first deploy clone nothing.
 7. Langfuse: `curl -s -o /dev/null -w '%{http_code}' -u "<org key>" <url>/api/public/projects` → `200` (X1 question 1). `401`/`403` means step 6 will fail and Langfuse needs a manual project (Gap 6).
 
 ## 3. The run
@@ -89,7 +89,7 @@ nothing is prompted. `pnpm install` output streams live; every other step prints
 |---|---|---|---|
 | 1 | template | `demo-app: template fetched into …` | `--from` wrong or no `.hyperfixation-template` marker; no directory left behind |
 | 2 | install | `demo-app: N file(s) in the initial commit` | `pnpm install exited …`; re-run resumes (a HEAD commit is the "done" mark) |
-| 3 | repo | `created the private repository grahamlutz/demo-app` | App-not-installed message with the install URL; the repo is adopted only if its `main` equals local HEAD |
+| 3 | repo | `created the private repository grahamlutz/demo-app`, then a `WARNING:` that the app installations could not be verified with this token | Push rejected for a missing `workflow` scope; the repo is adopted only if its `main` equals local HEAD. The installations are only asserted for a token that may list them |
 | 4 | backup | `registered a daily backup of hf_demo_app` | Coolify 4xx; the step **cannot detect its previous work** (X1 q6) — a re-run after this succeeded once registers a second schedule; check Coolify → the database → Backups |
 | 5 | sentry | `created the Sentry project <org>/demo_app` | re-run adopts |
 | 6 | langfuse | `created the Langfuse project demo_app` | re-run adopts by name but always mints a new key pair |

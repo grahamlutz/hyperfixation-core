@@ -406,6 +406,14 @@ its evidence line pasted here.
 >   starts one run. No e2e (a scratch app needs the built `hf`); covered by a real-database action test. The same PR added
 >   the template's PR template with the `Chunk:` and `## Built` convention.
 >
+> **Finding (pre-flight 6, 2026-09-20):** `GET /user/installations` answers 403 to a `gh` OAuth token, and GitHub
+> documents it as a GitHub App user-to-server endpoint — so no classic PAT, fine-grained PAT or OAuth token can call it,
+> and the repo step's app-installation assertion could never have run with an `HF_GITHUB_TOKEN`. It would have aborted
+> every real `hf new` at step 3, *after* the private repo was created and pushed; the msw happy path hid it. The check
+> now degrades: a 401/403/404 records the step, prints one `WARNING:` naming each slug and its
+> `https://github.com/apps/<slug>/installations/new`, and repeats it in the closing checklist. A personal account has no
+> second API to ask (organizations have `GET /orgs/{org}/installations`), so the installations are verified by hand.
+>
 > Still unknown until the box answers (risks 1–3 and 5): Langfuse's org-key lookup, Coolify's `production` environment
 > name, the Postgres hostname and loopback port, `SOURCE_COMMIT` under Coolify, and where backups live. Re-vendor
 > Coolify's OpenAPI from the box's own version before running.

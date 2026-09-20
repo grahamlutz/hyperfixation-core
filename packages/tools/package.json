@@ -10,6 +10,7 @@
     "test": "vitest run --passWithNoTests",
     "template-check": "tsx src/template-check.ts",
     "api-diff": "tsx src/api-diff.ts",
+    "downstream-matrix": "tsx src/downstream-matrix-ci.ts",
     "release-publish": "tsx src/publish.ts",
     "release-rehearse": "tsx src/rehearse.ts",
     "release-ci": "tsx src/publish-ci.ts",
@@ -17,7 +18,8 @@
     "plan-sync": "tsx src/plan-sync.ts",
     "dev-doctor": "tsx src/dev-doctor.ts",
     "dev-clean": "tsx src/dev-clean.ts",
-    "worktrees-clean": "tsx src/worktrees-clean.ts"
+    "worktrees-clean": "tsx src/worktrees-clean.ts",
+    "with-load": "tsx src/with-load.ts"
   },
   "devDependencies": {
     "@hyperfixation/eslint-config": "workspace:*",

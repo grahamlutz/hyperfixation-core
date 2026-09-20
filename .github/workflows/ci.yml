@@ -71,11 +71,38 @@ jobs:
       # "the public API changed" rather than "the code is broken".
       - run: pnpm turbo api-extractor
 
-  # The template, against this PR's packages rather than the published ones. `template:check`
-  # packs every publishable package here and installs the tarballs over the template's
-  # `@hyperfixation/*` specs, so a change that compiles in core and does not in an app fails
-  # here instead of on the template's main.
-  downstream:
+  # One entry per `owner/repo` line of `downstream.txt` — the same file `release:ci` opens the
+  # bump PRs from, so an app joins both at once.
+  downstream-list:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.4.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - id: matrix
+        run: pnpm downstream:matrix
+
+  # Every downstream app, against this PR's packages rather than the published ones.
+  # `template:check` packs every publishable package here and installs the tarballs over the
+  # app's `@hyperfixation/*` specs, so a change that compiles in core and does not in an app
+  # fails here instead of on that app's main.
+  #
+  # Named anything but `downstream`: a matrix job's checks are `downstream-matrix (owner/repo)`,
+  # and the ruleset requires one called exactly `downstream` — which the aggregate below is.
+  downstream-matrix:
+    needs: downstream-list
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.downstream-list.outputs.matrix) }}
+    name: downstream (${{ matrix.repo }})
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -92,10 +119,12 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     env:
-      # The template's tests provision a database per test off this admin connection, exactly
-      # as the `test` job above and the template's own CI do.
+      # The app's tests provision a database per test off this admin connection, exactly as the
+      # `test` job above and the template's own CI do.
       HF_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
-      HF_TEMPLATE_DIR: ${{ github.workspace }}/hyperfixation-template
+      # A generated app has the template's layout under another name, so `template:check` reads
+      # it the same way — only the directory it is pointed at changes.
+      HF_TEMPLATE_DIR: ${{ github.workspace }}/downstream
     # Two checkouts, so neither is the workspace root — `actions/checkout` refuses a `path`
     # outside it, which is why the sibling layout `HF_TEMPLATE_DIR` defaults to is built here
     # rather than inherited.
@@ -106,13 +135,31 @@ jobs:
       - uses: actions/checkout@v4
         with:
           path: hyperfixation-core
-      # Public, so no token. Pinned to `main`: the question this job answers is whether the
-      # template as shipped survives this PR.
+      # A PR from a fork gets no secrets, and the App is not installed on every owner either.
+      # Without a token the checkout below falls back to GITHUB_TOKEN, which reaches a public
+      # repo — the template — and fails loudly on a private one rather than checking nothing.
+      - id: app
+        working-directory: ${{ github.workspace }}
+        env:
+          APP_ID: ${{ secrets.HF_BOT_APP_ID }}
+        run: |
+          if [ -n "$APP_ID" ]; then echo "available=true" >> "$GITHUB_OUTPUT"; fi
+      - uses: actions/create-github-app-token@v2
+        id: app-token
+        if: steps.app.outputs.available == 'true'
+        with:
+          app-id: ${{ secrets.HF_BOT_APP_ID }}
+          private-key: ${{ secrets.HF_BOT_APP_PRIVATE_KEY }}
+          owner: ${{ matrix.owner }}
+          repositories: ${{ matrix.name }}
+      # Pinned to `main`: the question this job answers is whether the app as shipped survives
+      # this PR.
       - uses: actions/checkout@v4
         with:
-          repository: grahamlutz/hyperfixation-template
+          repository: ${{ matrix.repo }}
           ref: main
-          path: hyperfixation-template
+          path: downstream
+          token: ${{ steps.app-token.outputs.token || github.token }}
       - uses: pnpm/action-setup@v4
         with:
           version: 12.4.2
@@ -123,3 +170,17 @@ jobs:
           cache-dependency-path: hyperfixation-core/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - run: pnpm template:check
+
+  # The name the ruleset requires. `always()` so a cancelled or skipped matrix reports here as a
+  # failure instead of leaving the required check pending forever.
+  downstream:
+    needs: [downstream-list, downstream-matrix]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          LIST: ${{ needs.downstream-list.result }}
+          MATRIX: ${{ needs.downstream-matrix.result }}
+        run: |
+          echo "downstream-list: $LIST, downstream-matrix: $MATRIX"
+          test "$LIST" = success && test "$MATRIX" = success

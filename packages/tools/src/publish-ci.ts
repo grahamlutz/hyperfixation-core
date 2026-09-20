@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
+import { parseDownstream } from "./downstream-matrix.js";
 import {
   httpRegistryClient,
   NPMJS_REGISTRY,
@@ -95,14 +96,11 @@ function gh(deps: ReleaseCIDeps, cwd: string, args: readonly string[]): string {
   return result.stdout;
 }
 
-/** `owner/repo` per line; blank lines and `#` comments ignored. Absent file means no downstream. */
+/** Absent file means no downstream; `parseDownstream` is the same reader CI builds its matrix from. */
 export async function readDownstream(root: string): Promise<string[]> {
   const file = join(root, "downstream.txt");
   if (!existsSync(file)) return [];
-  return (await readFile(file, "utf8"))
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line !== "" && !line.startsWith("#"));
+  return parseDownstream(await readFile(file, "utf8"));
 }
 
 function cloneUrl(repo: string, token: string): string {

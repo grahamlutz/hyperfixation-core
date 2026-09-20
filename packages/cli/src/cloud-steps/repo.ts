@@ -8,6 +8,15 @@ import { gitHead, mustRun, short, StepFailed, type CloudStepContext } from "./co
 const PER_PAGE = 100;
 
 /**
+ * What GitHub answers a token that may not list installations.
+ *
+ * `GET /user/installations` is documented as a GitHub App user-to-server endpoint, so every
+ * classic PAT, fine-grained PAT and OAuth token — which is what `HF_GITHUB_TOKEN` is — is refused:
+ * 403 for a `gh` OAuth token, and 401/404 for the other ways a token can be told no.
+ */
+const CANNOT_LIST = new Set([401, 403, 404]);
+
+/**
  * The token reaches `git` through the child's environment alone.
  *
  * Not in argv, where `ps` reads it; not in the remote URL, which `git remote add` writes into
@@ -96,7 +105,7 @@ export const repoStep: Step<CloudStepContext> = {
       });
     }
 
-    await assertAppsInstalled(github, githubAppSlugs(context.config), fullName);
+    await checkAppsInstalled(context, github, githubAppSlugs(context.config), fullName);
     await context.state.patch({ repo: fullName });
   },
 };
@@ -107,13 +116,28 @@ export const repoStep: Step<CloudStepContext> = {
  * Coolify cannot deploy from a repository its GitHub App cannot see, and that failure otherwise
  * surfaces as a deployment that clones nothing — so it is asserted here, by name, with the URL
  * that fixes it.
+ *
+ * Unless the token may not ask at all, which is the usual case: then this degrades to a warning
+ * and a checklist line, because the repository has already been created and pushed and there is no
+ * second way to read a personal account's installations (organizations have
+ * `GET /orgs/{org}/installations`; personal accounts have nothing).
  */
-async function assertAppsInstalled(
+async function checkAppsInstalled(
+  context: CloudStepContext,
   github: GithubClient,
   slugs: readonly string[],
   fullName: string,
 ): Promise<void> {
-  const installations = await allInstallations(github);
+  let installations: { id: number; app_slug: string }[];
+  try {
+    installations = await allInstallations(github);
+  } catch (error) {
+    if (!(error instanceof ProviderError) || !CANNOT_LIST.has(error.status)) throw error;
+    const note = unverifiedNote(slugs, fullName, error.status);
+    context.io.out(`WARNING: ${context.names.given}: ${note}`);
+    context.checklist.push(note);
+    return;
+  }
   for (const slug of slugs) {
     const installation = installations.find((candidate) => candidate.app_slug === slug);
     if (installation === undefined) {
@@ -129,6 +153,20 @@ async function assertAppsInstalled(
       );
     }
   }
+}
+
+/** The one thing left to the operator when the installations could not be listed. */
+function unverifiedNote(slugs: readonly string[], fullName: string, status: number): string {
+  const apps = slugs
+    .map((slug) => `${slug} (https://github.com/apps/${slug}/installations/new)`)
+    .join(", ");
+  return (
+    `the GitHub App installations on ${fullName} could not be verified with this token — ` +
+    `listing them needs a GitHub App user-to-server token and GitHub answered HTTP ` +
+    `${String(status)}. Check by hand that each of these is installed on the repository, or on ` +
+    `All repositories: ${apps}. Coolify's first deploy clones an empty repository if its app ` +
+    `cannot see this one.`
+  );
 }
 
 async function allInstallations(
