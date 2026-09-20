@@ -50,6 +50,13 @@ const ROUTES: StubRoute[] = [
   {
     spec: "coolify",
     method: "post",
+    url: `${COOLIFY}/api/v1/projects/{uuid}/environments`,
+    status: 201,
+    json: { uuid: "e2" },
+  },
+  {
+    spec: "coolify",
+    method: "post",
     url: `${COOLIFY}/api/v1/applications/private-github-app`,
     json: { uuid: "a1" },
   },
@@ -196,16 +203,19 @@ describe("provider clients", () => {
   describe("coolify", () => {
     const coolify = new CoolifyClient({ url: COOLIFY, token: "t" });
 
-    it("creates and reads a project, and lists its environments", async () => {
+    it("creates and reads a project, and lists and creates its environments", async () => {
       expect(await coolify.createProject({ name: "demo-app" })).toEqual({ uuid: "p1" });
       expect((await coolify.getProject("p1")).uuid).toBe("p1");
       expect((await coolify.listEnvironments("p1"))[0]!.uuid).toBe("e1");
+      expect(await coolify.createEnvironment("p1", { name: "production" })).toEqual({ uuid: "e2" });
 
       expect(harness.requests.map((request) => request.operationPath)).toEqual([
         "/projects",
         "/projects/{uuid}",
         "/projects/{uuid}/environments",
+        "/projects/{uuid}/environments",
       ]);
+      expect(harness.requests.at(-1)!.body).toEqual({ name: "production" });
     });
 
     it("creates the application from the private GitHub App", async () => {

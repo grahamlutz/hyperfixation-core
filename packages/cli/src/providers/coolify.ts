@@ -162,6 +162,14 @@ export class CoolifyClient {
     });
   }
 
+  async createEnvironment(projectUuid: string, body: { name: string }): Promise<{ uuid: string }> {
+    return await this.request({
+      method: "POST",
+      path: `/projects/${segment(projectUuid)}/environments`,
+      body,
+    });
+  }
+
   async createPrivateGithubAppApplication(
     body: CoolifyApplicationRequest,
   ): Promise<CoolifyApplication> {

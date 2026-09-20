@@ -210,6 +210,81 @@
             "bearerAuth": []
           }
         ]
+      },
+      "post": {
+        "tags": [
+          "Projects"
+        ],
+        "summary": "Create Environment",
+        "description": "Create environment in project.",
+        "operationId": "create-environment",
+        "parameters": [
+          {
+            "name": "uuid",
+            "in": "path",
+            "description": "Project UUID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Environment created.",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "The name of the environment."
+                  }
+                },
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Environment created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "uuid": {
+                      "type": "string",
+                      "example": "env123",
+                      "description": "The UUID of the environment."
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "404": {
+            "description": "Project not found."
+          },
+          "409": {
+            "description": "Environment with this name already exists."
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/applications/private-github-app": {

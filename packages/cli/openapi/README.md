@@ -29,9 +29,10 @@ reshuffle every key in the file for no change in meaning, which buries the addit
 A new upstream commit is a different job: bump the row above, re-trim, and say so here.
 
 > **`coolify.json` is the box's own Coolify version**, re-vendored on 2026-09-20 from `openapi.json`
-> at tag `v4.3.21` — the box serves no document of its own. Across the thirteen operations kept, the
+> at tag `v4.3.21` — the box serves no document of its own. Across the thirteen operations first kept, the
 > tag and the `main` commit vendored before it are identical field for field, so the trimmed file
-> did not change; only the row above did.
+> did not change; only the row above did. `POST /projects/{uuid}/environments` was merged in later
+> from the same tag, verbatim.
 >
 > A green test still proves less than it looks. Coolify enforces rules its document does not
 > express: a `dockercompose` application is refused `domains` outright (422, *"Use
@@ -44,6 +45,7 @@ A new upstream commit is a different job: bump the row above, re-trim, and say s
 | Spec | Operation | Used by |
 | --- | --- | --- |
 | coolify | `POST /projects`, `GET /projects`, `GET /projects/{uuid}` | E3 — the app's Coolify project, found by name on a rerun |
+| coolify | `GET`/`POST /projects/{uuid}/environments` | E3 — the app's `production` environment, created when the project has none |
 | coolify | `GET /applications` | E3 — the application, found by name on a rerun |
 | coolify | `POST /applications/private-github-app` | E3 — the application, from the private repo |
 | coolify | `PATCH /applications/{uuid}/envs/bulk` | E3 — `REQUIRED_ENV` in one call |

@@ -113,6 +113,8 @@ interface RouteOptions {
   /** `main`'s sha on an existing repository; `undefined` means there is no such repository. */
   repoSha?: string;
   projects?: unknown[];
+  /** The project's environments; defaults to the `production` one every project starts with. */
+  environments?: unknown[];
   applications?: unknown[];
   langfuseProjects?: unknown[];
   dnsRecords?: unknown[];
@@ -163,7 +165,14 @@ function routes(options: RouteOptions = {}): StubRoute[] {
       spec: "coolify",
       method: "get",
       url: `${COOLIFY}/api/v1/projects/{uuid}/environments`,
-      json: [{ uuid: "environment-1", name: "production" }],
+      json: options.environments ?? [{ uuid: "environment-1", name: "production" }],
+    },
+    {
+      spec: "coolify",
+      method: "post",
+      url: `${COOLIFY}/api/v1/projects/{uuid}/environments`,
+      status: 201,
+      json: { uuid: "environment-2" },
     },
     {
       spec: "coolify",
@@ -752,6 +761,59 @@ describe("the coolify and deploy steps on their own", () => {
       ]);
     } finally {
       await second.close();
+    }
+  }, 90_000);
+
+  it("creates the production environment when the project has none, and names it in the application", async () => {
+    harness.reset();
+    useRoutes({ environments: [{ uuid: "environment-0", name: "staging" }] });
+
+    const run = await resumed();
+    try {
+      const result = await runSteps(CLOUD_STEPS, run.context);
+
+      expect(result.ran).toContain("coolify");
+      const order = writes().filter((line) =>
+        ["POST /projects", "POST /projects/{uuid}/environments", "POST /applications/"].some(
+          (write) => line.startsWith(`coolify ${write}`),
+        ),
+      );
+      expect(order).toEqual([
+        "coolify POST /projects",
+        "coolify POST /projects/{uuid}/environments",
+        "coolify POST /applications/private-github-app",
+      ]);
+
+      const environment = harness.requests.find(
+        (request) => request.operationPath === "/projects/{uuid}/environments" && request.method === "POST",
+      )!;
+      expect(environment.body).toEqual({ name: "production" });
+      expect(environment.pathname).toBe("/api/v1/projects/project-1/environments");
+
+      const application = harness.requests.find(
+        (request) => request.operationPath === "/applications/private-github-app",
+      )!.body as Record<string, unknown>;
+      expect(application).toMatchObject({
+        environment_name: "production",
+        environment_uuid: "environment-2",
+      });
+    } finally {
+      await run.close();
+    }
+  }, 90_000);
+
+  it("uses the production environment it finds, and creates none", async () => {
+    const run = await resumed();
+    try {
+      await runSteps(CLOUD_STEPS, run.context);
+
+      expect(writes()).not.toContain("coolify POST /projects/{uuid}/environments");
+      const application = harness.requests.find(
+        (request) => request.operationPath === "/applications/private-github-app",
+      )!.body as Record<string, unknown>;
+      expect(application.environment_uuid).toBe("environment-1");
+    } finally {
+      await run.close();
     }
   }, 90_000);
 
