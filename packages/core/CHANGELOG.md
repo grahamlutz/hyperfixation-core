@@ -1,5 +1,12 @@
 # @hyperfixation/core
 
+## 0.1.2
+
+### Patch Changes
+
+- @hyperfixation/workflows@0.1.2
+  - @hyperfixation/db@0.1.2
+
 ## 0.1.1
 
 ### Patch Changes
