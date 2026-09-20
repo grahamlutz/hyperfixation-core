@@ -122,13 +122,15 @@ describe("operator config", () => {
     expect((refusal as Error).message).not.toContain(COOLIFY_TOKEN);
   });
 
-  it("carries the twenty-two keys Phase 3 settled on", () => {
-    expect(CONFIG_KEYS).toHaveLength(22);
-    expect(new Set(CONFIG_KEYS).size).toBe(22);
+  it("carries the twenty-four keys Phase 3 settled on", () => {
+    expect(CONFIG_KEYS).toHaveLength(24);
+    expect(new Set(CONFIG_KEYS).size).toBe(24);
     expect(CONFIG_KEYS).toContain("HF_GITHUB_APP_SLUGS");
     expect(CONFIG_KEYS).toContain("HF_DB_HOST_INTERNAL");
     expect(CONFIG_KEYS).toContain("HF_ANTHROPIC_API_KEY");
     expect(CONFIG_KEYS).toContain("HF_OPENAI_API_KEY");
+    expect(CONFIG_KEYS).toContain("HF_LANGFUSE_PUBLIC_KEY");
+    expect(CONFIG_KEYS).toContain("HF_LANGFUSE_SECRET_KEY");
   });
 
   it("splits HF_GITHUB_APP_SLUGS into the apps to assert, and an unset key into none", async () => {
