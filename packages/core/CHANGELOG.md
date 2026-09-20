@@ -1,5 +1,13 @@
 # @hyperfixation/core
 
+## 0.1.5
+
+### Patch Changes
+
+- Updated dependencies [123aeab]
+  - @hyperfixation/workflows@0.1.5
+  - @hyperfixation/db@0.1.5
+
 ## 0.1.4
 
 ### Patch Changes

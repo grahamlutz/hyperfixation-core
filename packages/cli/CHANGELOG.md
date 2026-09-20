@@ -1,5 +1,33 @@
 # @hyperfixation/cli
 
+## 0.1.5
+
+### Patch Changes
+
+- 327cd64: The cloud `backup` step sends the dump off the box. It registered the schedule with `save_s3: true`
+  and no `s3_storage_uuid`, which Coolify 4.3.21 accepts and then runs with `S3 storage configuration
+  is missing`, keeping the only copy on the same disk as the database. The storage is now resolved
+  first — the new optional `HF_COOLIFY_S3_STORAGE_UUID`, else the one `is_usable` entry
+  `GET /s3-storages` lists — and sent with `save_s3: true`. With no usable storage, or more than one,
+  the step registers `save_s3: false` and says so in a `WARNING:` and the closing checklist rather
+  than guessing. It is also idempotent now: the database's schedules are listed and this app's is
+  PATCHed through `PATCH /databases/{uuid}/backups/{scheduled_backup_uuid}`, so a rerun no longer
+  leaves a second one. Both operations were merged into the vendored Coolify document from its pinned
+  `v4.3.21` tag.
+- e218562: `hf restore-check` runs `pg_restore` inside the Postgres container instead of on the box host.
+  The host has no Postgres client tools — Coolify runs Postgres only in a container — so the real
+  run exited 127 with `pg_restore: command not found`. The restore is now
+  `docker exec -i <container> pg_restore --no-owner --no-comments --role=<migrator> -U <admin>
+  -d <scratch>` with the host's dump streamed on stdin, since the dump is not mounted into the
+  container; the container comes from the same discovery the tunnel uses (`HF_DB_CONTAINER`, or
+  `HF_COOLIFY_POSTGRES_UUID`) and the admin from `HF_PG_ADMIN_USER`. Exit 127 now says what it
+  means and what to check. `Runner.exec` takes an `inputFile`, which on `ssh` becomes the remote
+  shell's own `<` redirection. `RestoreCheckOptions.restoreAdminUrl` and `pgRestoreArgv` are
+  deprecated; `pgRestoreInContainerArgv` and `findPostgresContainer` replace them.
+- @hyperfixation/core@0.1.5
+  - @hyperfixation/auth@0.1.5
+  - @hyperfixation/db@0.1.5
+
 ## 0.1.4
 
 ### Patch Changes
