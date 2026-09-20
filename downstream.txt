@@ -3,3 +3,4 @@
 # has to list the same repositories.
 grahamlutz/hyperfixation-template
 grahamlutz/demo-app
+grahamlutz/demo-two

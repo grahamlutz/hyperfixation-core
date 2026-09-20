@@ -44,6 +44,7 @@ jobs:
             hyperfixation-core
             hyperfixation-template
             demo-app
+            demo-two
 
       # fetch-depth: 0 for the tags — `release:ci` skips a `v<version>` that already exists.
       - uses: actions/checkout@v4
