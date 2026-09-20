@@ -1,18 +1,17 @@
 import { readFile, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import type { Step } from "../new-cloud.js";
-import { substituteTree, TEMPLATE_MARKER, TemplateError } from "../new.js";
+import {
+  scratchInTheWay,
+  substituteTree,
+  targetInTheWay,
+  templateTempDir,
+  TEMPLATE_MARKER,
+  TemplateError,
+} from "../new.js";
 import { exists, type CloudStepContext } from "./context.js";
 
-/**
- * Where the fetch lands before it becomes the app.
- *
- * Beside the target rather than under `os.tmpdir()`, so the rename is a rename and not a second
- * copy across filesystems, and dot-prefixed so a half-fetched tree does not look like an app.
- */
-export function templateTempDir(dir: string): string {
-  return path.join(path.dirname(dir), `.${path.basename(dir)}.hf-new`);
-}
+export { templateTempDir };
 
 /**
  * The app's files: giget's fetch of the template, substituted, renamed into place.
@@ -36,7 +35,14 @@ export const templateStep: Step<CloudStepContext> = {
     }
 
     const temp = templateTempDir(dir);
-    await rm(temp, { recursive: true, force: true });
+    if (await exists(temp)) {
+      // Cleared only on a resume, by the same rule the target directory gets: `fetchStartedAt`
+      // says a run of *this* app fetched into that path, and without it the directory is someone
+      // else's however much its name looks like ours.
+      if (context.state.state.templateFetchStartedAt === undefined) throw scratchInTheWay(temp);
+      await rm(temp, { recursive: true, force: true });
+    }
+    await context.state.patch({ templateFetchStartedAt: new Date(context.now()).toISOString() });
     const fetched = await context.fetchTemplate(context.from, temp);
     await substituteTree(fetched, names);
     // The marker is what `assertTemplateSource` looks for: an app is never a template twice.
@@ -75,7 +81,7 @@ async function adoptOrRefuse(context: CloudStepContext): Promise<void> {
   const substituted =
     !(await exists(path.join(dir, TEMPLATE_MARKER))) && (await packageName(dir)) === names.appName;
   if (!substituted) {
-    throw new TemplateError(`${dir} already exists; hf new will not write into it`);
+    throw targetInTheWay(dir);
   }
   context.io.out(`${names.given}: adopting the app directory already at ${dir}`);
 }

@@ -91,6 +91,19 @@ describe("the cloud template step", () => {
     expect(await readFile(path.join(dir, "package.json"), "utf8")).toContain("demo_app");
   });
 
+  it("refuses a scratch directory it has no record of creating, naming it and the way out", async () => {
+    const temp = templateTempDir(dir);
+    await mkdir(temp, { recursive: true });
+    await writeFile(path.join(temp, "not-ours"), "");
+
+    await expect(runSteps([templateStep], contextWith(recordingFetch))).rejects.toThrow(
+      new RegExp(`${temp} is a leftover hf new scratch directory.*Remove it`, "s"),
+    );
+
+    expect(fetched).toEqual([]);
+    expect(await exists(path.join(temp, "not-ours"))).toBe(true);
+  });
+
   const writeSubstitutedApp = async (): Promise<void> => {
     await mkdir(dir, { recursive: true });
     await writeFile(path.join(dir, "package.json"), '{ "name": "demo_app" }\n');
