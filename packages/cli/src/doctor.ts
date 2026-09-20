@@ -10,15 +10,22 @@ import {
   requireOperatorConfig,
   type OperatorConfig,
 } from "./config.js";
-import { openDatabase } from "./database.js";
-import { deriveNames } from "./names.js";
+import { openDatabase, type Database } from "./database.js";
+import { deriveNames, type AppNames } from "./names.js";
 import { GithubClient, type GithubPullRequest } from "./providers/github.js";
 import type { FetchLike } from "./providers/http.js";
+import { quoteLiteral } from "./roles.js";
 import { createSshRunner, type Runner } from "./runner.js";
 import { openAppState, stateDir, type AppState } from "./state.js";
 
 /** A restore check older than this is a warning: E5 is meant to run weekly, not once. */
 export const RESTORE_CHECK_MAX_AGE_DAYS = 7;
+
+/** The `CONNECTION LIMIT` every application role is created with, in `provisionRoles`. */
+export const APPLICATION_ROLE_CONNECTION_LIMIT = 25;
+
+/** Past this share of `max_connections`, the next app to deploy is the one that cannot connect. */
+export const CONNECTIONS_WARN_FRACTION = 0.8;
 
 /** The branch prefix Phase 4's core bumps open their pull requests on. */
 export const CORE_BUMP_BRANCH_PREFIX = "core-bump/";
@@ -28,7 +35,10 @@ export type Severity = "ok" | "warn" | "fail";
 export interface DoctorFinding {
   /** The app as the state cache names it. */
   app: string;
-  /** `state`, `status`, `runs`, `version`, `budget`, `E006`, `restore-check`, `core-bump`. */
+  /**
+   * `state`, `status`, `runs`, `version`, `budget`, `E006`, `connections`, `lock`,
+   * `restore-check`, `core-bump`.
+   */
   check: string;
   severity: Severity;
   message: string;
@@ -62,6 +72,11 @@ export interface DoctorOptions {
   now?: () => Date;
   /** How E006 is read. Defaults to the tunnel to `HF_SSH_HOST` as `postgres`. */
   privileges?: PrivilegeCheck;
+  /**
+   * Where the connection counts and the worker locks are read: the whole cluster, as the admin
+   * E006 already goes in as. Defaults to the same tunnel to `HF_SSH_HOST`.
+   */
+  database?: () => Promise<Database>;
   env?: NodeJS.ProcessEnv;
 }
 
@@ -81,6 +96,7 @@ export async function doctor(options: DoctorOptions = {}): Promise<DoctorResult>
   const required = requireOperatorConfig(config, ["HF_BASE_DOMAIN", "HF_GITHUB_TOKEN"], { env });
   const dir = options.stateDir ?? stateDir(env);
 
+  const cluster = lazyDatabase(options.database ?? defaultDatabase(config, env));
   const context: Context = {
     dir,
     env,
@@ -89,11 +105,19 @@ export async function doctor(options: DoctorOptions = {}): Promise<DoctorResult>
     fetch: options.fetch ?? ((input, init) => globalThis.fetch(input, init)),
     now: options.now ?? (() => new Date()),
     privileges: options.privileges ?? defaultPrivilegeCheck(config, env),
+    database: cluster.get,
+    // One snapshot for the whole run: the counts are the box's, not any one app's, and an app
+    // whose line is read a second later has not moved the cluster.
+    backends: once(async () => await readBackends(await cluster.get())),
   };
 
   const names = options.name === undefined ? await stateNames(dir) : [options.name];
   const findings: DoctorFinding[] = [];
-  for (const name of names) findings.push(...(await doctorApp(context, name)));
+  try {
+    for (const name of names) findings.push(...(await doctorApp(context, name)));
+  } finally {
+    await cluster.close();
+  }
 
   return { findings, ok: findings.every((finding) => finding.severity === "ok") };
 }
@@ -171,6 +195,8 @@ interface Context {
   fetch: FetchLike;
   now: () => Date;
   privileges: PrivilegeCheck;
+  database: () => Promise<Database>;
+  backends: () => Promise<Backends>;
 }
 
 function defaultPrivilegeCheck(config: OperatorConfig, env: NodeJS.ProcessEnv): PrivilegeCheck {
@@ -179,6 +205,40 @@ function defaultPrivilegeCheck(config: OperatorConfig, env: NodeJS.ProcessEnv): 
     containers: postgresContainers(config),
     adminUser: pgAdminUser(config),
   });
+}
+
+function defaultDatabase(config: OperatorConfig, env: NodeJS.ProcessEnv): () => Promise<Database> {
+  const { HF_SSH_HOST } = requireOperatorConfig(config, ["HF_SSH_HOST"], { env });
+  const runner = createSshRunner({ host: HF_SSH_HOST });
+  return async () =>
+    await openDatabase(runner, {
+      admin: { user: pgAdminUser(config) },
+      containers: postgresContainers(config),
+    });
+}
+
+/** One cluster connection for the whole run: opened when a check first needs it, closed once. */
+function lazyDatabase(open: () => Promise<Database>): {
+  get: () => Promise<Database>;
+  close: () => Promise<void>;
+} {
+  let pending: Promise<Database> | undefined;
+  return {
+    get: () => (pending ??= open()),
+    close: async () => {
+      // A run whose every app failed before the first query never opened one, and an open that
+      // failed is already a finding.
+      await pending?.then(
+        async (db) => await db.close(),
+        () => undefined,
+      );
+    },
+  };
+}
+
+function once<T>(read: () => Promise<T>): () => Promise<T> {
+  let pending: Promise<T> | undefined;
+  return () => (pending ??= read());
 }
 
 async function doctorApp(context: Context, name: string): Promise<DoctorFinding[]> {
@@ -221,6 +281,13 @@ async function doctorApp(context: Context, name: string): Promise<DoctorFinding[
     budgetFinding(report.budget.previous, "previous", add);
   }
   await privilegeFindings(context, name, add);
+  // A name `deriveNames` refuses has already failed E006 on that same message; the cluster checks
+  // have no names to run under and say nothing more.
+  const names = tryNames(name);
+  if (names !== undefined) {
+    await connectionFindings(context, names.applicationRole, add);
+    await lockFindings(context, names, add);
+  }
   restoreCheckFindings(context, state, add);
   if (repo !== undefined) await bumpFindings(context, repo, add);
 
@@ -428,6 +495,126 @@ async function privilegeFindings(context: Context, name: string, add: Add): Prom
     );
   } catch (error) {
     add("E006", "fail", flatten((error as Error).message));
+  }
+}
+
+/** Every backend belonging to an app role — `hf_<app>` and its `_migrator` and `_ro`. */
+const BACKENDS_SQL =
+  "SELECT usename, count(*) FROM pg_stat_activity WHERE usename LIKE 'hf\\_%' GROUP BY usename";
+
+interface Backends {
+  /** `max_connections`, or `undefined` when the server answered with something else. */
+  max: number | undefined;
+  total: number;
+  byRole: Map<string, number>;
+}
+
+async function readBackends(db: Database): Promise<Backends> {
+  const setting = (await db.query("SHOW max_connections")).rows[0]?.[0];
+  const byRole = new Map<string, number>();
+  for (const row of (await db.query(BACKENDS_SQL)).rows) {
+    if (row[0] !== undefined) byRole.set(row[0], Number(row[1]));
+  }
+  let total = 0;
+  for (const count of byRole.values()) total += count;
+  return { max: setting === undefined ? undefined : numeric(Number(setting)), total, byRole };
+}
+
+/**
+ * What the box's connection slots are spent on, and what this app has of them.
+ *
+ * Box-wide rather than per-app because that is where it runs out: every app on the box draws on
+ * one `max_connections`, and the app that then cannot connect is whichever one deploys next.
+ */
+async function connectionFindings(context: Context, role: string, add: Add): Promise<void> {
+  let backends: Backends;
+  try {
+    backends = await context.backends();
+  } catch (error) {
+    add("connections", "fail", flatten((error as Error).message));
+    return;
+  }
+
+  const limit = String(APPLICATION_ROLE_CONNECTION_LIMIT);
+  const line =
+    `${role} ${String(backends.byRole.get(role) ?? 0)}/${limit}, box ` +
+    `${String(backends.total)}/${backends.max === undefined ? UNKNOWN : String(backends.max)} ` +
+    "on hf_ roles";
+  const crowded =
+    backends.max !== undefined && backends.total > backends.max * CONNECTIONS_WARN_FRACTION;
+  add(
+    "connections",
+    crowded ? "warn" : "ok",
+    crowded
+      ? `${line} — over ${String(CONNECTIONS_WARN_FRACTION * 100)}% of max_connections`
+      : line,
+  );
+}
+
+/**
+ * The worker's advisory lock in one app's database: exactly one, under the key the worker takes.
+ *
+ * `pg_try_advisory_lock(bigint)` splits its key across `classid` and `objid`, so the key is
+ * reassembled rather than compared whole — and masked rather than only shifted, because
+ * `hashtext` answers `int4` and a negative hash widens to a bigint of sign bits.
+ */
+export function workerLockSql(appName: string): string {
+  return (
+    `WITH k AS (SELECT hashtext('hf-worker:' || ${quoteLiteral(appName)})::bigint AS value) ` +
+    "SELECT count(l.pid), count(l.pid) FILTER (WHERE " +
+    "l.classid = ((k.value >> 32) & 4294967295)::oid AND " +
+    "l.objid = (k.value & 4294967295)::oid) " +
+    "FROM k LEFT JOIN pg_locks AS l ON l.locktype = 'advisory' AND " +
+    "l.database = (SELECT oid FROM pg_database WHERE datname = current_database())"
+  );
+}
+
+async function lockFindings(context: Context, names: AppNames, add: Add): Promise<void> {
+  let row: string[] | undefined;
+  try {
+    const db = await context.database();
+    row = (await db.query(workerLockSql(names.appName), { database: names.databaseName })).rows[0];
+  } catch (error) {
+    add("lock", "fail", flatten((error as Error).message));
+    return;
+  }
+
+  const key = `hf-worker:${names.appName}`;
+  const held = Number(row?.[0]);
+  const matching = Number(row?.[1]);
+  if (!Number.isFinite(held)) {
+    add("lock", "fail", `pg_locks in ${names.databaseName} answered no count`);
+    return;
+  }
+  if (held === 0) {
+    add("lock", "fail", `no advisory lock in ${names.databaseName}: no worker holds ${key}`);
+    return;
+  }
+  if (held !== 1) {
+    add(
+      "lock",
+      "fail",
+      `${String(held)} advisory locks in ${names.databaseName}; one worker per app holds one`,
+    );
+    return;
+  }
+  if (matching !== 1) {
+    add(
+      "lock",
+      "fail",
+      `the one advisory lock in ${names.databaseName} is not hashtext('${key}'): ` +
+        "something other than the worker holds it",
+    );
+    return;
+  }
+  add("lock", "ok", `one worker holds ${key} in ${names.databaseName}`);
+}
+
+function tryNames(name: string): AppNames | undefined {
+  try {
+    return deriveNames(name);
+  } catch {
+    return undefined;
   }
 }
 

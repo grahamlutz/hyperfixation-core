@@ -36,6 +36,15 @@ An export leaves over two releases. In release N it is marked in `deprecations.j
 version that will remove it; in release N+1's minor it is removed. A removal that never appeared
 in a `deprecations.json` is a bug in the release, not a fast path.
 
+A value inside an exported const's literal set leaves the same way. `@hyperfixation/cli`'s
+`COMMANDS` is printed as a readonly tuple of string literals, and dropping `"deploy"` from it
+breaks every caller of `hf deploy` exactly like a removed export, so `api-diff` reports it and the
+tuple may only grow. A tuple member has nowhere to carry an `@deprecated` tag, so for it the
+`deprecations.json` entry **is** the announcement: name the symbol `COMMANDS.<name>` —
+`{"package": "@hyperfixation/cli", "symbol": "COMMANDS.deploy", ...}` — and the baseline-tag gate
+does not apply. The `USAGE` text beside it is prose that every added command reprints; the gate
+ignores its contents and relies on `COMMANDS` to catch what actually left.
+
 ## Migrations: additive against N-1
 
 A core migration must be additive against N-1's readers — no dropping or renaming a column N-1

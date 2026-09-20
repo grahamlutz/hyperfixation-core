@@ -12,6 +12,7 @@ import { formatRestoreCheck, restoreCheckApp } from "./restore-check.js";
 import { statusTokenApp, type StatusTokenKind } from "./status-token.js";
 import { requireTemplateSource } from "./template-source.js";
 import { DEV_BUDGET_USD, upApp } from "./up.js";
+import { cliVersion } from "./version.js";
 
 export const COMMANDS = [
   "new",
@@ -25,6 +26,7 @@ export const COMMANDS = [
   "deploy",
   "doctor",
   "restore-check",
+  "version",
 ] as const;
 
 export type Command = (typeof COMMANDS)[number];
@@ -74,7 +76,8 @@ export const USAGE = `hf — the hyperfixation CLI
 
   hf doctor [name]          every deployed app in the state cache, or one: /api/status under its
                             read token, the deployed version against main, E006 as the app role,
-                            the last restore check, and open core-bump PRs. Exits 1 on any finding
+                            the box's connection slots, the worker's advisory lock, the last
+                            restore check, and open core-bump PRs. Exits 1 on any finding
 
   hf gen [generator]        the app's turbo generators
 
@@ -83,9 +86,14 @@ export const USAGE = `hf — the hyperfixation CLI
       --compose-only          bring the infrastructure up and stop
 
   hf restore-check <name>   restore the newest hf_<name> dump beside the live database and
-                            compare row counts; exits 1 on any mismatch
+                            compare row counts. An append-only table the live side has moved
+                            on from reads ok (drift +N); exits 1 on any mismatch, and on a
+                            dump older than 24 h
       --backup-dir <dir>      where the dumps are (default: Coolify's on the box)
       --from-s3               read the dump from object storage (not implemented)
+      --strict                compare every table exactly; no table may drift
+
+  hf version                the @hyperfixation/cli version behind this hf, also as --version, -v
 
 Every command but \`new\`, \`deploy\`, \`doctor\` and \`restore-check\` runs against the app at or above the working directory, or --dir.
 `;
@@ -113,6 +121,10 @@ export async function main(argv: readonly string[], io: Io = consoleIo): Promise
   if (command === undefined || command === "--help" || command === "-h") {
     io.out(USAGE);
     return command === undefined ? 1 : 0;
+  }
+  if (command === "--version" || command === "-v") {
+    io.out(await cliVersion());
+    return 0;
   }
   if (!(COMMANDS as readonly string[]).includes(command)) {
     io.err(`unknown command ${JSON.stringify(command)}`);
@@ -152,6 +164,9 @@ async function dispatch(command: Command, argv: readonly string[], io: Io): Prom
       return await commandDoctor(argv, io);
     case "restore-check":
       return await commandRestoreCheck(argv, io);
+    case "version":
+      io.out(await cliVersion());
+      return 0;
   }
 }
 
@@ -410,6 +425,7 @@ async function commandRestoreCheck(argv: readonly string[], io: Io): Promise<num
     options: {
       "backup-dir": { type: "string" },
       "from-s3": { type: "boolean", default: false },
+      strict: { type: "boolean", default: false },
     },
     allowPositionals: true,
   });
@@ -424,6 +440,7 @@ async function commandRestoreCheck(argv: readonly string[], io: Io): Promise<num
     app: name,
     backupDir: values["backup-dir"],
     fromS3: values["from-s3"],
+    strict: values.strict,
   });
   for (const line of formatRestoreCheck(result)) io.out(line);
   return result.ok ? 0 : 1;

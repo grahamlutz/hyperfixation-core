@@ -77,6 +77,6 @@ export function credentialsOf(connectionString: string): { user: string; passwor
   return { user: decodeURIComponent(url.username), password: decodeURIComponent(url.password) };
 }
 
-function quoteLiteral(value: string): string {
+export function quoteLiteral(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
 }

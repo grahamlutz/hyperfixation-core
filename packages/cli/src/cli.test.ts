@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { COMMANDS, main, USAGE, type Io } from "./cli.js";
 import { TEMPLATE_MARKER } from "./new.js";
@@ -63,8 +64,36 @@ describe("the hf binary's argument handling", () => {
       "deploy",
       "doctor",
       "restore-check",
+      "version",
     ]);
     for (const command of COMMANDS) expect(USAGE).toContain(`hf ${command}`);
+  });
+});
+
+describe("hf --version", () => {
+  /** The published version itself: a string of its own here would only ever agree by accident. */
+  const packaged = async (): Promise<string> =>
+    (
+      JSON.parse(
+        await readFile(fileURLToPath(new URL("../package.json", import.meta.url)), "utf8"),
+      ) as { version: string }
+    ).version;
+
+  it("prints the @hyperfixation/cli version and exits 0", async () => {
+    const { io: sink, out } = io();
+
+    expect(await main(["--version"], sink)).toBe(0);
+    expect(out).toEqual([await packaged()]);
+  });
+
+  it("answers to -v and to hf version alike", async () => {
+    const short = io();
+    const spelled = io();
+
+    expect(await main(["-v"], short.io)).toBe(0);
+    expect(await main(["version"], spelled.io)).toBe(0);
+    expect(short.out).toEqual([await packaged()]);
+    expect(spelled.out).toEqual([await packaged()]);
   });
 });
 

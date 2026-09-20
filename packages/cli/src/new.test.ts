@@ -176,12 +176,23 @@ describe("hf new --local", () => {
     ).rejects.toThrow(TEMPLATE_MARKER);
   });
 
-  it("refuses a target directory that already exists", async () => {
-    await mkdir(path.join(workspace, "demo-app"));
+  it("refuses a target directory that already exists, naming it and the way out", async () => {
+    const dir = path.join(workspace, "demo-app");
+    await mkdir(dir);
 
     await expect(
       newApp({ name: "demo-app", from: source, into: workspace, local: true }),
-    ).rejects.toThrow(TemplateError);
+    ).rejects.toThrow(new RegExp(`${dir} already exists.*Move it away`, "s"));
+  });
+
+  it("refuses a leftover scratch directory by name rather than copying beside it", async () => {
+    const scratch = path.join(workspace, ".demo-app.hf-new");
+    await mkdir(scratch);
+
+    await expect(
+      newApp({ name: "demo-app", from: source, into: workspace, local: true }),
+    ).rejects.toThrow(new RegExp(`${scratch} is a leftover hf new scratch directory.*Remove it`, "s"));
+    expect(await readdir(workspace)).not.toContain("demo-app");
   });
 
   it("refuses an invalid name before it creates anything", async () => {

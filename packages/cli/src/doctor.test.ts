@@ -4,17 +4,28 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { StatusReport } from "@hyperfixation/core";
 import { BootCheckFailure } from "@hyperfixation/db";
-import { ADMIN_URL, asRole } from "@hyperfixation/testing";
+import { ADMIN_URL, asRole, createTestDatabase, type TestDatabase } from "@hyperfixation/testing";
 import { http, HttpResponse } from "msw";
+import { Client } from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { main } from "./cli.js";
-import { checkAppRolePrivileges, doctor, doctorLines, type DoctorOptions } from "./doctor.js";
+import { openDatabaseUrl, type Database } from "./database.js";
+import {
+  checkAppRolePrivileges,
+  doctor,
+  doctorLines,
+  workerLockSql,
+  type DoctorOptions,
+} from "./doctor.js";
 import { openAppState, type AppState } from "./state.js";
 import { createOpenApiHarness, type StubRoute } from "./test-support/openapi.js";
 
 const APP = "demo-app";
 const BASE_DOMAIN = "hf.test";
 const STATUS_URL = `https://${APP}.${BASE_DOMAIN}/api/status`;
+/** A second app on the same box, for the checks that are the box's rather than one app's. */
+const OTHER_APP = "other-app";
+const OTHER_STATUS_URL = `https://${OTHER_APP}.${BASE_DOMAIN}/api/status`;
 const GITHUB = "https://api.github.com";
 const REPO = `grahamlutz/${APP}`;
 
@@ -112,12 +123,68 @@ function statusReport(overrides: Partial<StatusReport> = {}): StatusReport {
   };
 }
 
+function otherStatusHandler(json: StatusReport): ReturnType<typeof http.get> {
+  return http.get(OTHER_STATUS_URL, () => HttpResponse.json(json));
+}
+
 /** A record, not a `StatusReport`: the shape an older core answers with is the point of some. */
 function statusHandler(
   json: StatusReport | Record<string, unknown>,
   status = 200,
 ): ReturnType<typeof http.get> {
   return http.get(STATUS_URL, () => HttpResponse.json(json, { status }));
+}
+
+const ROLE = "hf_demo_app";
+const DATABASE = "hf_demo_app";
+
+interface ClusterStub {
+  maxConnections?: number;
+  /** Backends per role, as `pg_stat_activity` grouped by `usename` hands them back. */
+  backends?: Record<string, number>;
+  /** Per database: how many advisory locks are held, and how many carry the worker's key. */
+  locks?: Record<string, { held: number; matching?: number }>;
+  /** A query whose SQL matches refuses, the way a tunnel that died under it does. */
+  fails?: RegExp;
+}
+
+/** The cluster as `hf doctor` queries it: canned counts in the row shape `Database` returns. */
+function cluster(stub: ClusterStub = {}): {
+  open: () => Promise<Database>;
+  counts: { opens: number; closes: number };
+} {
+  const counts = { opens: 0, closes: 0 };
+  const database: Database = {
+    kind: "tunnel",
+    adminUrl: () => undefined,
+    query: (sql, queryOptions) => {
+      if (stub.fails?.test(sql) === true) return Promise.reject(new Error("connection terminated"));
+      if (sql.startsWith("SHOW max_connections")) {
+        return Promise.resolve({ rows: [[String(stub.maxConnections ?? 100)]] });
+      }
+      if (sql.includes("pg_stat_activity")) {
+        return Promise.resolve({
+          rows: Object.entries(stub.backends ?? { [ROLE]: 7 }).map(([role, count]) => [
+            role,
+            String(count),
+          ]),
+        });
+      }
+      const lock = stub.locks?.[queryOptions?.database ?? ""] ?? { held: 1 };
+      return Promise.resolve({ rows: [[String(lock.held), String(lock.matching ?? lock.held)]] });
+    },
+    close: () => {
+      counts.closes += 1;
+      return Promise.resolve();
+    },
+  };
+  return {
+    open: () => {
+      counts.opens += 1;
+      return Promise.resolve(database);
+    },
+    counts,
+  };
 }
 
 function options(dir: string, overrides: Partial<DoctorOptions> = {}): DoctorOptions {
@@ -128,6 +195,7 @@ function options(dir: string, overrides: Partial<DoctorOptions> = {}): DoctorOpt
     now: () => NOW,
     // E006 needs a cluster; the check itself is exercised against one further down.
     privileges: async () => undefined,
+    database: cluster().open,
     ...overrides,
   };
 }
@@ -291,6 +359,122 @@ describe("hf doctor", () => {
     expect(line).not.toContain("\n");
   });
 
+  it("counts the app's backends against its role limit and the box's against max_connections", async () => {
+    const dir = await stateDirWith();
+    harness.server.use(statusHandler(statusReport()));
+    const box = cluster();
+
+    const result = await doctor(options(dir, { name: APP, database: box.open }));
+
+    expect(result.ok).toBe(true);
+    expect(findingOf(doctorLines(result), "connections")).toBe(
+      `  OK   connections: ${ROLE} 7/25, box 7/100 on hf_ roles`,
+    );
+    // One cluster connection for the run, closed once however the findings went.
+    expect(box.counts).toEqual({ opens: 1, closes: 1 });
+  });
+
+  it("warns when the box's hf_ roles hold more than 80% of max_connections", async () => {
+    const dir = await stateDirWith();
+    harness.server.use(statusHandler(statusReport()));
+
+    const result = await doctor(
+      options(dir, {
+        name: APP,
+        database: cluster({
+          maxConnections: 100,
+          backends: { [ROLE]: 20, [`${ROLE}_migrator`]: 5, hf_other_app: 60 },
+        }).open,
+      }),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(findingOf(doctorLines(result), "connections")).toBe(
+      `  WARN connections: ${ROLE} 20/25, box 85/100 on hf_ roles — over 80% of max_connections`,
+    );
+  });
+
+  it("fails when no worker holds the app's advisory lock", async () => {
+    const dir = await stateDirWith();
+    harness.server.use(statusHandler(statusReport()));
+
+    const result = await doctor(
+      options(dir, { name: APP, database: cluster({ locks: { [DATABASE]: { held: 0 } } }).open }),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(findingOf(doctorLines(result), "lock")).toBe(
+      `  FAIL lock: no advisory lock in ${DATABASE}: no worker holds hf-worker:demo_app`,
+    );
+  });
+
+  it("fails on two advisory locks, and on one that is not the worker's key", async () => {
+    const dir = await stateDirWith();
+    harness.server.use(statusHandler(statusReport()));
+
+    const two = await doctor(
+      options(dir, { name: APP, database: cluster({ locks: { [DATABASE]: { held: 2 } } }).open }),
+    );
+    expect(two.ok).toBe(false);
+    expect(findingOf(doctorLines(two), "lock")).toContain(
+      `FAIL lock: 2 advisory locks in ${DATABASE}`,
+    );
+
+    harness.server.use(statusHandler(statusReport()));
+    const other = await doctor(
+      options(dir, {
+        name: APP,
+        database: cluster({ locks: { [DATABASE]: { held: 1, matching: 0 } } }).open,
+      }),
+    );
+    expect(other.ok).toBe(false);
+    expect(findingOf(doctorLines(other), "lock")).toContain(
+      "is not hashtext('hf-worker:demo_app')",
+    );
+  });
+
+  it("reports one app's lock without the other app's deciding it", async () => {
+    const dir = await tempDir();
+    for (const name of [APP, OTHER_APP]) {
+      await (await openAppState(name, { dir })).patch(stateOf({ repo: `grahamlutz/${name}` }));
+    }
+    harness.server.use(statusHandler(statusReport()), otherStatusHandler(statusReport()));
+
+    const result = await doctor(
+      options(dir, {
+        database: cluster({ locks: { [DATABASE]: { held: 1 }, hf_other_app: { held: 0 } } }).open,
+      }),
+    );
+    const locks = doctorLines(result).filter((line) => line.includes(" lock:"));
+
+    expect(result.ok).toBe(false);
+    expect(locks).toEqual([
+      `  OK   lock: one worker holds hf-worker:demo_app in ${DATABASE}`,
+      "  FAIL lock: no advisory lock in hf_other_app: no worker holds hf-worker:other_app",
+    ]);
+  });
+
+  it("fails, rather than crashes, when a cluster query refuses", async () => {
+    const dir = await stateDirWith();
+    harness.server.use(statusHandler(statusReport()));
+
+    const locks = await doctor(
+      options(dir, { name: APP, database: cluster({ fails: /pg_locks/ }).open }),
+    );
+    expect(locks.ok).toBe(false);
+    expect(findingOf(doctorLines(locks), "lock")).toBe("  FAIL lock: connection terminated");
+    expect(findingOf(doctorLines(locks), "connections")).toContain("OK");
+
+    harness.server.use(statusHandler(statusReport()));
+    const backends = await doctor(
+      options(dir, { name: APP, database: cluster({ fails: /pg_stat_activity/ }).open }),
+    );
+    expect(backends.ok).toBe(false);
+    expect(findingOf(doctorLines(backends), "connections")).toBe(
+      "  FAIL connections: connection terminated",
+    );
+  });
+
   it("warns when the last restore check is older than a week, and when there is none", async () => {
     const stale = await stateDirWith(
       stateOf({ lastRestoreCheckAt: new Date(NOW.getTime() - 30 * 86_400_000).toISOString() }),
@@ -452,6 +636,44 @@ describe("hf doctor", () => {
 
     expect(lines.join("\n")).toContain("no apps in the state cache");
   });
+});
+
+describe("workerLockSql", () => {
+  let db: TestDatabase;
+  let holder: Client;
+
+  /** `WORKER_LOCK_STATEMENT` in `@hyperfixation/workflows`, which the CLI does not depend on. */
+  const ACQUIRE = "SELECT pg_try_advisory_lock(hashtext('hf-worker:' || $1::text))";
+
+  beforeAll(async () => {
+    db = await createTestDatabase();
+    holder = new Client({ connectionString: db.applicationUrl });
+    await holder.connect();
+  }, 60_000);
+
+  afterAll(async () => {
+    await holder.end();
+    await db.drop();
+  }, 30_000);
+
+  it("counts the worker's own lock, and does not count another app's key as it", async () => {
+    const cluster = openDatabaseUrl(ADMIN_URL);
+    const count = async (appName: string): Promise<string[] | undefined> =>
+      (await cluster.query(workerLockSql(appName), { database: db.databaseName })).rows[0];
+
+    try {
+      expect(await count(db.appName)).toEqual(["0", "0"]);
+
+      await holder.query(ACQUIRE, [db.appName]);
+
+      // The split across classid/objid is the whole risk here: a wrong one reads as a lock held
+      // under someone else's key, which is a FAIL line on a healthy app.
+      expect(await count(db.appName)).toEqual(["1", "1"]);
+      expect(await count(`${db.appName}_elsewhere`)).toEqual(["1", "0"]);
+    } finally {
+      await cluster.close();
+    }
+  }, 30_000);
 });
 
 describe("checkAppRolePrivileges", () => {
