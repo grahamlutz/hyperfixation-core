@@ -255,6 +255,12 @@ async function statusFindings(
       report.coreVersion,
   );
   add("runs", "ok", `${String(report.runs.running)} run(s) running`);
+  // Only `fixtures` gets a line. `live` is the expected deploy, and `unknown` is an app whose
+  // worker has not reported yet — neither is a finding, but a canned draft an operator takes
+  // for a real one is.
+  if (report.llm.mode === "fixtures") {
+    add("llm", "warn", "app is serving fixture drafts — no provider key set");
+  }
   return report;
 }
 

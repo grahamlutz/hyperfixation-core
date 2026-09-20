@@ -193,6 +193,31 @@ describe("hf doctor", () => {
     );
   });
 
+  it("warns that an app is serving fixture drafts, and only about that mode", async () => {
+    const dir = await stateDirWith();
+    harness.server.use(statusHandler(statusReport({ llm: { mode: "fixtures" } })));
+
+    const result = await doctor(options(dir, { name: APP }));
+
+    expect(result.ok).toBe(false);
+    expect(findingOf(doctorLines(result), "llm")).toBe(
+      "  WARN llm: app is serving fixture drafts — no provider key set",
+    );
+  });
+
+  it("says nothing about a live app, or one whose worker has not reported yet", async () => {
+    for (const mode of ["live", "unknown"] as const) {
+      const dir = await stateDirWith();
+      harness.server.use(statusHandler(statusReport({ llm: { mode } })));
+
+      const result = await doctor(options(dir, { name: APP }));
+
+      expect(result.ok, mode).toBe(true);
+      expect(doctorLines(result).some((line) => line.includes(" llm:")), mode).toBe(false);
+      harness.server.resetHandlers();
+    }
+  });
+
   it("fails E006 on one line when a privilege is false", async () => {
     const dir = await stateDirWith();
     harness.server.use(statusHandler(statusReport()));
