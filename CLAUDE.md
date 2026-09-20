@@ -13,7 +13,7 @@ maintainer tooling and never publishes. The app template is the separate
 - A flake is a bug: file it and fix it, never retry-merge. `packages/ai/src/redeploy-case-1.test.ts`
   and the EPIPE fix in #60 both looked like flakes and were real defects.
 - Before merging a PR that changes an exported type, run the template against it:
-  `pnpm template:check` (forthcoming, with `packages/tools`).
+  `pnpm template:check`.
 - Cross-repo order: core merges **and publishes** before the template PR that needs the change.
 - Regenerate `etc/*.api.md` from a clean clone — an incremental build reorders union members, so
   the diff you get locally is noise that hides the real API change.

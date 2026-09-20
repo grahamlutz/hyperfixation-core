@@ -199,6 +199,35 @@ Automated: `publish-ci` against a fake registry; `api-diff` over fixture reports
 5. **A mechanical core-migration additivity check** (policy: no drop/rename against N-1)? Recommend not this phase — the
    plan lists the app allowlist, which exists; add a `core-migration-policy` test when Phase 5 has an N-1 reader.
 
+## Follow-ups from the first-run review
+
+Found while running a fresh clone on 2026-09-19, after Phase 2. None block a phase exit; each is
+small enough to ride along with the chunk it touches. Markers as above.
+
+- ✅ **`hf up` needed a budget `hf new` never set.** `hf up` now seeds `DEV_BUDGET_USD` ($10) when
+  `HF_BOOTSTRAP_BUDGET_USD` is unset and says so; `hf bootstrap` still requires an explicit one, so a
+  deploy never gets an implicit cap (core #15, template #11).
+- ⬜ **No CI job runs `hf new --local && hf up`.** That bug shipped because every test set the
+  budget by hand and no job ran the two commands together. Needs the built `hf` (the X1 note says the
+  same about the admin form). One job that scaffolds a scratch app and runs `hf up` to the point the
+  web process is listening.
+- ⬜ **`hf new --local` and `hf check` don't verify the bootstrap inputs.** A blank email answer is
+  accepted (`new.ts`, `promptForBootstrapEmail`) and only fails later inside `hf bootstrap`; `hf check`
+  compares `.env.example` to the env and looks at migrations and E001–E006, nothing else. The cloud
+  `hf new` already refuses a missing `--email`/`--budget-usd` up front — make `--local` match.
+- ⬜ **The app's base budget has no command.** #28's admin action edits one `hf_budget_period` row
+  (audited, passkey-gated); `hf_app_state.budget_usd`, the default each new month copies, is set once by
+  `hf bootstrap` and never again. Decide whether an admin action or `hf` command should change it.
+- ⬜ **Test database default is a port nothing starts.** `packages/testing/src/database.ts` defaults to
+  5434, "the `hf dev` compose port"; this repo has no compose file and CI overrides it to 5432. Default to
+  5432, or ship a `docker-compose.test.yml`. Also document how to get `hf` on PATH from a clone (the
+  published `@hyperfixation/cli` may make this moot — check before writing it down).
+- ⬜ **Docs drift.** The chunk headings above (R1, A1, B1, B2, X2), "Where Phase 4 starts from" (written
+  against `720ad4e`), the Phase 3 X1 header, and the master plan's status table all predate the merged
+  work. `pnpm plan:sync --write` regenerates the Status block; the rest is hand prose.
+- ⬜ **shadcn registry is empty** (`registry/registry.json`, `items: []`). Fenced above; listed so it
+  isn't forgotten.
+
 ## Risks
 
 1. Concern 1 is a documented GitHub rule; if an App token also fails to trigger CI (it should not), the fallback is a
