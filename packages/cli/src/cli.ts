@@ -8,7 +8,7 @@ import { generate } from "./gen.js";
 import { migrateApp } from "./migrate.js";
 import { newApp } from "./new.js";
 import { newAppCloud } from "./new-cloud.js";
-import { formatRestoreCheck, restoreCheckApp, STALE_DUMP_HOURS } from "./restore-check.js";
+import { formatRestoreCheck, restoreCheckApp } from "./restore-check.js";
 import { statusTokenApp, type StatusTokenKind } from "./status-token.js";
 import { requireTemplateSource } from "./template-source.js";
 import { DEV_BUDGET_USD, upApp } from "./up.js";
@@ -84,7 +84,7 @@ export const USAGE = `hf — the hyperfixation CLI
   hf restore-check <name>   restore the newest hf_<name> dump beside the live database and
                             compare row counts. An append-only table the live side has moved
                             on from reads ok (drift +N); exits 1 on any mismatch, and on a
-                            dump older than ${String(STALE_DUMP_HOURS)} h
+                            dump older than 24 h
       --backup-dir <dir>      where the dumps are (default: Coolify's on the box)
       --from-s3               read the dump from object storage (not implemented)
       --strict                compare every table exactly; no table may drift

@@ -268,7 +268,7 @@ describe("restoreCheck", () => {
       live: 2,
       restored: 0,
       drift: 2,
-      verdict: "drift",
+      verdict: "ok",
     });
     expect(state.state.lastRestoreCheckAt).toBeDefined();
   }, 120_000);
@@ -545,7 +545,7 @@ describe("formatRestoreCheck", () => {
       ...base,
       rows: [
         { table: "hf_app_state", live: 1, restored: 1, verdict: "ok" },
-        { table: "hf_run", live: 30, restored: 3, drift: 27, verdict: "drift" },
+        { table: "hf_run", live: 30, restored: 3, drift: 27, verdict: "ok" },
       ],
       matched: true,
       ok: true,

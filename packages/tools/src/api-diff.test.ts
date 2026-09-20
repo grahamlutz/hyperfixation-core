@@ -8,6 +8,7 @@ import {
   checkApiDiff,
   nextMinor,
   normalizeSignature,
+  onlyChangesAConstLiteral,
   parseApiReport,
   parseDeprecations,
 } from "./api-diff.js";
@@ -242,6 +243,17 @@ export type Verdict = "approved" | "rejected";
 `);
     expect(apiChanges(pair(head))).toEqual([]);
     expect(check(head, [], "patch")).toEqual([]);
+  });
+
+  it("passes a numeric const whose value moved, and still reports one that changed shape", () => {
+    const hours = (value: string): string => `export const STALE_DUMP_HOURS = ${value};`;
+
+    expect(onlyChangesAConstLiteral(hours("36"), hours("24"))).toBe(true);
+    // A threshold that stops being a number is a contract change, not a value change.
+    expect(onlyChangesAConstLiteral(hours("36"), "export const STALE_DUMP_HOURS: number;")).toBe(
+      false,
+    );
+    expect(onlyChangesAConstLiteral(hours("36"), "export const OTHER_HOURS = 24;")).toBe(false);
   });
 
   it("still reports a type alias that was retyped, const or not", () => {

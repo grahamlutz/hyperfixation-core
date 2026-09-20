@@ -68,8 +68,7 @@ export const APPEND_ONLY_TABLES: readonly string[] = [
 
 const APPEND_ONLY = new Set(APPEND_ONLY_TABLES);
 
-/** `drift` prints as `ok (drift +N)` and is not a failure; see `APPEND_ONLY_TABLES`. */
-export type RestoreVerdict = "ok" | "drift" | "mismatch" | "live only" | "restored only";
+export type RestoreVerdict = "ok" | "mismatch" | "live only" | "restored only";
 
 export interface RestoreCheckRow {
   table: string;
@@ -77,7 +76,13 @@ export interface RestoreCheckRow {
   live?: number;
   /** Absent when the table is not in the restored dump. */
   restored?: number;
-  /** Rows the live side gained since the dump. Only on a `drift` row. */
+  /**
+   * Rows the live side gained since the dump, on an `APPEND_ONLY_TABLES` table.
+   *
+   * Drift is not its own verdict because it is not its own outcome: the restore held everything
+   * the dump had, which is `ok`. The column prints it as `ok (drift +N)` so the operator can see
+   * why two counts differ without having to decide whether it mattered.
+   */
   drift?: number;
   verdict: RestoreVerdict;
 }
@@ -94,7 +99,7 @@ export interface RestoreCheckResult {
   strict: boolean;
   /** One row per table, `hf_*` or carrying `normalized_name`, sorted by name. */
   rows: readonly RestoreCheckRow[];
-  /** No row failed: every verdict is `ok` or `drift`. What `lastRestoreCheckAt` is written on. */
+  /** Every row's verdict is `ok`, drift included. What `lastRestoreCheckAt` is written on. */
   matched: boolean;
   /** `matched` and the dump is not stale. The command's exit code is `ok ? 0 : 1`. */
   ok: boolean;
@@ -218,7 +223,7 @@ export async function restoreCheck(options: RestoreCheckOptions): Promise<Restor
       }
 
       const dumpStale = dumpAgeHours > STALE_DUMP_HOURS;
-      const matched = rows.every((row) => row.verdict === "ok" || row.verdict === "drift");
+      const matched = rows.every((row) => row.verdict === "ok");
       // A stale dump keeps the exit code but not the timestamp: the restore itself was proved,
       // and it is `hf doctor` that decides how long a proof stays good.
       if (matched) await options.state.patch({ lastRestoreCheckAt: now.toISOString() });
@@ -379,9 +384,9 @@ async function countTables(db: Database, database?: string): Promise<Map<string,
  * between the backup and the check is the ordinary reason for it, and reading it as a count of
  * zero would make an added table look like lost data.
  *
- * An `APPEND_ONLY_TABLES` table the live side is *ahead* on is `drift`, unless `strict`. A
- * restored count above the live one is still a `mismatch` there: the dump cannot hold rows the
- * append-only live table has since lost unless something did lose them.
+ * An `APPEND_ONLY_TABLES` table the live side is *ahead* on is `ok` with a `drift`, unless
+ * `strict`. A restored count above the live one is still a `mismatch` there: the dump cannot
+ * hold rows an append-only live table has since lost unless something did lose them.
  */
 function compare(
   live: Map<string, number>,
@@ -403,11 +408,9 @@ function compare(
         ? "restored only"
         : restoredCount === undefined
           ? "live only"
-          : liveCount === restoredCount
+          : liveCount === restoredCount || drifted
             ? "ok"
-            : drifted
-              ? "drift"
-              : "mismatch";
+            : "mismatch";
     return {
       table,
       ...(liveCount === undefined ? {} : { live: liveCount }),
@@ -438,7 +441,7 @@ export function formatRestoreCheck(result: RestoreCheckResult): string[] {
     row.table,
     row.live === undefined ? "—" : String(row.live),
     row.restored === undefined ? "—" : String(row.restored),
-    row.verdict === "drift" ? `ok (drift +${String(row.drift ?? 0)})` : row.verdict,
+    row.drift === undefined ? row.verdict : `${row.verdict} (drift +${String(row.drift)})`,
   ]);
   const widths = header.map((name, column) =>
     Math.max(name.length, ...cells.map((row) => row[column]?.length ?? 0)),
@@ -448,10 +451,8 @@ export function formatRestoreCheck(result: RestoreCheckResult): string[] {
 
   lines.push(line(header), ...cells.map(line));
 
-  const drifted = result.rows.filter((row) => row.verdict === "drift").length;
-  const failed = result.rows.filter(
-    (row) => row.verdict !== "ok" && row.verdict !== "drift",
-  ).length;
+  const drifted = result.rows.filter((row) => row.drift !== undefined).length;
+  const failed = result.rows.filter((row) => row.verdict !== "ok").length;
   const drift = drifted === 0 ? "" : `, ${String(drifted)} with drift since the dump`;
   lines.push(
     result.matched

@@ -293,9 +293,15 @@ export function onlyChangesAConstLiteral(before: string, after: string): boolean
   return isLiteralType(one[2]!) && isLiteralType(two[2]!);
 }
 
-/** The two shapes the reports carry: a string literal, and a `readonly [...]` tuple of them. */
+/**
+ * The three shapes the reports carry: a string literal, a number, and a `readonly [...]` tuple.
+ *
+ * A numeric one is the same category as the other two — `STALE_DUMP_HOURS` moving from 36 to 24
+ * changes what `hf restore-check` warns at, not what any caller may write — and it was left out
+ * only because no threshold had moved yet.
+ */
 function isLiteralType(type: string): boolean {
-  return type.startsWith('"') || type.startsWith("readonly [");
+  return /^["\d]/.test(type) || type.startsWith("readonly [");
 }
 
 /**
