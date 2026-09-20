@@ -200,7 +200,7 @@ describe("hf doctor", () => {
 
     expect(result.ok).toBe(false);
     expect(findingOf(doctorLines(result), "version")).toBe(
-      "  WARN version: applicationVersion 2222222 is not main 1111111",
+      `  WARN version: applicationVersion 2222222 is not main 1111111 — run hf deploy ${APP}`,
     );
   });
 

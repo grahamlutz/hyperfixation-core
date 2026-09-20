@@ -215,7 +215,7 @@ async function doctorApp(context: Context, name: string): Promise<DoctorFinding[
   }
 
   const report = await statusFindings(context, name, state, add);
-  versionFinding(report?.applicationVersion, mainSha, mainShaProblem, add);
+  versionFinding(name, report?.applicationVersion, mainSha, mainShaProblem, add);
   if (report?.budget !== undefined) {
     budgetFinding(report.budget.current, "current", add);
     budgetFinding(report.budget.previous, "previous", add);
@@ -349,7 +349,15 @@ function amount(value: string | undefined): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
+/**
+ * What the app answers against what its repository's main holds.
+ *
+ * The mismatch names `hf deploy` because nothing else closes it: Coolify's push auto-deploy is
+ * disabled on every application `hf new` creates, so a merged pull request sits unpublished until
+ * an operator says so.
+ */
 function versionFinding(
+  name: string,
   deployed: string | null | undefined,
   mainSha: string | undefined,
   mainShaProblem: string | undefined,
@@ -369,7 +377,7 @@ function versionFinding(
     deployed === mainSha ? "ok" : "warn",
     deployed === mainSha
       ? `applicationVersion ${short(mainSha)} is main`
-      : `applicationVersion ${short(deployed)} is not main ${short(mainSha)}`,
+      : `applicationVersion ${short(deployed)} is not main ${short(mainSha)} — run hf deploy ${name}`,
   );
 }
 

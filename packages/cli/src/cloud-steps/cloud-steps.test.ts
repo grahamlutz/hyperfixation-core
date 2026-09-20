@@ -116,6 +116,8 @@ interface RouteOptions {
   /** The project's environments; defaults to the `production` one every project starts with. */
   environments?: unknown[];
   applications?: unknown[];
+  /** What `GET /applications/{uuid}/envs` lists; `[]` is an application Coolify has not parsed. */
+  envs?: unknown[];
   /** The database's backup schedules; defaults to none, as a box that has never run `hf new`. */
   backups?: unknown[];
   langfuseProjects?: unknown[];
@@ -207,6 +209,20 @@ function routes(options: RouteOptions = {}): StubRoute[] {
       json: { uuid: "application-1" },
     },
     { spec: "coolify", method: "patch", url: `${COOLIFY}/api/v1/applications/{uuid}/envs/bulk`, json: [] },
+    {
+      spec: "coolify",
+      method: "get",
+      url: `${COOLIFY}/api/v1/applications/{uuid}/envs`,
+      json: options.envs ?? [],
+    },
+    {
+      spec: "coolify",
+      method: "post",
+      url: `${COOLIFY}/api/v1/applications/{uuid}/envs`,
+      status: 201,
+      json: { uuid: "env-1" },
+    },
+    { spec: "coolify", method: "patch", url: `${COOLIFY}/api/v1/applications/{uuid}/envs`, json: {} },
     {
       spec: "coolify",
       method: "post",
@@ -476,6 +492,16 @@ function envBody(index = 0): { key: string; value: string }[] {
   return (patches[index]!.body as { data: { key: string; value: string }[] }).data;
 }
 
+/** Every `SOURCE_COMMIT` write, in order — the create and the per-entry updates alike. */
+function sourceCommitWrites(): { method: string; body: Record<string, unknown> }[] {
+  return harness.requests
+    .filter(
+      (request) =>
+        request.operationPath === "/applications/{uuid}/envs" && request.method !== "GET",
+    )
+    .map((request) => ({ method: request.method, body: request.body as Record<string, unknown> }));
+}
+
 function useRoutes(options: RouteOptions): void {
   harness.server.use(...routes(options).map(harness.handler));
 }
@@ -568,6 +594,8 @@ describe("a cloud hf new, all ten steps", () => {
         "coolify GET /applications",
         "coolify POST /applications/private-github-app",
         "coolify PATCH /applications/{uuid}/envs/bulk",
+        "coolify GET /applications/{uuid}/envs",
+        "coolify POST /applications/{uuid}/envs",
         "coolify POST /deploy",
         "coolify GET /deployments/{uuid}",
       ]);
@@ -588,6 +616,16 @@ describe("a cloud hf new, all ten steps", () => {
         ],
       });
       expect(created.domains).toBeUndefined();
+      // A push that deployed itself would build against whatever SOURCE_COMMIT held at the time.
+      expect(created.is_auto_deploy_enabled).toBe(false);
+
+      // Created rather than updated, because Coolify has not parsed the compose file yet.
+      expect(sourceCommitWrites()).toEqual([
+        {
+          method: "POST",
+          body: { key: "SOURCE_COMMIT", value: HEAD_SHA, is_buildtime: true, is_runtime: true },
+        },
+      ]);
 
       expect(envBody().map((env) => env.key)).toEqual(EXPECTED_ENV_KEYS);
       expect(statusHosts).toEqual([`${name}.${BASE_DOMAIN}`]);
@@ -713,11 +751,14 @@ describe("a cloud hf new, all ten steps", () => {
 
       expect(second.context.rotated).toBe(true);
       // Only what a cold run cannot look up: Langfuse hands a secret key back once. The backup
-      // schedule is found in the database's list and reconciled, not registered a second time.
+      // schedule is found in the database's list and reconciled, not registered a second time,
+      // and the SOURCE_COMMIT POST is a create only because this fixture's application lists no
+      // envs.
       expect(writes()).toEqual([
         "coolify PATCH /databases/{uuid}/backups/{scheduled_backup_uuid}",
         "langfuse POST /api/public/projects/{projectId}/apiKeys",
         "coolify PATCH /applications/{uuid}/envs/bulk",
+        "coolify POST /applications/{uuid}/envs",
         "coolify POST /deploy",
       ]);
 
@@ -785,6 +826,7 @@ describe("the coolify and deploy steps on their own", () => {
       // The project and the application are found, not created a second time.
       expect(writes()).toEqual([
         "coolify PATCH /applications/{uuid}/envs/bulk",
+        "coolify POST /applications/{uuid}/envs",
         "coolify POST /deploy",
       ]);
     } finally {
@@ -802,7 +844,11 @@ describe("the coolify and deploy steps on their own", () => {
 
       expect(result.ran).toContain("coolify");
       const order = writes().filter((line) =>
-        ["POST /projects", "POST /projects/{uuid}/environments", "POST /applications/"].some(
+        [
+          "POST /projects",
+          "POST /projects/{uuid}/environments",
+          "POST /applications/private-github-app",
+        ].some(
           (write) => line.startsWith(`coolify ${write}`),
         ),
       );
@@ -958,6 +1004,88 @@ describe("the coolify and deploy steps on their own", () => {
       await second.close();
     }
   }, 90_000);
+
+  it("updates every SOURCE_COMMIT entry Coolify already lists, and creates none", async () => {
+    harness.reset();
+    useRoutes({
+      // What a compose parse leaves behind: the same name, preview and non-preview, both empty.
+      envs: [
+        { uuid: "env-1", key: "SOURCE_COMMIT", value: "", is_preview: false },
+        { uuid: "env-2", key: "SOURCE_COMMIT", value: "", is_preview: true },
+        { uuid: "env-3", key: "DATABASE_URL", value: "postgres://…", is_preview: false },
+      ],
+    });
+
+    const run = await resumed();
+    try {
+      await runSteps(CLOUD_STEPS, run.context);
+
+      expect(sourceCommitWrites()).toEqual([
+        {
+          method: "PATCH",
+          body: {
+            key: "SOURCE_COMMIT",
+            value: HEAD_SHA,
+            is_buildtime: true,
+            is_runtime: true,
+            is_preview: false,
+          },
+        },
+        {
+          method: "PATCH",
+          body: {
+            key: "SOURCE_COMMIT",
+            value: HEAD_SHA,
+            is_buildtime: true,
+            is_runtime: true,
+            is_preview: true,
+          },
+        },
+      ]);
+      // Before the deploy, never after: the build reads the entry this write just set.
+      const order = writes();
+      expect(order.indexOf("coolify PATCH /applications/{uuid}/envs")).toBeLessThan(
+        order.indexOf("coolify POST /deploy"),
+      );
+    } finally {
+      await run.close();
+    }
+  }, 90_000);
+
+  it("re-runs the deploy step against an app already serving the sha without creating a second entry", async () => {
+    const first = await resumed();
+    try {
+      await runSteps(CLOUD_STEPS, first.context);
+    } finally {
+      await first.close();
+    }
+
+    harness.reset();
+    useRoutes({
+      projects: [{ uuid: "project-1", name }],
+      applications: [{ uuid: "application-1", name }],
+      envs: [{ uuid: "env-1", key: "SOURCE_COMMIT", value: HEAD_SHA, is_preview: false }],
+    });
+
+    // The state file is the previous run's, less its `deploy` record: the one shape a redeploy
+    // takes when a build failed and the operator re-ran `hf new`.
+    await first.context.state.clearDone("deploy");
+    const second = await fixture({
+      name,
+      state: first.context.state,
+      workspace,
+      committed: true,
+    });
+    try {
+      const result = await runSteps(CLOUD_STEPS, second.context);
+
+      expect(result.ran).toEqual(["deploy"]);
+      expect(sourceCommitWrites().map((write) => write.method)).toEqual(["PATCH"]);
+      expect(second.context.state.state.lastDeployedSha).toBe(HEAD_SHA);
+    } finally {
+      await second.close();
+    }
+  }, 120_000);
 
   it("omits both provider keys when the operator configured neither", async () => {
     const config = { ...CONFIG };

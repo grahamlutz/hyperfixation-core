@@ -873,6 +873,230 @@
         ]
       }
     },
+    "/applications/{uuid}/envs": {
+      "get": {
+        "tags": [
+          "Applications"
+        ],
+        "summary": "List Envs",
+        "description": "List all envs by application UUID.",
+        "operationId": "list-envs-by-application-uuid",
+        "parameters": [
+          {
+            "name": "uuid",
+            "in": "path",
+            "description": "UUID of the application.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "All environment variables by application UUID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EnvironmentVariable"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Applications"
+        ],
+        "summary": "Create Env",
+        "description": "Create env by application UUID.",
+        "operationId": "create-env-by-application-uuid",
+        "parameters": [
+          {
+            "name": "uuid",
+            "in": "path",
+            "description": "UUID of the application.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Env created.",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "description": "The key of the environment variable."
+                  },
+                  "value": {
+                    "type": "string",
+                    "description": "The value of the environment variable."
+                  },
+                  "is_preview": {
+                    "type": "boolean",
+                    "description": "The flag to indicate if the environment variable is used in preview deployments."
+                  },
+                  "is_literal": {
+                    "type": "boolean",
+                    "description": "The flag to indicate if the environment variable is a literal, nothing espaced."
+                  },
+                  "is_multiline": {
+                    "type": "boolean",
+                    "description": "The flag to indicate if the environment variable is multiline."
+                  },
+                  "is_shown_once": {
+                    "type": "boolean",
+                    "description": "The flag to indicate if the environment variable's value is shown on the UI."
+                  }
+                },
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Environment variable created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "uuid": {
+                      "type": "string",
+                      "example": "nc0k04gk8g0cgsk440g0koko"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "Applications"
+        ],
+        "summary": "Update Env",
+        "description": "Update env by application UUID.",
+        "operationId": "update-env-by-application-uuid",
+        "parameters": [
+          {
+            "name": "uuid",
+            "in": "path",
+            "description": "UUID of the application.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Env updated.",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "key",
+                  "value"
+                ],
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "description": "The key of the environment variable."
+                  },
+                  "value": {
+                    "type": "string",
+                    "description": "The value of the environment variable."
+                  },
+                  "is_preview": {
+                    "type": "boolean",
+                    "description": "The flag to indicate if the environment variable is used in preview deployments."
+                  },
+                  "is_literal": {
+                    "type": "boolean",
+                    "description": "The flag to indicate if the environment variable is a literal, nothing espaced."
+                  },
+                  "is_multiline": {
+                    "type": "boolean",
+                    "description": "The flag to indicate if the environment variable is multiline."
+                  },
+                  "is_shown_once": {
+                    "type": "boolean",
+                    "description": "The flag to indicate if the environment variable's value is shown on the UI."
+                  }
+                },
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Environment variable updated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvironmentVariable"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
     "/applications/{uuid}/envs/bulk": {
       "patch": {
         "tags": [

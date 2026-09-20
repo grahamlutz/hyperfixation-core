@@ -32,6 +32,7 @@ A new upstream commit is a different job: bump the row above, re-trim, and say s
 > at tag `v4.3.21` — the box serves no document of its own. Across the thirteen operations first kept, the
 > tag and the `main` commit vendored before it are identical field for field, so the trimmed file
 > did not change; only the row above did. `POST /projects/{uuid}/environments`,
+> `GET`/`POST`/`PATCH /applications/{uuid}/envs`,
 > `PATCH /databases/{uuid}/backups/{scheduled_backup_uuid}` and `GET /s3-storages` were merged in
 > later from the same tag, verbatim — the last two carry only the verb the CLI issues, and the
 > file's own key order is untouched because the merge is textual (a JSON round trip reorders the
@@ -55,6 +56,7 @@ A new upstream commit is a different job: bump the row above, re-trim, and say s
 | coolify | `GET /applications` | E3 — the application, found by name on a rerun |
 | coolify | `POST /applications/private-github-app` | E3 — the application, from the private repo |
 | coolify | `PATCH /applications/{uuid}/envs/bulk` | E3 — `REQUIRED_ENV` in one call |
+| coolify | `GET`/`POST`/`PATCH /applications/{uuid}/envs` | E3 — `SOURCE_COMMIT`, written per deploy rather than with the operator's secrets |
 | coolify | `POST /deploy`, `GET /deployments/{uuid}` | E3 — deploy and poll |
 | coolify | `POST /databases/{uuid}/backups` | E3 — backup registration |
 | coolify | `GET /databases/{uuid}/backups` | E3 — the schedule an earlier run left; E5 — the registered backups |

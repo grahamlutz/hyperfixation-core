@@ -77,7 +77,8 @@ Tokens are pulled from the config with `jq` so none is typed or echoed.
 4. Coolify API: `curl -sf -H "Authorization: Bearer <token>" <url>/api/v1/projects | jq 'map({name, uuid})'` → the existing projects (no `demo-app`). List one project's environments (`…/projects/<uuid>/environments | jq 'map(.name)'`) → `["production"]`; anything else makes step 9 fail with "has no production environment" (X1 question 2).
 5. Cloudflare: `GET /client/v4/zones/<zone>` → `success: true` and your base domain.
 6. GitHub apps, by hand: `GET /user/installations` answers `403` to every personal token (it is a GitHub App user-to-server endpoint), so there is nothing to curl and nothing `hf` can check — step 3 prints a `WARNING:` line naming each slug and repeats it in the closing checklist. Open `github.com/settings/installations` and confirm that Coolify's GitHub App and `hyperfixation-bot` are both installed with access to **All repositories**; a Coolify app that cannot see the new repo makes step 10's first deploy clone nothing.
-7. Langfuse: **already answered for this account — the org is on the Hobby plan and Organization settings has no API Keys page at all, so there is no org key to curl.** Leave `HF_LANGFUSE_ORG_KEY` unset and set `HF_LANGFUSE_PUBLIC_KEY`/`HF_LANGFUSE_SECRET_KEY` from the existing project instead; step 6 then makes no request and hands the pair straight to the app. On an account that does have the page, `curl -s -o /dev/null -w '%{http_code}' -u "<org key>" <url>/api/public/projects` → `200` is the check, and `401`/`403` means falling back to the pair.
+7. `SOURCE_COMMIT`: **already answered — nothing to check.** Coolify's docker-compose build pack passes no commit into the build (no `--build-arg`, nothing in the compose environment) and the build context has no `.git` even with `is_preserve_repository_enabled`, so the Dockerfile's `git rev-parse HEAD` fallback cannot run either. `hf` sets the application environment entry `SOURCE_COMMIT` itself before every deploy and disables Coolify's push auto-deploy, which is why step 10 prints it and why a merge to main publishes nothing until `hf deploy demo-app` runs. X1 question 5, closed.
+8. Langfuse: **already answered for this account — the org is on the Hobby plan and Organization settings has no API Keys page at all, so there is no org key to curl.** Leave `HF_LANGFUSE_ORG_KEY` unset and set `HF_LANGFUSE_PUBLIC_KEY`/`HF_LANGFUSE_SECRET_KEY` from the existing project instead; step 6 then makes no request and hands the pair straight to the app. On an account that does have the page, `curl -s -o /dev/null -w '%{http_code}' -u "<org key>" <url>/api/public/projects` → `200` is the check, and `401`/`403` means falling back to the pair.
 
 ## 3. The run
 
@@ -98,7 +99,7 @@ nothing is prompted. `pnpm install` output streams live; every other step prints
 | 7 | dns | `demo-app.<base> A <ip>, DNS-only` | an existing record with another address aborts, never overwritten |
 | 8 | database | `created hf_demo_app, roles …` | tunnel or `PGPASSWORD` failure; nothing created |
 | 9 | coolify | project → application → `10 environment variable(s) set in Coolify` → `migrated hf_demo_app` → `bootstrapped … with a $10 budget` → `minted the /api/status read and write tokens` | `EnvDrift` before any request; "no production environment"; migrate/bootstrap child errors |
-| 10 | deploy | `deployment <uuid> queued` … `serving <sha7> at https://demo-app.<base>` | 15-minute deadline (`deploy.ts:13`); `ended failed` → Coolify's build log; `never reported <sha>` → `SOURCE_COMMIT` did not reach the image (X1 q5, Risk 2) |
+| 10 | deploy | `SOURCE_COMMIT=<sha7> set in Coolify` → `deployment <uuid> queued` … `serving <sha7> at https://demo-app.<base>` | 15-minute deadline (`deploy.ts:13`); `ended failed` → Coolify's build log; `never reported <sha>` → the entry did not reach the image — check Coolify → the application → Environment Variables for `SOURCE_COMMIT` |
 
 Then the checklist (section 5), including the **write token, printed once**; copy it somewhere safe.
 
@@ -107,6 +108,10 @@ Then the checklist (section 5), including the **write token, printed once**; cop
 (`provision-database.ts:99-102`), mints a Langfuse key, and if the run then stops before step 9 the deployed app is
 locked out until you re-run (the runner refuses to call that "finished", `new-cloud.ts:110-117`). Watch progress in Coolify → the application →
 Deployments during step 10.
+
+**Publishing later.** Push auto-deploy is off on every application `hf new` creates, so a merge to `main` changes nothing on the box:
+`hf deploy demo-app` sets `SOURCE_COMMIT` to `main`'s sha, deploys it and waits for `/api/status` to report it. `--sha <sha>` deploys a
+particular commit instead. `hf doctor` is what notices the gap (`applicationVersion … is not main … — run hf deploy demo-app`).
 
 ## 4. Verify
 
@@ -131,7 +136,7 @@ Evidence table to paste into the Phase 3 doc's Exit section: `hf new` exit 0 + c
 
 ## 5. Finish — the printed checklist
 
-- **Fixtures line:** expected; leave until you paste `ANTHROPIC_API_KEY` into Coolify → the app → Environment Variables and redeploy (it is already in `REQUIRED_ENV`; nothing to add).
+- **Fixtures line:** expected; leave until you paste `ANTHROPIC_API_KEY` into Coolify → the app → Environment Variables and then `hf deploy demo-app` (it is already in `REQUIRED_ENV`; nothing to add). Coolify's own Redeploy button works too, but `hf deploy` is what keeps `SOURCE_COMMIT` and the reported version in step.
 - **New third-party keys:** add to `REQUIRED_ENV`, `.env.example` and all compose blocks, then Coolify — `hf new` refuses the next run on drift (`coolify.ts:113-121`).
 - **Metabase:** `postgres://hf_demo_app_ro:<password>@<dbHost>:5432/hf_demo_app`; the password is `database.readonlyPassword` in the state file; Metabase must sit on the `coolify` network.
 - **`downstream.txt`:** note the line `grahamlutz/demo-app`; the file is Phase 4's.
@@ -163,7 +168,7 @@ There is **no `hf destroy`**; `hf` removes nothing. Manual, in this order:
    - **None in the document.** Every request and response schema of `/projects`, `/projects/{uuid}`, `/projects/{uuid}/environments`, `/applications`, `/applications/private-github-app`, `/applications/{uuid}/envs/bulk`, `/deploy`, `/deployments/{uuid}`, `/databases/{uuid}` and `/databases/{uuid}/backups` is byte-identical between `v4.3.21` and the `main` commit that was vendored, so `coolify.json` itself is unchanged and only its provenance row moved.
    - **One rule the document does not express**, and the one that failed the run: a `dockercompose` application refuses `domains` (422, below). The harness now carries it as an explicit rule beside the document rather than as a hand-edit to it (`test-support/openapi.ts`).
    - **`POST /projects/{uuid}/environments` exists** and has since before the vendored commit, so the `coolify` step's "the API has no endpoint that creates one" (`cloud-steps/coolify.ts`) is wrong. Left alone here — creating the environment is a behaviour change nothing has run against the box — but the message should not claim it.
-8. **Postgres loopback port, `HF_DB_HOST_INTERNAL`, `SOURCE_COMMIT`, Coolify container names, backup location:** all UNVERIFIED (X1 questions 3 to 6); the pre-flights and the deploy step's error text surface each.
+8. **Coolify supplies no `SOURCE_COMMIT` to a docker-compose build** (X1 question 5, answered on the box): no build arg, nothing in the compose environment, and no `.git` in the build context even with `is_preserve_repository_enabled`, so `HF_BUILD_SHA` came out `<unresolved>` and the worker died at startup on `MissingBuildSha`. **Closed:** the `deploy` step writes the application environment entry `SOURCE_COMMIT` — the one channel there is, because the template's compose file interpolating `${SOURCE_COMMIT:-}` is what makes Coolify materialise the entry — before it asks for a deployment, and `hf new` creates applications with `is_auto_deploy_enabled: false` so a push cannot deploy against a stale value. `hf deploy <name> [--sha <sha>]` is what publishes a merge to main, and `hf doctor`'s version warning names it. **Postgres loopback port, `HF_DB_HOST_INTERNAL` and Coolify container names** remain UNVERIFIED (X1 questions 3 and 4); the pre-flights surface each. Backup location and X1 q6 are answered in items 9 and 11.
 9. **Restore-check needs a dump that `hf new` never triggers** (`backup_now: false`); trigger one from Coolify first. Answered by the run, and two defects found:
    - **Where the dumps are:** on the box's own disk at `/data/coolify/backups/databases/<team>/<name>-<uuid>/pg-dump-<db>-<epoch>.dmp`, custom-format `pg_dump -Fc`. `--from-s3` is still a refusal (`backup-source.ts:128-140`), and nothing needs it while the dumps are local.
    - **`pg_restore` ran on the wrong side.** The host has no Postgres client tools, so the restore exited 127. **Closed by `X1-fixes`:** it runs inside the discovered Postgres container with the dump on stdin, since the dump path is not mounted in.

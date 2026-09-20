@@ -425,8 +425,8 @@ its evidence line pasted here.
 > the three is empty, and no entrypoint calls `requireEnv` on them.
 >
 > Still unknown until the box answers (risks 1–3 and 5): Coolify's `production` environment
-> name, the Postgres hostname and loopback port, `SOURCE_COMMIT` under Coolify, and where backups live. Re-vendor
-> Coolify's OpenAPI from the box's own version before running.
+> name, the Postgres hostname and loopback port, and where backups live. `SOURCE_COMMIT` under Coolify is answered —
+> see the step 10 finding below. Re-vendor Coolify's OpenAPI from the box's own version before running.
 
 > **Finding (step 9, 2026-09-20): a `dockercompose` application cannot be given `domains`.** The first real `hf new
 > demo-app` got through steps 1–8 and died at the `coolify` step on `POST /applications/private-github-app` with
@@ -439,6 +439,36 @@ its evidence line pasted here.
 > And the transport dropped the response body on a non-2xx by design, so the operator saw only `HTTP 422`: a provider's
 > `message` and `errors` now reach the error, truncated, with every credential and every value the request sent blanked
 > out of them.
+
+> **Finding (step 10, 2026-09-20): Coolify hands a docker-compose build no commit, so `hf` has to set one.** Three
+> things, all verified against the box (4.3.21, docker-compose build pack, GitHub App source):
+> 1. **Nothing carries the commit into the build.** No `--build-arg SOURCE_COMMIT`, nothing in the compose environment,
+>    and **no `.git` directory in the build context** even with `settings.is_preserve_repository_enabled: true`
+>    (`ls -ld .git` → No such file), so the Dockerfile's `git rev-parse HEAD` fallback cannot run there either. The
+>    image came up on `hf-build: HF_BUILD_SHA=<unresolved>` and the worker died at startup with `MissingBuildSha` —
+>    working as designed, and loud.
+> 2. **The compose file is the channel.** Because the template's `docker-compose.prod.yml` interpolates
+>    `${SOURCE_COMMIT:-}` (image tag, build arg, and the three `HF_BUILD_SHA` lines), Coolify materialises application
+>    environment entries named `SOURCE_COMMIT` — preview and non-preview, buildtime and runtime, empty — on every
+>    deploy parse. Setting their value works: `POST /applications/{uuid}/envs` with
+>    `{key, value, is_buildtime: true, is_runtime: true}` was created for both.
+> 3. **Push auto-deploy corrupts the semantics.** Coolify's webhook deploys whatever commit arrived against the
+>    *current* `SOURCE_COMMIT`, so a stale value makes the app report a version it is not running — which is exactly
+>    what the redeploy and step-change evidence depends on. `PATCH /applications/{uuid} {"is_auto_deploy_enabled":
+>    false}` returns 200 and stops it (the GET response does not echo the field at the top level; read `.settings.*`).
+>
+> **Design, built in `X1-fixes`.** `hf new` creates the application with `is_auto_deploy_enabled: false` in the create
+> payload (Coolify's own schema takes it, so no follow-up PATCH); `is_preserve_repository_enabled` is not needed. The
+> `deploy` step upserts `SOURCE_COMMIT` to the exact commit being deployed — buildtime and runtime, every entry the
+> application lists under the name — **before** it triggers the deployment, then waits for `/api/status`'s
+> `applicationVersion` as before. The write is idempotent and is neither in `secretsHash` nor in what
+> `assertEnvsMatchCompose` compares: it is a compose variable `hf` sets per deploy, not an operator secret. The new
+> `hf deploy <name> [--sha <sha>]` runs that same path from the state cache alone, resolving `main` with
+> `git ls-remote` when no `--sha` is given, and `hf doctor`'s version warning names it.
+>
+> **Consequence for Phase 4.** With auto-deploy off, merging a core-bump PR no longer publishes anything: the bump
+> flow needs `hf deploy <name>` (or a future CI trigger) after the PR merges, and `hf doctor` is what catches a bump
+> that was merged and never deployed.
 
 > **Finding (verify 3, 2026-09-20): `hf restore-check` ran `pg_restore` on the box host, which has no Postgres client
 > tools.** The first real run died with `pg_restore exited 127 … bash: line 1: pg_restore: command not found`. Postgres
@@ -565,7 +595,9 @@ only PR that adds the `image` job and have D3 and D4 add steps to it); `planning
 1. **Coolify API shapes** (`/applications/private-github-app`, `/envs/bulk`, deployment polling, backup registration)
    are named from memory; E1's vendored OpenAPI is what pins them — vendor the doc from the box's own Coolify version
    first.
-2. **`SOURCE_COMMIT`**: the fallback makes a miss loud, not silent; first manual item.
+2. **`SOURCE_COMMIT`**: ~~the fallback makes a miss loud, not silent; first manual item.~~ **Realised, then closed** —
+   the miss was loud (`MissingBuildSha` at worker startup) but the fallback could never fire, because Coolify's build
+   context has no `.git`. `hf` now sets the entry itself and turns push auto-deploy off; see the step 10 finding.
 3. **Where a backup lives and whether `databases_to_backup` is API-settable.** If Coolify keeps dumps only in S3 or the
    field is UI-only, E3's backup step becomes a checklist line and E5 downloads from S3 with the operator key. Verify
    on the box before E5.
