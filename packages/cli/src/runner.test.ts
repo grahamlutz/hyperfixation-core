@@ -65,6 +65,17 @@ describe("the local Runner", () => {
     expect(result.stdout).toBe("SELECT 1");
   });
 
+  it("reports the exit code of a command that exits without reading its input", async () => {
+    const runner = createLocalRunner();
+
+    // Big enough to outrun the pipe buffer, so the write is still in flight when the child is gone.
+    const result = await runner.exec([process.execPath, "-e", "process.exit(3)"], {
+      input: "x".repeat(4 * 1024 * 1024),
+    });
+
+    expect(result.code).toBe(3);
+  });
+
   it("names the port it was configured with instead of forwarding one", async () => {
     const runner = createLocalRunner({ tunnelPort: 5434 });
 

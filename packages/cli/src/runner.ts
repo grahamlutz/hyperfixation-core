@@ -211,6 +211,9 @@ async function spawnCollecting(
     stderr += chunk.toString("utf8");
   });
 
+  // A child that exits before reading its stdin (`true`, a refused ssh) makes the write fail with
+  // EPIPE; the exit code already says what happened, so it must not surface as an unhandled error.
+  child.stdin?.on("error", () => {});
   child.stdin?.end(options.input ?? "");
 
   const code = await new Promise<number | null>((resolve, reject) => {
