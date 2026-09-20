@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -20,29 +20,34 @@ import {
   SCRATCH_SUFFIX,
   type RestoreCheckResult,
 } from "./restore-check.js";
-import { createLocalRunner, type LocalRunner } from "./runner.js";
+import { createLocalRunner, type ExecOptions, type ExecResult, type Runner } from "./runner.js";
 import { openAppState, type AppStateStore } from "./state.js";
 
 const execFile = promisify(execFileCallback);
 
 /**
- * `pg_dump`, `pg_restore` and the dumps themselves live inside the test cluster's container.
+ * The Postgres container: the only place in this suite with a Postgres client binary.
  *
- * Neither a laptop nor `ubuntu-latest` is guaranteed a client of the server's own major version,
- * and a `pg_dump` older than its server refuses to run — so the suite uses the ones shipped
- * beside the server. Which is also the shape the box has: the dumps are where Postgres is.
+ * The box has the same shape. Coolify runs Postgres in a container and the host has no client
+ * tools at all, so a `pg_restore` on the host exits 127 — which is what `hostRunner` below
+ * reproduces, and what the real `hf restore-check demo-app` hit.
  */
 let container: string;
-/** The directory inside that container standing in for Coolify's backup directory. */
+/** Coolify's backup directory, on the **host**: where the dumps are and `pg_restore` is not. */
 let backupDir: string;
 let hostDir: string;
 
-/** The cluster as the container sees it; `restoreAdminUrl` on the box is the same idea. */
+/** The cluster as the container sees it, for the `pg_dump` that produces a fixture. */
 function containerUrl(database?: string): string {
   const url = new URL(ADMIN_URL);
   url.host = "127.0.0.1:5432";
   if (database !== undefined) url.pathname = `/${encodeURIComponent(database)}`;
   return url.toString();
+}
+
+/** The cluster superuser, which is what `-U` inside the container has to be. */
+function adminUser(): string {
+  return decodeURIComponent(new URL(ADMIN_URL).username);
 }
 
 /** The container publishing the port `ADMIN_URL` names — a service container in CI. */
@@ -56,35 +61,62 @@ async function findContainer(): Promise<string> {
   throw new Error(`no running container publishes port ${port}; HF_TEST_DATABASE_URL is ${ADMIN_URL}`);
 }
 
-async function inContainer(command: readonly string[]): Promise<string> {
-  const { stdout } = await execFile("docker", ["exec", "-i", container, ...command]);
-  return stdout;
+/** What a box host has no binary for, and answers exactly as a shell does when asked. */
+const NO_SUCH_BINARY = new Set(["pg_restore", "pg_dump", "psql", "createdb", "pg_dumpall"]);
+
+interface HostRunner extends Runner {
+  /** Every `exec`, including the ones the host refused; `commands` records only what ran. */
+  readonly calls: readonly { command: readonly string[]; options?: ExecOptions }[];
 }
 
 /**
- * The local recording Runner, with every command run inside the cluster's container.
+ * The box host: `find`, `stat` and `docker` work, and no Postgres client binary exists.
  *
- * `find`, `stat` and `pg_restore` all have to see the same filesystem the dumps are on, which on
- * the box is the box and here is the container.
+ * Everything else about it is this machine, so a `docker exec` it is handed really runs against
+ * the test cluster's container and the restore is exercised end to end.
  */
-function containerRunner(): LocalRunner {
+function hostRunner(stub?: (command: readonly string[]) => ExecResult | undefined): HostRunner {
   const local = createLocalRunner();
+  const calls: { command: readonly string[]; options?: ExecOptions }[] = [];
+
   return {
-    get commands() {
-      return local.commands;
+    get calls() {
+      return calls;
     },
-    get tunnels() {
-      return local.tunnels;
+    exec: async (command, options) => {
+      calls.push({ command: [...command], options });
+      const stubbed = stub?.(command);
+      if (stubbed !== undefined) return stubbed;
+      const [bin] = command;
+      if (bin !== undefined && NO_SUCH_BINARY.has(bin)) {
+        return { code: 127, stdout: "", stderr: `bash: line 1: ${bin}: command not found` };
+      }
+      return await local.exec(command, options);
     },
-    exec: async (command, options) =>
-      await local.exec(["docker", "exec", "-i", container, ...command], options),
     tunnel: async (remotePort, remoteHost) => await local.tunnel(remotePort, remoteHost),
   };
 }
 
+/** The `docker exec … pg_restore` call in a runner's log, or nothing. */
+function restoreCall(
+  runner: HostRunner,
+): { command: readonly string[]; options?: ExecOptions } | undefined {
+  return runner.calls.find((call) => call.command.includes("pg_restore"));
+}
+
+/**
+ * A dump on the **host**, the way Coolify leaves one: `pg_dump -Fc` to stdout inside the
+ * container, written to a host file that is never mounted back in.
+ */
 async function pgDump(databaseName: string): Promise<string> {
-  const file = path.posix.join(backupDir, `${databaseName}-${randomBytes(4).toString("hex")}.dmp`);
-  await inContainer(["pg_dump", "-Fc", "-f", file, containerUrl(databaseName)]);
+  const epoch = String(Math.floor(Date.now() / 1000));
+  const file = path.join(backupDir, `pg-dump-${databaseName}-${epoch}.dmp`);
+  const { stdout } = await execFile(
+    "docker",
+    ["exec", "-i", container, "pg_dump", "-Fc", containerUrl(databaseName)],
+    { encoding: "buffer", maxBuffer: 256 * 1024 * 1024 },
+  );
+  await writeFile(file, stdout);
   return file;
 }
 
@@ -125,15 +157,25 @@ function rowFor(result: RestoreCheckResult, table: string): RestoreCheckResult["
 }
 
 /** Everything `restoreCheck` needs but the app, the state and the source. */
-function harness(): { runner: LocalRunner; database: string; restoreAdminUrl: string } {
-  return { runner: containerRunner(), database: ADMIN_URL, restoreAdminUrl: containerUrl() };
+function harness(runner: HostRunner = hostRunner()): {
+  runner: HostRunner;
+  database: string;
+  container: string;
+  adminUser: string;
+} {
+  return { runner, database: ADMIN_URL, container, adminUser: adminUser() };
+}
+
+/** The host source: the dumps are on the host's disk, so `find` and `stat` run there. */
+function hostSource(runner: HostRunner): BackupSource {
+  return createLocalDirectoryBackupSource({ runner, directory: backupDir });
 }
 
 beforeAll(async () => {
   container = await findContainer();
-  backupDir = `/tmp/hf-restore-check-${randomBytes(4).toString("hex")}`;
-  await inContainer(["mkdir", "-p", backupDir]);
   hostDir = await mkdtemp(path.join(tmpdir(), "hf-restore-check-"));
+  backupDir = path.join(hostDir, "backups");
+  await mkdir(backupDir, { recursive: true });
 }, 60_000);
 
 afterAll(async () => {
@@ -143,7 +185,6 @@ afterAll(async () => {
     });
     await db.drop();
   }
-  if (container !== undefined) await inContainer(["rm", "-rf", backupDir]);
   if (hostDir !== undefined) await rm(hostDir, { recursive: true, force: true });
 }, 120_000);
 
@@ -152,12 +193,13 @@ describe("restoreCheck", () => {
     const db = await seededDatabase(2);
     const dump = await pgDump(db.databaseName);
     const state = await stateFor(db.appName);
+    const runner = hostRunner();
 
     const result = await restoreCheck({
       app: db.appName,
       state,
-      source: createLocalDirectoryBackupSource({ runner: containerRunner(), directory: backupDir }),
-      ...harness(),
+      source: hostSource(runner),
+      ...harness(runner),
     });
 
     expect(result.ok).toBe(true);
@@ -169,6 +211,8 @@ describe("restoreCheck", () => {
 
     expect(state.state.lastRestoreCheckAt).toBeDefined();
     expect(await scratchExists(db.databaseName)).toBe(false);
+    // The host had no `pg_restore` to offer, and was never asked for one.
+    expect(runner.calls.some((call) => call.command[0] === "pg_restore")).toBe(false);
   }, 120_000);
 
   it("reports the table a dump taken before a seed disagrees on, and records nothing", async () => {
@@ -178,12 +222,13 @@ describe("restoreCheck", () => {
       await migrator.query("INSERT INTO widget (normalized_name) VALUES ('late')");
     });
     const state = await stateFor(db.appName);
+    const runner = hostRunner();
 
     const result = await restoreCheck({
       app: db.appName,
       state,
-      source: createLocalDirectoryBackupSource({ runner: containerRunner(), directory: backupDir }),
-      ...harness(),
+      source: hostSource(runner),
+      ...harness(runner),
     });
 
     expect(result.ok).toBe(false);
@@ -206,11 +251,12 @@ describe("restoreCheck", () => {
       await migrator.query("CREATE TABLE late_widget (id int, normalized_name text)");
     });
 
+    const runner = hostRunner();
     const result = await restoreCheck({
       app: db.appName,
       state: await stateFor(db.appName),
-      source: createLocalDirectoryBackupSource({ runner: containerRunner(), directory: backupDir }),
-      ...harness(),
+      source: hostSource(runner),
+      ...harness(runner),
     });
 
     expect(result.ok).toBe(false);
@@ -222,10 +268,10 @@ describe("restoreCheck", () => {
     });
   }, 120_000);
 
-  it("drops the scratch database when the restore itself fails", async () => {
+  it("reports pg_restore's own stderr and drops the scratch database when the restore fails", async () => {
     const db = await seededDatabase(1);
-    const junk = path.posix.join(backupDir, `${db.databaseName}-not-a-dump.dmp`);
-    await inContainer(["sh", "-c", `printf 'not a dump' > ${junk}`]);
+    const junk = path.join(backupDir, `pg-dump-${db.databaseName}-not-a-dump.dmp`);
+    await writeFile(junk, "not a dump");
     const source: BackupSource = {
       kind: "local-directory",
       newest: async () => ({ path: junk, takenAt: new Date(), from: backupDir }),
@@ -234,36 +280,89 @@ describe("restoreCheck", () => {
 
     await expect(
       restoreCheck({ app: db.appName, state, source, ...harness() }),
-    ).rejects.toThrow(RestoreCheckError);
+    ).rejects.toThrow(/pg_restore exited [1-9]\d* restoring .*not-a-dump\.dmp in .*: .*archive/i);
 
     expect(await scratchExists(db.databaseName)).toBe(false);
     expect(state.state.lastRestoreCheckAt).toBeUndefined();
   }, 120_000);
 
-  it("runs pg_restore as the app's migrator, with no owners and no comments", async () => {
+  it("runs pg_restore inside the container, as the migrator, with the dump on stdin", async () => {
     const db = await seededDatabase(1);
     const dump = await pgDump(db.databaseName);
-    const runner = containerRunner();
+    const runner = hostRunner();
 
     await restoreCheck({
       app: db.appName,
       state: await stateFor(db.appName),
-      source: createLocalDirectoryBackupSource({ runner, directory: backupDir }),
-      runner,
-      database: ADMIN_URL,
-      restoreAdminUrl: containerUrl(),
+      source: hostSource(runner),
+      ...harness(runner),
     });
 
-    const restore = runner.commands.find((command) => command.includes("pg_restore"));
-    expect(restore?.slice(restore.indexOf("pg_restore"))).toEqual([
+    const call = restoreCall(runner);
+    expect(call?.command).toEqual([
+      "docker",
+      "exec",
+      "-i",
+      container,
       "pg_restore",
       "--no-owner",
       "--no-comments",
       `--role=${db.roles.migrator}`,
-      "--dbname",
-      containerUrl(`${db.databaseName}${SCRATCH_SUFFIX}`),
-      dump,
+      "-U",
+      adminUser(),
+      "-d",
+      `${db.databaseName}${SCRATCH_SUFFIX}`,
     ]);
+    // The dump is a host file and is not mounted into the container: stdin is the whole route,
+    // and nothing names it on the command line.
+    expect(call?.options?.inputFile).toBe(dump);
+    expect(call?.command).not.toContain(dump);
+  }, 120_000);
+
+  it("says what to do when the restore exits 127, and still drops the scratch database", async () => {
+    const db = await seededDatabase(1);
+    const dump = await pgDump(db.databaseName);
+    // What the box answered before the restore moved into the container.
+    const runner = hostRunner((command) =>
+      command.includes("pg_restore")
+        ? { code: 127, stdout: "", stderr: "bash: line 1: pg_restore: command not found" }
+        : undefined,
+    );
+    const state = await stateFor(db.appName);
+
+    await expect(
+      restoreCheck({ app: db.appName, state, source: hostSource(runner), ...harness(runner) }),
+    ).rejects.toThrow(
+      new RegExp(
+        `pg_restore exited 127 restoring ${dump} in ${container}: ` +
+          `bash: line 1: pg_restore: command not found — exit 127 means "command not found"\\. ` +
+          "The box host has no Postgres client tools; only the container does\\.",
+      ),
+    );
+
+    expect(await scratchExists(db.databaseName)).toBe(false);
+    expect(state.state.lastRestoreCheckAt).toBeUndefined();
+  }, 120_000);
+
+  it("names the container it could not exec into, and drops the scratch database", async () => {
+    const db = await seededDatabase(1);
+    await pgDump(db.databaseName);
+    const runner = hostRunner();
+    const absent = `hf-no-such-container-${randomBytes(4).toString("hex")}`;
+    const state = await stateFor(db.appName);
+
+    await expect(
+      restoreCheck({
+        app: db.appName,
+        state,
+        source: hostSource(runner),
+        ...harness(runner),
+        container: absent,
+      }),
+    ).rejects.toThrow(new RegExp(`pg_restore exited .* in ${absent}: .*No such container`));
+
+    expect(await scratchExists(db.databaseName)).toBe(false);
+    expect(state.state.lastRestoreCheckAt).toBeUndefined();
   }, 120_000);
 
   it("refuses an app name carrying shell or SQL metacharacters before it touches the cluster", async () => {
