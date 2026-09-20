@@ -18,6 +18,11 @@ export interface SessionUser {
   email?: string;
   role?: string | null;
   banned?: boolean | null;
+  /**
+   * When the ban lapses. better-auth hands this back as a `Date` from the database and as an
+   * ISO string once it has been through JSON, so both shapes have to read the same here.
+   */
+  banExpires?: Date | string | null;
 }
 
 /** What the guard needs of a session; better-auth's `session` is a superset. */
