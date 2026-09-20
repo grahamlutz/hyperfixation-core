@@ -1,5 +1,5 @@
 ---
-"@hyperfixation/cli": minor
+"@hyperfixation/cli": patch
 ---
 
 Coolify never told the app which commit it built. Its docker-compose build pack passes no

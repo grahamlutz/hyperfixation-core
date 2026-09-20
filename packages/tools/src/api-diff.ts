@@ -258,7 +258,8 @@ export function apiChanges(pair: ReportPair): Change[] {
         });
       } else if (
         replacement.signature !== member.signature &&
-        !onlyAddsOptionalParameters(member.signature, replacement.signature)
+        !onlyAddsOptionalParameters(member.signature, replacement.signature) &&
+        !onlyChangesAConstLiteral(member.signature, replacement.signature)
       ) {
         changes.push({
           package: pair.package,
@@ -271,6 +272,30 @@ export function apiChanges(pair: ReportPair): Change[] {
     }
   }
   return changes;
+}
+
+/** `export const NAME = <literal>;`, or `export const NAME: <literal>;` as the report writes it. */
+const CONST_DECLARATION = /^export const ([A-Za-z0-9_$]+)\s*(?::|=)\s*(.+);$/;
+
+/**
+ * True when both signatures declare the same `const` and differ only inside its literal type.
+ *
+ * A const's literal is a value the report happens to print rather than a contract: `hf`'s
+ * `COMMANDS` tuple and its `USAGE` text are retyped by every command added, and the gates a
+ * retype otherwise has to clear — an announced `deprecations.json` entry and an `@deprecated` tag
+ * a release earlier — say nothing about that. The const disappearing from the report is still a
+ * removal, and still reported.
+ */
+export function onlyChangesAConstLiteral(before: string, after: string): boolean {
+  const one = CONST_DECLARATION.exec(before);
+  const two = CONST_DECLARATION.exec(after);
+  if (one === null || two === null || one[1] !== two[1]) return false;
+  return isLiteralType(one[2]!) && isLiteralType(two[2]!);
+}
+
+/** The two shapes the reports carry: a string literal, and a `readonly [...]` tuple of them. */
+function isLiteralType(type: string): boolean {
+  return type.startsWith('"') || type.startsWith("readonly [");
 }
 
 /**

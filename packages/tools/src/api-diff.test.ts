@@ -223,6 +223,55 @@ export type Verdict = "approved" | "rejected";
     expect(findings[0]?.problems.join("\n")).toContain("no deprecations.json entry");
   });
 
+  it("passes a const whose literal grew, which is what adding an hf command does", () => {
+    const head = report(`// @public
+export const ACTIVITY_LIST_OPERATION = "activity.list, activity.count";
+
+// @public @deprecated
+export function flowOriginRef(runId: string, key: string): string;
+
+// @public @deprecated
+export interface TaskCreateOptions {
+    dueAt?: Date;
+    key?: string;
+    title: string;
+}
+
+// @public
+export type Verdict = "approved" | "rejected";
+`);
+    expect(apiChanges(pair(head))).toEqual([]);
+    expect(check(head, [], "patch")).toEqual([]);
+  });
+
+  it("still reports a type alias that was retyped, const or not", () => {
+    const head = report(`// @public
+export const ACTIVITY_LIST_OPERATION = "activity.list";
+
+// @public @deprecated
+export function flowOriginRef(runId: string, key: string): string;
+
+// @public @deprecated
+export interface TaskCreateOptions {
+    dueAt?: Date;
+    key?: string;
+    title: string;
+}
+
+// @public
+export type Verdict = "approved";
+`);
+    expect(apiChanges(pair(head))).toEqual([
+      {
+        package: "@hyperfixation/core",
+        file: "packages/core/etc/core.api.md",
+        symbol: "Verdict",
+        member: "",
+        kind: "retyped",
+      },
+    ]);
+  });
+
   it("passes a signature that only gained a trailing optional parameter", () => {
     const head = report(`// @public
 export const ACTIVITY_LIST_OPERATION = "activity.list";
