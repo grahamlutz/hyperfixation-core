@@ -8,6 +8,31 @@ marked *unverified*.
 mechanism nothing in either repo has yet; the tarball-override install is rehearsed in template #33's body but never in CI. Run the
 `adversary` agent against topics 3 and 4's claims before starting.
 
+## Status — built 2026-09-19
+
+| Item | State |
+|---|---|
+| `guard.py` blocks `gh pr merge` on failing/pending checks (agents repo; uncommitted in the working tree with the user's own `_migration_committed` change) | done; `--auto` and `gh pr checks N --watch && gh pr merge N` pass, `--admin` is always blocked, it fails open. A first version matched prose that merely mentioned the commands (a heredoc'd doc, a PR body) and blocked its own fix; it now inspects only a skeleton of the command with heredoc bodies and quoted strings blanked, with regression tests |
+| Template branch protection | ruleset `main` (id 23716791): required `check`, `image`, `compose`, no up-to-date rule, no deletion or non-fast-forward; `allow_auto_merge` on |
+| Core ruleset | ruleset `main` (id 23717389): required `test`, `downstream`, `changeset`, no up-to-date rule; the classic branch protection is deleted |
+| **Merge queue** | **not available**: the ruleset API rejects `merge_queue` (`Invalid rule 'merge_queue'`) because GitHub offers merge queues only on organization-owned repos and `grahamlutz/*` is a personal account. Fallback applied: required checks without "up to date"; `gh pr merge --auto` is the norm. Trade: two PRs that each pass alone can conflict once both are on `main`; the `push: main` run catches it. Moving both repos into a (free) GitHub org would unlock a real queue — revisit only if the serial cost returns |
+| `packages/tools` scaffold, `template:check`, `merge_group` and the `downstream` job (core #66) | `downstream` runs the template's typecheck and 15-file suite against the PR's packed tarballs (1m54s to 2m19s); demonstrated to fail on a renamed `BoardView` member |
+| Core `CLAUDE.md`, `planning/hyperfixation-versioning-policy.md`, the changeset CI job (core #67) | the check flags only `packages/*/src` (minus tests) and `etc/*.api.md`, skips private and ignored packages and version PRs, and requires a changeset **added** on the branch; a separate `changeset` job, hence the third required check |
+| `release:publish`, `release:rehearse`, `release:verify` (core #69) | rehearsal against a real Verdaccio in 17.4 s; refuses without a TTY; per-version registry documents, never `npm view`; skips already-published packages; never stores a token |
+| `dev:doctor`, `dev:clean`, `worktrees:clean` (core #70) | dry-run by default; never `image prune -a`, `system prune` or `--volumes` |
+| `plan:sync`, the `Chunk:` and `## Built` convention, the PR template (core #68) | a generated status table in the Phase 3 doc from 98 merged PRs; the template repo still needs its own PR template |
+| Versioning policy | written (see the policy doc) |
+| OIDC `release.yml` | Phase 4: configure trusted publishers on npmjs.com (nine, user-performed), then `changesets/action` with `id-token: write` |
+| Local dev infra fixes | user-performed: recreate `hyperfixation-pg` with `--restart unless-stopped` and a named volume; `colima start --disk 60` (interrupts other projects' containers); `worktrees:clean --yes` and `dev:clean --yes` when chosen |
+
+**Corrections to this plan found while building it.** Role names: a leaked `hf_test_x`'s application role is `hf_test_x` itself
+(`roles.ts:37-43` gives `hf_<app>_migrator`, `hf_<app>`, `hf_<app>_ro`), not `test_%_{...}`. buildx 0.37 renamed `--keep-storage` to
+`--reserved-space`. `pnpm pack`, unlike `publish`, does not skip private packages, so `template:check` filters them. Merged worktrees look
+unmerged (squash merges), so `worktrees:clean` keys off the PR's `headRefOid`. **A test hazard, fixed:** the first `worktrees.test.ts` set its
+fixture's `origin` to the real repo and pushed four throwaway branches to GitHub (`merged-clean`, `merged-dirty`, `merged-unpushed`,
+`unmerged`); they were deleted and the fixture can no longer reach a remote. **New working rules from this:** every code PR that changes
+`packages/*/src` or `etc/*.api.md` needs a `.changeset/*.md`; merge with `--auto`, or `gh pr checks N --watch && gh pr merge N`.
+
 ## Goal and problem
 
 A session is spent on serial merge cycles, a merge went through red, an unrelated repo went red after a core merge, publishing is a
