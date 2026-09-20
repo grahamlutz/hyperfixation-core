@@ -242,38 +242,155 @@ describe("provisionDatabase", () => {
 });
 
 describe("the cluster transports", () => {
-  it("falls back to docker exec psql when nothing answers through the tunnel", async () => {
+  /** What Coolify may call the box's Postgres container, and its address on the `coolify` network. */
+  const CONTAINERS = ["4pjq0kw7ty27vsi0xpesevrq", "postgresql-4pjq0kw7ty27vsi0xpesevrq"];
+  const CONTAINER_IP = "10.0.1.9";
+  const inspectArgv = (container: string): string[] => [
+    "docker",
+    "inspect",
+    "-f",
+    "{{range $k,$v := .NetworkSettings.Networks}}{{$k}}={{$v.IPAddress}} {{end}}",
+    container,
+  ];
+
+  const cluster = new URL(ADMIN_URL);
+  const clusterPort = Number(cluster.port === "" ? "5432" : cluster.port);
+  const clusterAdmin = {
+    user: decodeURIComponent(cluster.username),
+    password: decodeURIComponent(cluster.password),
+  };
+
+  /** Forwards land on the test cluster for the hosts in `live`, and on nothing for any other. */
+  function forwarder(live: Record<string, number>, targets: string[]): Runner["tunnel"] {
+    return async (remotePort, remoteHost = "127.0.0.1") => {
+      targets.push(`${remoteHost}:${String(remotePort)}`);
+      return { localPort: live[remoteHost] ?? (await deadPort()), close: async () => undefined };
+    };
+  }
+
+  it("takes the box's loopback when Postgres answers there, and asks docker nothing", async () => {
+    const targets: string[] = [];
+    const commands: string[][] = [];
+    const runner: Runner = {
+      exec: async (command): Promise<ExecResult> => {
+        commands.push([...command]);
+        return { code: 0, stdout: "", stderr: "" };
+      },
+      tunnel: forwarder({ "127.0.0.1": clusterPort }, targets),
+    };
+
+    const db = await openDatabase(runner, { admin: clusterAdmin, containers: CONTAINERS });
+
+    try {
+      expect(db.kind).toBe("tunnel");
+      expect(db.boxAddress).toEqual({ host: "127.0.0.1", port: 5432 });
+      expect(targets).toEqual(["127.0.0.1:5432"]);
+      expect(commands).toEqual([]);
+    } finally {
+      await db.close();
+    }
+  }, 30_000);
+
+  it("forwards to the container's coolify address when the loopback refuses", async () => {
+    const targets: string[] = [];
+    const commands: string[][] = [];
+    const runner: Runner = {
+      exec: async (command): Promise<ExecResult> => {
+        commands.push([...command]);
+        // The bare uuid is the standalone resource's container; a service database would be the
+        // `postgresql-` one, and only one of the two is ever there.
+        if (command[4] !== CONTAINERS[0]) {
+          return { code: 1, stdout: "", stderr: `Error: No such object: ${String(command[4])}` };
+        }
+        // Both networks a Coolify database sits on; the per-service one is not the routable one,
+        // which is why `coolify` is picked by name.
+        return {
+          code: 0,
+          stdout: `coolify=${CONTAINER_IP} 4pjq0kw7ty27vsi0xpesevrq=10.0.2.3 \n`,
+          stderr: "",
+        };
+      },
+      tunnel: forwarder({ [CONTAINER_IP]: clusterPort }, targets),
+    };
+
+    const db = await openDatabase(runner, { admin: clusterAdmin, containers: CONTAINERS });
+
+    try {
+      expect(db.kind).toBe("tunnel");
+      expect(db.boxAddress).toEqual({ host: CONTAINER_IP, port: 5432 });
+      expect(await db.query("SELECT 1")).toEqual({ rows: [["1"]] });
+      expect(commands).toEqual([inspectArgv(CONTAINERS[0] ?? "")]);
+      expect(targets).toEqual(["127.0.0.1:5432", `${CONTAINER_IP}:5432`]);
+    } finally {
+      await db.close();
+    }
+  }, 30_000);
+
+  it("names every container it tried when docker inspect finds none of them", async () => {
+    const runner: Runner = {
+      exec: async (command) => ({
+        code: 1,
+        stdout: "",
+        stderr: `Error: No such object: ${String(command[4])}`,
+      }),
+      tunnel: forwarder({}, []),
+    };
+
+    const opened = openDatabase(runner, { admin: clusterAdmin, containers: CONTAINERS });
+
+    await expect(opened).rejects.toThrow(/No such object/);
+    await expect(opened).rejects.toThrow(new RegExp(CONTAINERS.join(", ")));
+  }, 30_000);
+
+  it("refuses a container that has no address on any docker network", async () => {
+    const runner: Runner = {
+      exec: async () => ({ code: 0, stdout: "none= \n", stderr: "" }),
+      tunnel: forwarder({}, []),
+    };
+
+    await expect(
+      openDatabase(runner, { admin: clusterAdmin, containers: [CONTAINERS[0] ?? ""] }),
+    ).rejects.toThrow(/no IPv4 address on any docker network/);
+  }, 30_000);
+
+  it("falls back to docker exec psql as the configured admin when no address answers", async () => {
     const commands: string[][] = [];
     const runner: Runner = {
       exec: async (command, options): Promise<ExecResult> => {
         commands.push([...command]);
+        if (command[1] === "inspect") {
+          return { code: 0, stdout: `coolify=${CONTAINER_IP} `, stderr: "" };
+        }
         expect(options?.input).toBe("SELECT 1");
         return { code: 0, stdout: "1t\n", stderr: "" };
       },
-      tunnel: async () => ({ localPort: await deadPort(), close: async () => undefined }),
+      tunnel: forwarder({}, []),
     };
 
     const db = await openDatabase(runner, {
-      admin: { user: "postgres" },
-      container: "coolify-postgres-1",
+      // Coolify creates the cluster with its own POSTGRES_USER, which need not be `postgres`.
+      admin: { user: "coolify_admin" },
+      containers: [CONTAINERS[0] ?? ""],
+      dockerExec: true,
     });
 
     expect(db.kind).toBe("docker-exec");
     expect(db.adminUrl()).toBeUndefined();
     expect(await db.query("SELECT 1")).toEqual({ rows: [["1", "t"]] });
     expect(commands).toEqual([
+      inspectArgv(CONTAINERS[0] ?? ""),
       [
         "docker",
         "exec",
         "-i",
-        "coolify-postgres-1",
+        CONTAINERS[0] ?? "",
         "psql",
         "-v",
         "ON_ERROR_STOP=1",
         "-qtAF",
         "",
         "-U",
-        "postgres",
+        "coolify_admin",
         "-d",
         "postgres",
         "-f",
@@ -285,10 +402,10 @@ describe("the cluster transports", () => {
   it("refuses the tunnel with nothing to fall back to when no container is named", async () => {
     const runner: Runner = {
       exec: async () => ({ code: 0, stdout: "", stderr: "" }),
-      tunnel: async () => ({ localPort: await deadPort(), close: async () => undefined }),
+      tunnel: forwarder({}, []),
     };
 
-    await expect(openDatabase(runner, { admin: { user: "postgres" } })).rejects.toThrow(
+    await expect(openDatabase(runner, { admin: clusterAdmin })).rejects.toThrow(
       /no container was named/,
     );
   }, 30_000);

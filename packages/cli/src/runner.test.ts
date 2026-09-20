@@ -34,6 +34,14 @@ describe("the ssh Runner's argv", () => {
     ]);
   });
 
+  it("forwards to an address on the far side's own network when given one", () => {
+    expect(sshTunnelArgv(HOST, 54321, 5432, "10.0.1.9")).toContain("54321:10.0.1.9:5432");
+  });
+
+  it("refuses a remote host that would turn one forward into another", () => {
+    expect(() => sshTunnelArgv(HOST, 54321, 5432, "10.0.1.9:5432:evil")).toThrow(RunnerError);
+  });
+
   it("quotes a word the remote shell would otherwise split or run", () => {
     expect(shellQuote(["psql", "-c", "SELECT 'a b'; $(id)"])).toBe(
       `'psql' '-c' 'SELECT '\\''a b'\\''; $(id)'`,

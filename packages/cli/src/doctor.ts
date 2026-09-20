@@ -3,7 +3,10 @@ import path from "node:path";
 import { checkE006, quoteIdent } from "@hyperfixation/db";
 import { Client } from "pg";
 import {
+  DEFAULT_PG_ADMIN_USER,
   loadOperatorConfig,
+  pgAdminUser,
+  postgresContainers,
   requireOperatorConfig,
   type OperatorConfig,
 } from "./config.js";
@@ -19,9 +22,6 @@ export const RESTORE_CHECK_MAX_AGE_DAYS = 7;
 
 /** The branch prefix Phase 4's core bumps open their pull requests on. */
 export const CORE_BUMP_BRANCH_PREFIX = "core-bump/";
-
-/** The cluster role `hf doctor` reads privileges as, before `SET ROLE`. */
-const CLUSTER_ADMIN_USER = "postgres";
 
 export type Severity = "ok" | "warn" | "fail";
 
@@ -117,25 +117,26 @@ export function doctorLines(result: DoctorResult): string[] {
 }
 
 /**
- * E006 as `postgres` with `SET ROLE hf_<app>`, over the tunnel a `Runner` opens.
+ * E006 as the cluster admin with `SET ROLE hf_<app>`, over the tunnel a `Runner` opens.
  *
  * As the app role rather than as an admin because that is the only role whose answer matters —
  * a superuser's privileges are both true whatever the migrator granted.
  */
 export function tunnelPrivilegeCheck(
   runner: Runner,
-  options: { container?: string } = {},
+  options: { containers?: readonly string[]; adminUser?: string } = {},
 ): PrivilegeCheck {
+  const adminUser = options.adminUser ?? DEFAULT_PG_ADMIN_USER;
   return async (target) => {
     const db = await openDatabase(runner, {
-      admin: { user: CLUSTER_ADMIN_USER },
-      container: options.container,
+      admin: { user: adminUser },
+      containers: options.containers,
     });
     try {
       const adminUrl = db.adminUrl(target.databaseName);
       if (adminUrl === undefined) {
         throw new Error(
-          `E006 cannot be read over the ${db.kind} transport: ${CLUSTER_ADMIN_USER} has to be ` +
+          `E006 cannot be read over the ${db.kind} transport: ${adminUser} has to be ` +
             "a session a pg client holds open, so that SET ROLE outlives the statement",
         );
       }
@@ -174,7 +175,10 @@ interface Context {
 
 function defaultPrivilegeCheck(config: OperatorConfig, env: NodeJS.ProcessEnv): PrivilegeCheck {
   const { HF_SSH_HOST } = requireOperatorConfig(config, ["HF_SSH_HOST"], { env });
-  return tunnelPrivilegeCheck(createSshRunner({ host: HF_SSH_HOST }));
+  return tunnelPrivilegeCheck(createSshRunner({ host: HF_SSH_HOST }), {
+    containers: postgresContainers(config),
+    adminUser: pgAdminUser(config),
+  });
 }
 
 async function doctorApp(context: Context, name: string): Promise<DoctorFinding[]> {

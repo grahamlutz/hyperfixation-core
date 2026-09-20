@@ -12,6 +12,8 @@ import {
 import {
   CONFIG_KEYS,
   loadOperatorConfig,
+  pgAdminUser,
+  postgresContainers,
   requireOperatorConfig,
   type ConfigKey,
   type OperatorConfig,
@@ -172,11 +174,13 @@ export async function runSteps<Context extends CloudContext>(
 }
 
 /**
- * The keys a cloud `hf new` runs without: `HF_DB_HOST_INTERNAL` has a default, and the two
- * provider keys are what the checklist warns about when they are unset.
+ * The keys a cloud `hf new` runs without: three have a default derived from another key, and the
+ * two provider keys are what the checklist warns about when they are unset.
  */
 export const OPTIONAL_CLOUD_CONFIG: readonly ConfigKey[] = [
   "HF_DB_HOST_INTERNAL",
+  "HF_DB_CONTAINER",
+  "HF_PG_ADMIN_USER",
   "HF_ANTHROPIC_API_KEY",
   "HF_OPENAI_API_KEY",
 ];
@@ -194,9 +198,6 @@ export const OPTIONAL_CLOUD_CONFIG: readonly ConfigKey[] = [
 export const REQUIRED_CLOUD_CONFIG: readonly ConfigKey[] = CONFIG_KEYS.filter(
   (key) => !OPTIONAL_CLOUD_CONFIG.includes(key),
 );
-
-/** The cluster role `hf new` provisions the app's database and roles as. */
-const CLUSTER_ADMIN_USER = "postgres";
 
 export interface NewAppCloudOptions {
   name: string;
@@ -249,7 +250,7 @@ export async function newAppCloud(options: NewAppCloudOptions): Promise<NewAppCl
   // `PGPASSWORD` is libpq's own name for it, and the same place `hf restore-check` reads it:
   // Coolify's cluster password is not an hf config key, because nothing of ours should hold it.
   const clusterAdmin: AdminCredentials =
-    options.clusterAdmin ?? { user: CLUSTER_ADMIN_USER, password: env.PGPASSWORD };
+    options.clusterAdmin ?? { user: pgAdminUser(config), password: env.PGPASSWORD };
 
   let database: Database | undefined;
   const hadWriteToken = state.state.statusTokens?.write !== undefined;
@@ -271,9 +272,13 @@ export async function newAppCloud(options: NewAppCloudOptions): Promise<NewAppCl
     email: options.email,
     budgetUsd: options.budgetUsd,
     database: async () => {
-      // No `container`: the `docker exec psql` transport has no address, and every use of the
-      // cluster here — `provisionRoles`, the migrator, the tokens — is a pg client.
-      database ??= await openDatabase(runner, { admin: clusterAdmin });
+      // The container is named so the tunnel can discover its address, but no `dockerExec`: that
+      // transport has no address, and every use of the cluster here — `provisionRoles`, the
+      // migrator, the tokens — is a pg client.
+      database ??= await openDatabase(runner, {
+        admin: clusterAdmin,
+        containers: postgresContainers(config),
+      });
       return database;
     },
     commands: options.commands ?? cloudCommands,

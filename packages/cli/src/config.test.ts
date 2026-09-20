@@ -9,6 +9,8 @@ import {
   githubAppSlugs,
   loadOperatorConfig,
   MissingConfig,
+  pgAdminUser,
+  postgresContainers,
   requireOperatorConfig,
 } from "./config.js";
 import { InsecureFileMode } from "./secret-file.js";
@@ -122,9 +124,9 @@ describe("operator config", () => {
     expect((refusal as Error).message).not.toContain(COOLIFY_TOKEN);
   });
 
-  it("carries the twenty-two keys Phase 3 settled on", () => {
-    expect(CONFIG_KEYS).toHaveLength(22);
-    expect(new Set(CONFIG_KEYS).size).toBe(22);
+  it("carries the twenty-four keys Phase 3 settled on", () => {
+    expect(CONFIG_KEYS).toHaveLength(24);
+    expect(new Set(CONFIG_KEYS).size).toBe(24);
     expect(CONFIG_KEYS).toContain("HF_GITHUB_APP_SLUGS");
     expect(CONFIG_KEYS).toContain("HF_DB_HOST_INTERNAL");
     expect(CONFIG_KEYS).toContain("HF_ANTHROPIC_API_KEY");
@@ -139,5 +141,21 @@ describe("operator config", () => {
       "hyperfixation-bump",
     ]);
     expect(githubAppSlugs({})).toEqual([]);
+  });
+
+  it("names both containers Coolify may have created for the database, override first", async () => {
+    await write({ HF_COOLIFY_POSTGRES_UUID: "4pjq0kw7ty27vsi0xpesevrq" });
+
+    expect(postgresContainers(await loadOperatorConfig({ file, env: {} }))).toEqual([
+      "4pjq0kw7ty27vsi0xpesevrq",
+      "postgresql-4pjq0kw7ty27vsi0xpesevrq",
+    ]);
+    expect(postgresContainers({ HF_DB_CONTAINER: "pg-1" })).toEqual(["pg-1"]);
+    expect(postgresContainers({})).toEqual([]);
+  });
+
+  it("logs in as postgres until HF_PG_ADMIN_USER says otherwise", () => {
+    expect(pgAdminUser({})).toBe("postgres");
+    expect(pgAdminUser({ HF_PG_ADMIN_USER: "coolify_admin" })).toBe("coolify_admin");
   });
 });
