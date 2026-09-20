@@ -2,6 +2,7 @@ import { parseArgs } from "node:util";
 import { bootstrapApp } from "./bootstrap.js";
 import { checkApp } from "./check.js";
 import { dev, devBuildSha } from "./dev.js";
+import { doctor, doctorLines } from "./doctor.js";
 import { generate } from "./gen.js";
 import { migrateApp } from "./migrate.js";
 import { newApp } from "./new.js";
@@ -19,6 +20,7 @@ export const COMMANDS = [
   "gen",
   "dev",
   "up",
+  "doctor",
   "restore-check",
 ] as const;
 
@@ -51,6 +53,10 @@ export const USAGE = `hf — the hyperfixation CLI
 
   hf check                  declared env, pending migrations, and E001-E006
 
+  hf doctor [name]          every deployed app in the state cache, or one: /api/status under its
+                            read token, the deployed version against main, E006 as the app role,
+                            the last restore check, and open core-bump PRs. Exits 1 on any finding
+
   hf gen [generator]        the app's turbo generators
 
   hf dev                    docker compose up, then pnpm dev under HF_BUILD_SHA=dev-<timestamp>
@@ -62,7 +68,7 @@ export const USAGE = `hf — the hyperfixation CLI
       --backup-dir <dir>      where the dumps are (default: Coolify's on the box)
       --from-s3               read the dump from object storage (not implemented)
 
-Every command but \`new\` and \`restore-check\` runs against the app at or above the working directory, or --dir.
+Every command but \`new\`, \`doctor\` and \`restore-check\` runs against the app at or above the working directory, or --dir.
 `;
 
 export interface Io {
@@ -121,6 +127,8 @@ async function dispatch(command: Command, argv: readonly string[], io: Io): Prom
       return await commandDev(argv, io);
     case "up":
       return await commandUp(argv, io);
+    case "doctor":
+      return await commandDoctor(argv, io);
     case "restore-check":
       return await commandRestoreCheck(argv, io);
   }
@@ -251,6 +259,14 @@ async function commandCheck(argv: readonly string[], io: Io): Promise<number> {
   }
   for (const finding of result.findings) io.err(`${finding.code}: ${finding.message}`);
   return 1;
+}
+
+async function commandDoctor(argv: readonly string[], io: Io): Promise<number> {
+  const { positionals } = parseArgs({ args: [...argv], allowPositionals: true });
+
+  const result = await doctor({ name: positionals[0] });
+  for (const line of doctorLines(result)) io.out(line);
+  return result.ok ? 0 : 1;
 }
 
 async function commandGen(argv: readonly string[]): Promise<number> {
