@@ -269,6 +269,55 @@ export function workspaceRangeLeftovers(
   return leftovers;
 }
 
+export type RegistryComparison = {
+  readonly name: string;
+  readonly document: VersionDocument;
+  readonly waitedMs: number;
+  /** The integrity of the tarball packed here; absent when the document never arrived. */
+  readonly local: string | undefined;
+};
+
+/** Each package's version document beside the integrity of the tarball packed locally. */
+export async function compareTarballs(
+  registry: RegistryClient,
+  version: string,
+  tarballs: ReadonlyMap<string, string>,
+  integrityOf: (tarball: string) => Promise<string> = tarballIntegrity,
+  wait: PropagationWait = {},
+): Promise<RegistryComparison[]> {
+  const comparisons: RegistryComparison[] = [];
+  for (const [name, tarball] of tarballs) {
+    const { document, waitedMs } = await awaitVersionDocument(registry, name, version, wait);
+    comparisons.push({
+      name,
+      document,
+      waitedMs,
+      local: document.status === 200 ? await integrityOf(tarball) : undefined,
+    });
+  }
+  return comparisons;
+}
+
+/** Why the version document is not usable, or `undefined` when it is a 200. */
+export function missingProblem(
+  registryUrl: string,
+  version: string,
+  comparison: RegistryComparison,
+): string | undefined {
+  if (comparison.document.status === 200) return undefined;
+  const waited = comparison.waitedMs > 0 ? ` after ${Math.round(comparison.waitedMs / 1000)}s` : "";
+  return `${comparison.name}@${version} is not on ${registryUrl} (HTTP ${comparison.document.status}${waited})`;
+}
+
+/** How the registry's tarball differs from the one packed here, or `undefined` when it does not. */
+export function integrityDifference(
+  version: string,
+  comparison: RegistryComparison,
+): string | undefined {
+  if (comparison.document.integrity === comparison.local) return undefined;
+  return `${comparison.name}@${version} integrity is ${comparison.document.integrity ?? "(absent)"} on the registry, ${comparison.local ?? "(absent)"} locally`;
+}
+
 /** Step 6: every version document is present and its `dist.integrity` matches the local tarball. */
 export async function registryProblems(
   registry: RegistryClient,
@@ -277,24 +326,14 @@ export async function registryProblems(
   integrityOf: (tarball: string) => Promise<string> = tarballIntegrity,
   wait: PropagationWait = {},
 ): Promise<string[]> {
-  const problems: string[] = [];
-  for (const [name, tarball] of tarballs) {
-    const { document, waitedMs } = await awaitVersionDocument(registry, name, version, wait);
-    if (document.status !== 200) {
-      const waited = waitedMs > 0 ? ` after ${Math.round(waitedMs / 1000)}s` : "";
-      problems.push(
-        `${name}@${version} is not on ${registry.url} (HTTP ${document.status}${waited})`,
-      );
-      continue;
-    }
-    const local = await integrityOf(tarball);
-    if (document.integrity !== local) {
-      problems.push(
-        `${name}@${version} integrity is ${document.integrity ?? "(absent)"} on the registry, ${local} locally`,
-      );
-    }
-  }
-  return problems;
+  const comparisons = await compareTarballs(registry, version, tarballs, integrityOf, wait);
+  return comparisons.flatMap((comparison) => {
+    const missing = missingProblem(registry.url, version, comparison);
+    if (missing !== undefined) return [missing];
+    return [integrityDifference(version, comparison)].filter(
+      (problem): problem is string => problem !== undefined,
+    );
+  });
 }
 
 export function dispatchCommand(version: string): string {
