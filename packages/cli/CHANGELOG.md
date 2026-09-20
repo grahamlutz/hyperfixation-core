@@ -1,5 +1,14 @@
 # @hyperfixation/cli
 
+## 0.1.8
+
+### Patch Changes
+
+- Updated dependencies [7715754]
+  - @hyperfixation/db@0.1.8
+  - @hyperfixation/core@0.1.8
+  - @hyperfixation/auth@0.1.8
+
 ## 0.1.7
 
 ### Patch Changes
