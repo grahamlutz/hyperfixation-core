@@ -1,0 +1,19 @@
+{
+  "name": "@hyperfixation/tools",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Maintainer scripts: nothing here ships to users",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src",
+    "test": "vitest run --passWithNoTests",
+    "template-check": "tsx src/template-check.ts"
+  },
+  "devDependencies": {
+    "@hyperfixation/eslint-config": "workspace:*",
+    "eslint": "^10.10.0",
+    "tsx": "4.23.13",
+    "yaml": "2.9.1"
+  }
+}
