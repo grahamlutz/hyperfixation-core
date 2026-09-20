@@ -1,0 +1,1 @@
+ALTER TABLE "hf_app_state" ADD COLUMN "llm_mode" text;

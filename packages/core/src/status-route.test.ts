@@ -69,11 +69,27 @@ describe("the status endpoint", () => {
       pausedBy: null,
       anomalies: 0,
       runs: { running: 0, waiting: 0, paused: 0, done: 0, failed: 0 },
+      // Nothing has built an LLM registry, so nothing has reported what it serves.
+      llm: { mode: "unknown" },
     });
     expect(report.coreVersion).toMatch(/^\d+\.\d+\.\d+/);
     // No gate has run, so no period row exists yet; the endpoint reports that rather than
     // inventing a zeroed one.
     expect(report.budget).toEqual({ current: null, previous: null });
+  });
+
+  it("reports the mode the worker reported, in the web process that never built a registry", async () => {
+    for (const [reported, expected] of [
+      ["fixtures", "fixtures"],
+      ["live", "live"],
+      // A mode written by a newer core than the one answering reads as no answer at all.
+      ["something-else", "unknown"],
+    ]) {
+      await pool.query("UPDATE hf_app_state SET llm_mode = $1 WHERE id = 1", [reported]);
+      const report = (await (await call("/api/status", "GET", READ_TOKEN)).json()) as StatusReport;
+
+      expect(report.llm.mode, reported).toBe(expected);
+    }
   });
 
   it("refuses a read with no token, a wrong token, and a token in the wrong place", async () => {
