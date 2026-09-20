@@ -168,7 +168,7 @@ recommended, the CLI half and the token in `core-bump.yml` are dropped.)
 **Done:** `core-version.test.ts` fails on a hand-edited mixed lockfile; `new.test.ts` cloud case (a) issues the two
 sealed PUTs after the repo step and none on a re-run; the GitHub OpenAPI vendoring covers the public-key endpoint.
 
-## X2 — Exit (manual; after R2, B1, B2) — 🚧 In progress
+## X2 — Exit (manual; after R2, B1, B2) — ✅ Done
 
 `0.1.2`'s dispatch opens `core-bump/0.1.2` on the template and on demo-app; both CIs run and are green; `hf doctor`
 lists them; merge; `hf doctor` clean. Paste the PR URLs and check times here.
@@ -178,6 +178,10 @@ lists them; merge; `hf doctor` clean. Paste the PR URLs and check times here.
 > `demo-app`'s own bump and deploy. `downstream.txt` lists only the template, so no bump PR is opened on the app;
 > add `grahamlutz/demo-app` to it when the app should get them. `hf deploy <name>` exists and is what publishes a
 > merged bump, because `hf new` leaves Coolify's push auto-deploy off.
+>
+> **Closed by Phase 5 W1 (core #117), 2026-09-20.** `demo-app` is in `downstream.txt` and in `release.yml`'s repository
+> list, and release `0.1.7` opened `core-bump/0.1.7` on both the template (#46) and `demo-app` (#11) by itself; both
+> merged green and `hf deploy demo-app` published it. Nothing here is by hand any more.
 
 ---
 
@@ -252,14 +256,15 @@ small enough to ride along with the chunk it touches. Markers as above.
 - ✅ **`hf up` needed a budget `hf new` never set.** `hf up` now seeds `DEV_BUDGET_USD` ($10) when
   `HF_BOOTSTRAP_BUDGET_USD` is unset and says so; `hf bootstrap` still requires an explicit one, so a
   deploy never gets an implicit cap (core #15, template #11).
-- ⬜ **No CI job runs `hf new --local && hf up`.** That bug shipped because every test set the
+- ✅ **No CI job runs `hf new --local && hf up`.** That bug shipped because every test set the
   budget by hand and no job ran the two commands together. Needs the built `hf` (the X1 note says the
   same about the admin form). One job that scaffolds a scratch app and runs `hf up` to the point the
-  web process is listening.
+  web process is listening. **Done in Phase 5 S1 (core #116)** — the `scaffold` job.
 - ⬜ **`hf new --local` and `hf check` don't verify the bootstrap inputs.** A blank email answer is
   accepted (`new.ts`, `promptForBootstrapEmail`) and only fails later inside `hf bootstrap`; `hf check`
   compares `.env.example` to the env and looks at migrations and E001–E006, nothing else. The cloud
-  `hf new` already refuses a missing `--email`/`--budget-usd` up front — make `--local` match.
+  `hf new` already refuses a missing `--email`/`--budget-usd` up front — make `--local` match. **Half
+  done in Phase 5 S1 (core #116):** `--local` refuses both now; `hf check` is unchanged.
 - ⬜ **The app's base budget has no command.** #28's admin action edits one `hf_budget_period` row
   (audited, passkey-gated); `hf_app_state.budget_usd`, the default each new month copies, is set once by
   `hf bootstrap` and never again. Decide whether an admin action or `hf` command should change it.
@@ -276,26 +281,28 @@ small enough to ride along with the chunk it touches. Markers as above.
 
 None block Phase 4; the first two are the most likely to bite.
 
-- ⬜ **`hf restore-check` should tolerate live drift.** Against a dump a few hours old it reports every
+- ✅ **`hf restore-check` should tolerate live drift.** Against a dump a few hours old it reports every
   table the app has written to as a mismatch (9 of 24 at 1.3 h). It only passes when run right after a
   backup. Compare append-only tables as `restored <= live`, flag only tables where `restored > live`
-  unexpectedly, and print the dump's age next to the verdict.
-- ⬜ **The api-diff gate no longer catches a removed CLI command.** #98 excused a changed `COMMANDS` /
+  unexpectedly, and print the dump's age next to the verdict. **Done in Phase 5 C2 (core #114).**
+- ✅ **The api-diff gate no longer catches a removed CLI command.** #98 excused a changed `COMMANDS` /
   `USAGE` literal so a command could be added; a removed command passes too. Tighten it to accept
-  additions only (new tuple is a superset of the old).
+  additions only (new tuple is a superset of the old). **Done in Phase 5 C3 (core #111).**
 - ⬜ **An end-to-end guard against a second `DuplicateFlow`.** A template prod e2e that hits an
   authenticated page plus a server action twice and asserts the web log has no `DuplicateFlow` (core #103
   fixed `defineFlow`; nothing yet exercises the real Next layers).
 - ⬜ **Two registries the #103 audit left alone.** `registerLangfuse` has no duplicate guard (a second
   tracer provider leaks; only called once per runtime today), and `defineApp`'s `attach()` and
   `run-context.ts`'s ALS are per-instance under two module layers.
-- ⬜ **`downstream.txt` lists only the template.** Add `grahamlutz/demo-app` to give it core-bump PRs;
+- ✅ **`downstream.txt` lists only the template.** Add `grahamlutz/demo-app` to give it core-bump PRs;
   until then it is updated by hand (`pnpm update '@hyperfixation/*'`, commit, `hf deploy demo-app`).
+  **Done in Phase 5 W1 (core #117)** — `release.yml`'s own repository list had to gain the line too.
 - ⬜ **SIGTERM mid-run was not shown on the box.** The drain was timed on an idle worker (fixtures finish
   instantly). Interrupting a run mid-step is covered by core's redeploy test cases only.
 - ⬜ **Phone passkey proof and the first-of-month period row** (2026-10-01) — the two X1 manual items left.
-- ⬜ **`hf` should offer `--version`,** and `hf new` should be safe to run from a directory that already
+- ✅ **`hf` should offer `--version`,** and `hf new` should be safe to run from a directory that already
   holds an app (the adopt rule was tightened in core #97; add a message that names the existing path).
+  **Done in Phase 5 C1 (core #113).**
 
 ## Risks
 

@@ -8,9 +8,10 @@ approves → perform an action** (send an email, mail a letter). Crashes and red
 double-bill or double-send: every LLM call and action is keyed and fenced, so a restarted run
 picks up exactly where it stopped.
 
-> **Status:** early. Phases 1–3 are done — the run model, the local demo loop, and a first app
-> (`demo-app`) provisioned by the cloud `hf new` and running on a real box. The nine
-> `@hyperfixation/*` packages are on npm (0.1.6, released by CI with provenance). See
+> **Status:** early. Phases 1–4 are done — the run model, the local demo loop, a first app
+> (`demo-app`) provisioned by the cloud `hf new` and running on a real box, and releases that bump
+> every downstream app by themselves. The nine `@hyperfixation/*` packages are on npm (0.1.7,
+> released by CI with provenance). Phase 5 is under way: a second app, `demo-two`, is deployed. See
 > [Roadmap](#roadmap).
 
 ## What it will do
@@ -102,8 +103,8 @@ to point it elsewhere, `--full` to add its lint and `next build`). CI runs it as
 | 1 | Core skeleton and run model: `db`, `workflows`, `auth`, `admin`, `cli`, redeploy/fence proofs | Done |
 | 2 | The demo loop, locally: approval inbox, pipeline board, tasks, Telegram, Langfuse | Done |
 | 3 | Cloud `hf new`, backups, `hf doctor`, restore checks | Done: `demo-app` is deployed on the real box |
-| 4 | npm publish, API-diff gate, automated downstream bumps | Done but for X2: bump PRs land on the template, not yet on apps |
-| 5 | A second app; per-app isolation | Planned |
+| 4 | npm publish, API-diff gate, automated downstream bumps | Done: 0.1.7's bump PRs landed on the template and on `demo-app` |
+| 5 | A second app; per-app isolation | In progress: `demo-two` is live; the isolation exit is next |
 | 6 | Channels, fetch cache, cadences, documents, digests | Planned |
 | 7 | `business-acquisition`: the first real app | Planned |
 
@@ -117,6 +118,7 @@ Design and build order live in [`planning/`](planning): the
 ([1](planning/hyperfixation-phase1-order-2026-09-16.md),
 [2](planning/hyperfixation-phase2-order-2026-09-18.md),
 [3](planning/hyperfixation-phase3-order-2026-09-19.md),
-[4](planning/hyperfixation-phase4-order-2026-09-20.md)), the
+[4](planning/hyperfixation-phase4-order-2026-09-20.md),
+[5](planning/hyperfixation-phase5-order-2026-09-20.md)), the
 [tooling plan](planning/hyperfixation-tooling-plan-2026-09-19.md), and the
 [X1 runbook](planning/hyperfixation-x1-runbook-2026-09-20.md) for the first real-box run.
