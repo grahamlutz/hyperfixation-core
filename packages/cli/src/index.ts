@@ -90,6 +90,7 @@ export {
   type LocalDirectoryBackupSourceOptions,
 } from "./backup-source.js";
 export {
+  APPEND_ONLY_TABLES,
   formatRestoreCheck,
   pgRestoreArgv,
   pgRestoreInContainerArgv,

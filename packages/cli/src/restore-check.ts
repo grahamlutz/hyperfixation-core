@@ -31,8 +31,42 @@ export const SCRATCH_SUFFIX = "_restore_check";
 /** Postgres truncates an identifier past this, which would collide with the live database. */
 const MAX_IDENTIFIER_BYTES = 63;
 
-/** Older than this and the dump gets a warning line; it never changes the exit code. */
-export const STALE_DUMP_HOURS = 36;
+/** Older than this and the dump gets a WARN line, which — as in `hf doctor` — exits 1. */
+export const STALE_DUMP_HOURS = 24;
+
+/**
+ * Tables a live row is only ever added to, so a live count above the dump's is the app working,
+ * not lost data.
+ *
+ * X1 found this the hard way: against a 1.3-hour-old dump of a running app, 9 of 24 tables
+ * "mismatched" purely from churn since the dump, and the same check against a fresh dump matched
+ * all 24. A table earns a place here only when no code path deletes from it and none updates it
+ * in a way that lowers its count — checked against `packages/db/src/schema` and every statement
+ * in `core`, `workflows`, `auth` and `admin`. Anything else, including a table whose rows merely
+ * look permanent, stays exact: a false `ok` here hides exactly the data loss this command exists
+ * to catch.
+ */
+export const APPEND_ONLY_TABLES: readonly string[] = [
+  // Insert-only ledgers: nothing but `INSERT` touches either.
+  "hf_audit",
+  "hf_activity",
+  // Ledger rows are inserted `started` and then `UPDATE`d to a terminal status — including
+  // `reconcile()`'s sweep to `abandoned`/`uncertain`, which is still an update.
+  "hf_llm_call",
+  "hf_action_log",
+  // Inserted pending and decided by `UPDATE`; `reconcile()` step (5) expires a stale one the
+  // same way. The delete guard exists precisely so an approval outlives the record it names.
+  "hf_approval",
+  // Inserted, or upserted on `(run_id, key, spec_name)` by a replayed step; never deleted.
+  "hf_score",
+  // `INSERT` at the start of a source run, `UPDATE` at its end.
+  "hf_source_run",
+  // `INSERT` at `runs.start`; every later write is an `UPDATE` of status, attempt or the
+  // fencing token. Runs are never purged — there is no retention sweep.
+  "hf_run",
+];
+
+const APPEND_ONLY = new Set(APPEND_ONLY_TABLES);
 
 export type RestoreVerdict = "ok" | "mismatch" | "live only" | "restored only";
 
@@ -42,6 +76,14 @@ export interface RestoreCheckRow {
   live?: number;
   /** Absent when the table is not in the restored dump. */
   restored?: number;
+  /**
+   * Rows the live side gained since the dump, on an `APPEND_ONLY_TABLES` table.
+   *
+   * Drift is not its own verdict because it is not its own outcome: the restore held everything
+   * the dump had, which is `ok`. The column prints it as `ok (drift +N)` so the operator can see
+   * why two counts differ without having to decide whether it mattered.
+   */
+  drift?: number;
   verdict: RestoreVerdict;
 }
 
@@ -51,11 +93,15 @@ export interface RestoreCheckResult {
   scratchDatabase: string;
   dump: BackupDump;
   dumpAgeHours: number;
-  /** The dump is older than `STALE_DUMP_HOURS`. Informational. */
+  /** The dump is older than `STALE_DUMP_HOURS`; on its own enough to exit 1. */
   dumpStale: boolean;
+  /** Exact matching was asked for, so no table was allowed to drift. */
+  strict: boolean;
   /** One row per table, `hf_*` or carrying `normalized_name`, sorted by name. */
   rows: readonly RestoreCheckRow[];
-  /** Every row's verdict is `ok`. The command's exit code is `ok ? 0 : 1`. */
+  /** Every row's verdict is `ok`, drift included. What `lastRestoreCheckAt` is written on. */
+  matched: boolean;
+  /** `matched` and the dump is not stale. The command's exit code is `ok ? 0 : 1`. */
   ok: boolean;
 }
 
@@ -92,6 +138,8 @@ export interface RestoreCheckOptions {
   restoreAdminUrl?: string;
   /** The `pg_restore` binary inside the container. */
   pgRestorePath?: string;
+  /** Compare every table exactly, `APPEND_ONLY_TABLES` included. */
+  strict?: boolean;
   now?: Date;
 }
 
@@ -165,22 +213,31 @@ export async function restoreCheck(options: RestoreCheckOptions): Promise<Restor
           `GRANT CREATE, USAGE ON SCHEMA public TO ${quoteIdent(names.migratorRole)}`,
         );
         await runRestore(options, scratchDatabase, names.migratorRole, dump.path);
-        rows = compare(await countTables(db, names.databaseName), await countTables(scratch));
+        rows = compare(
+          await countTables(db, names.databaseName),
+          await countTables(scratch),
+          options.strict ?? false,
+        );
       } finally {
         await scratch.close();
       }
 
-      const ok = rows.every((row) => row.verdict === "ok");
-      if (ok) await options.state.patch({ lastRestoreCheckAt: now.toISOString() });
+      const dumpStale = dumpAgeHours > STALE_DUMP_HOURS;
+      const matched = rows.every((row) => row.verdict === "ok");
+      // A stale dump keeps the exit code but not the timestamp: the restore itself was proved,
+      // and it is `hf doctor` that decides how long a proof stays good.
+      if (matched) await options.state.patch({ lastRestoreCheckAt: now.toISOString() });
 
       return {
         databaseName: names.databaseName,
         scratchDatabase,
         dump,
         dumpAgeHours,
-        dumpStale: dumpAgeHours > STALE_DUMP_HOURS,
+        dumpStale,
+        strict: options.strict ?? false,
         rows,
-        ok,
+        matched,
+        ok: matched && !dumpStale,
       };
     } finally {
       await db.query(`DROP DATABASE IF EXISTS ${quoteIdent(scratchDatabase)} WITH (FORCE)`);
@@ -326,27 +383,41 @@ async function countTables(db: Database, database?: string): Promise<Map<string,
  * A table on one side only is its own verdict rather than a crash or a zero: an app migration
  * between the backup and the check is the ordinary reason for it, and reading it as a count of
  * zero would make an added table look like lost data.
+ *
+ * An `APPEND_ONLY_TABLES` table the live side is *ahead* on is `ok` with a `drift`, unless
+ * `strict`. A restored count above the live one is still a `mismatch` there: the dump cannot
+ * hold rows an append-only live table has since lost unless something did lose them.
  */
 function compare(
   live: Map<string, number>,
   restored: Map<string, number>,
+  strict: boolean,
 ): readonly RestoreCheckRow[] {
   const tables = [...new Set([...live.keys(), ...restored.keys()])].sort();
   return tables.map((table) => {
     const liveCount = live.get(table);
     const restoredCount = restored.get(table);
+    const drifted =
+      !strict &&
+      APPEND_ONLY.has(table) &&
+      liveCount !== undefined &&
+      restoredCount !== undefined &&
+      restoredCount < liveCount;
     const verdict: RestoreVerdict =
       liveCount === undefined
         ? "restored only"
         : restoredCount === undefined
           ? "live only"
-          : liveCount === restoredCount
+          : liveCount === restoredCount || drifted
             ? "ok"
             : "mismatch";
     return {
       table,
       ...(liveCount === undefined ? {} : { live: liveCount }),
       ...(restoredCount === undefined ? {} : { restored: restoredCount }),
+      ...(drifted && liveCount !== undefined && restoredCount !== undefined
+        ? { drift: liveCount - restoredCount }
+        : {}),
       verdict,
     };
   });
@@ -355,9 +426,14 @@ function compare(
 /** The table `hf restore-check` prints, and the two lines around it. */
 export function formatRestoreCheck(result: RestoreCheckResult): string[] {
   const age = `${result.dumpAgeHours.toFixed(1)} h old`;
-  const lines = [`${result.databaseName}: ${result.dump.path}, ${age}`];
+  const lines = [
+    `${result.databaseName}: ${result.dump.path}, ${age}${result.strict ? ", strict" : ""}`,
+  ];
   if (result.dumpStale) {
-    lines.push(`WARNING: the dump is ${age} — over ${String(STALE_DUMP_HOURS)} h`);
+    lines.push(
+      `WARN: the dump is ${age} — over ${String(STALE_DUMP_HOURS)} h; ` +
+        "this compares against stale data",
+    );
   }
 
   const header = ["table", "live", "restored", "verdict"] as const;
@@ -365,7 +441,7 @@ export function formatRestoreCheck(result: RestoreCheckResult): string[] {
     row.table,
     row.live === undefined ? "—" : String(row.live),
     row.restored === undefined ? "—" : String(row.restored),
-    row.verdict,
+    row.drift === undefined ? row.verdict : `${row.verdict} (drift +${String(row.drift)})`,
   ]);
   const widths = header.map((name, column) =>
     Math.max(name.length, ...cells.map((row) => row[column]?.length ?? 0)),
@@ -375,11 +451,13 @@ export function formatRestoreCheck(result: RestoreCheckResult): string[] {
 
   lines.push(line(header), ...cells.map(line));
 
-  const mismatched = result.rows.filter((row) => row.verdict !== "ok").length;
+  const drifted = result.rows.filter((row) => row.drift !== undefined).length;
+  const failed = result.rows.filter((row) => row.verdict !== "ok").length;
+  const drift = drifted === 0 ? "" : `, ${String(drifted)} with drift since the dump`;
   lines.push(
-    result.ok
-      ? `${String(result.rows.length)} table(s) matched`
-      : `${String(mismatched)} of ${String(result.rows.length)} table(s) did not match`,
+    result.matched
+      ? `${String(result.rows.length)} table(s) matched${drift}`
+      : `${String(failed)} of ${String(result.rows.length)} table(s) did not match${drift}`,
   );
   return lines;
 }
@@ -390,6 +468,8 @@ export interface RestoreCheckAppOptions {
   backupDir?: string;
   /** Read the dump from Hetzner object storage instead. Not implemented; see `backup-source`. */
   fromS3?: boolean;
+  /** Compare every table exactly, `APPEND_ONLY_TABLES` included. */
+  strict?: boolean;
   env?: NodeJS.ProcessEnv;
 }
 
@@ -424,6 +504,7 @@ export async function restoreCheckApp(
       database: db,
       container: await restoreContainer(runner, db, containers),
       adminUser: admin.user,
+      strict: options.strict,
     });
   } finally {
     await db.close();

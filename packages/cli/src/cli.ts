@@ -85,9 +85,12 @@ export const USAGE = `hf — the hyperfixation CLI
       --compose-only          bring the infrastructure up and stop
 
   hf restore-check <name>   restore the newest hf_<name> dump beside the live database and
-                            compare row counts; exits 1 on any mismatch
+                            compare row counts. An append-only table the live side has moved
+                            on from reads ok (drift +N); exits 1 on any mismatch, and on a
+                            dump older than 24 h
       --backup-dir <dir>      where the dumps are (default: Coolify's on the box)
       --from-s3               read the dump from object storage (not implemented)
+      --strict                compare every table exactly; no table may drift
 
   hf version                the @hyperfixation/cli version behind this hf, also as --version, -v
 
@@ -404,6 +407,7 @@ async function commandRestoreCheck(argv: readonly string[], io: Io): Promise<num
     options: {
       "backup-dir": { type: "string" },
       "from-s3": { type: "boolean", default: false },
+      strict: { type: "boolean", default: false },
     },
     allowPositionals: true,
   });
@@ -418,6 +422,7 @@ async function commandRestoreCheck(argv: readonly string[], io: Io): Promise<num
     app: name,
     backupDir: values["backup-dir"],
     fromS3: values["from-s3"],
+    strict: values.strict,
   });
   for (const line of formatRestoreCheck(result)) io.out(line);
   return result.ok ? 0 : 1;
