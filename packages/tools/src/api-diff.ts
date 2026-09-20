@@ -256,7 +256,10 @@ export function apiChanges(pair: ReportPair): Change[] {
           member: key,
           kind: "removed",
         });
-      } else if (replacement.signature !== member.signature) {
+      } else if (
+        replacement.signature !== member.signature &&
+        !onlyAddsOptionalParameters(member.signature, replacement.signature)
+      ) {
         changes.push({
           package: pair.package,
           file: pair.file,
@@ -268,6 +271,72 @@ export function apiChanges(pair: ReportPair): Change[] {
     }
   }
   return changes;
+}
+
+/**
+ * True when `after` is `before` with optional parameters appended and nothing else touched.
+ *
+ * "Adding one is not [breaking]" covers a trailing optional parameter: every existing call still
+ * compiles, and so does every existing implementation of the member, which may ignore it. Only a
+ * literal prefix counts — a parameter inserted, renamed, retyped or made required lands outside
+ * this and is reported.
+ */
+export function onlyAddsOptionalParameters(before: string, after: string): boolean {
+  const split = (
+    signature: string,
+  ): { head: string; params: string[]; tail: string } | undefined => {
+    const span = parameterSpan(signature);
+    if (span === undefined) return undefined;
+    const [open, close] = span;
+    const inner = signature.slice(open + 1, close).trim();
+    const commas = topLevel(inner, ",");
+    const params: string[] = [];
+    let from = 0;
+    for (const at of commas) {
+      params.push(inner.slice(from, at).trim());
+      from = at + 1;
+    }
+    const last = inner.slice(from).trim();
+    if (last !== "" || params.length > 0) params.push(last);
+    return {
+      head: signature.slice(0, open),
+      params: params.filter((param) => param !== ""),
+      tail: signature.slice(close + 1),
+    };
+  };
+
+  const one = split(before);
+  const two = split(after);
+  if (one === undefined || two === undefined) return false;
+  if (one.head !== two.head || one.tail !== two.tail) return false;
+  if (two.params.length <= one.params.length) return false;
+  if (one.params.some((param, index) => param !== two.params[index])) return false;
+  return two.params
+    .slice(one.params.length)
+    .every((param) => /^\.\.\./.test(param) || /^[A-Za-z_$][\w$]*\?\s*:/.test(param));
+}
+
+/** The first parameter list's `(` and its matching `)`, or nothing when there is none. */
+function parameterSpan(text: string): [number, number] | undefined {
+  let open: number | undefined;
+  let depth = 0;
+  let quote = "";
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i] ?? "";
+    if (quote !== "") {
+      if (char === quote && text[i - 1] !== "\\") quote = "";
+      continue;
+    }
+    if (char === '"' || char === "'" || char === "`") quote = char;
+    else if ("([{".includes(char)) {
+      if (char === "(" && depth === 0) open = i;
+      depth += 1;
+    } else if (")]}".includes(char)) {
+      depth -= 1;
+      if (char === ")" && depth === 0 && open !== undefined) return [open, i];
+    }
+  }
+  return undefined;
 }
 
 // --- versions ----------------------------------------------------------------------------

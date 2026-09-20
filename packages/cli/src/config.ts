@@ -18,6 +18,15 @@ export const CONFIG_KEYS = [
   // names the container after the database's uuid, so `HF_COOLIFY_POSTGRES_UUID` is the default a
   // caller falls back to, and this is how a box that disagrees is told to us rather than guessed.
   "HF_DB_HOST_INTERNAL",
+  // The Postgres container's name on the box, which is what `docker inspect` is asked about when
+  // the box's loopback has no 5432 listener. Coolify names it for the bare uuid or
+  // `postgresql-<uuid>` depending on how the database was created, so `postgresContainers()`
+  // derives both from `HF_COOLIFY_POSTGRES_UUID` and this replaces the pair.
+  "HF_DB_CONTAINER",
+  // The cluster superuser to log in as. Coolify creates the cluster with its own `POSTGRES_USER`,
+  // and on the X1 box that role is not `postgres` — `psql -U postgres` there fails with
+  // `role "postgres" does not exist`. The password stays in `PGPASSWORD`, never in this file.
+  "HF_PG_ADMIN_USER",
   "HF_SSH_HOST",
   "HF_CLOUDFLARE_TOKEN",
   "HF_CLOUDFLARE_ZONE_ID",
@@ -153,6 +162,29 @@ export function requireOperatorConfig<Key extends ConfigKey>(
     throw new MissingConfig(missing, options.file ?? configFile(options.env));
   }
   return required;
+}
+
+/** What `HF_PG_ADMIN_USER` defaults to: the role a stock Postgres image creates. */
+export const DEFAULT_PG_ADMIN_USER = "postgres";
+
+/** The cluster superuser to log in as — Coolify's `POSTGRES_USER`, which need not be `postgres`. */
+export function pgAdminUser(config: OperatorConfig): string {
+  const user = config.HF_PG_ADMIN_USER;
+  return user === undefined || user === "" ? DEFAULT_PG_ADMIN_USER : user;
+}
+
+/**
+ * What Coolify may have called the Postgres container on the box, in the order to try them.
+ *
+ * A standalone Postgres resource runs in a container named for the bare uuid; a database attached
+ * to a service gets `postgresql-<uuid>`. Both are asked about rather than one being guessed at,
+ * and `HF_DB_CONTAINER` replaces the pair outright. Empty when neither key is set.
+ */
+export function postgresContainers(config: OperatorConfig): readonly string[] {
+  const override = config.HF_DB_CONTAINER;
+  if (override !== undefined && override !== "") return [override];
+  const uuid = config.HF_COOLIFY_POSTGRES_UUID;
+  return uuid === undefined || uuid === "" ? [] : [uuid, `postgresql-${uuid}`];
 }
 
 /**

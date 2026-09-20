@@ -428,6 +428,13 @@ its evidence line pasted here.
 > name, the Postgres hostname and loopback port, `SOURCE_COMMIT` under Coolify, and where backups live. Re-vendor
 > Coolify's OpenAPI from the box's own version before running.
 
+> **Finding (pre-flight, 2026-09-20): Coolify publishes no port for its Postgres**, so the box's `127.0.0.1:5432` was
+> never a listener and every tunnel command failed at the first query. The container is reachable from the box host at
+> its address on the `coolify` docker network, and publishing the port would bind all interfaces, so the tunnel now asks
+> `docker inspect` for that address and forwards to it with the box as the hop; the loopback stays as a fast path.
+> Container naming is Coolify's own and depends on how the database was created — the bare uuid for a standalone
+> resource, `postgresql-<uuid>` for a service's — so both are tried, with `HF_DB_CONTAINER` to override.
+
 ---
 
 ## Parallelism

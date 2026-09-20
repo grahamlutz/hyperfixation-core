@@ -78,7 +78,7 @@ function containerRunner(): LocalRunner {
     },
     exec: async (command, options) =>
       await local.exec(["docker", "exec", "-i", container, ...command], options),
-    tunnel: async (remotePort) => await local.tunnel(remotePort),
+    tunnel: async (remotePort, remoteHost) => await local.tunnel(remotePort, remoteHost),
   };
 }
 

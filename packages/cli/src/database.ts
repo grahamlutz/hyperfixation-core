@@ -1,5 +1,6 @@
+import { isIPv4 } from "node:net";
 import { Client } from "pg";
-import type { Runner, Tunnel } from "./runner.js";
+import { shellQuote, TUNNEL_LOOPBACK, type Runner, type Tunnel } from "./runner.js";
 
 /** Rows as strings, the one shape both transports can produce without inventing types. */
 export interface QueryResult {
@@ -18,13 +19,19 @@ export type DatabaseTransport = "tunnel" | "docker-exec";
  *
  * `tunnel` is the default, and the only transport that can carry the whole of E2: it hands out
  * a libpq URL, which is what `provisionRoles()` — a `pg` client, in `@hyperfixation/db` — takes.
- * `docker-exec` exists because Phase 0 never confirmed that the Coolify Postgres container
- * publishes 5432 on the box's loopback; it runs the same SQL through `psql` inside the
- * container, so `CREATE DATABASE`, the extensions and a password rotation all work, but there
- * is no address for a client library to dial and `adminUrl` is `undefined`.
+ * Its far end is the box's loopback where the port is published and the container's own address
+ * on the docker network where it is not. `docker-exec` is the last resort: it runs the same SQL
+ * through `psql` inside the container, so `CREATE DATABASE`, the extensions and a password
+ * rotation all work, but there is no address for a client library to dial and `adminUrl` is
+ * `undefined`.
  */
 export interface Database {
   readonly kind: DatabaseTransport;
+  /**
+   * Where the **box** reaches this cluster, for anything that runs there rather than here —
+   * `pg_restore`, in E7. `undefined` when the transport has no address at all.
+   */
+  readonly boxAddress?: { host: string; port: number };
   /** A libpq URL onto `databaseName`, or `undefined` when the transport has no address. */
   adminUrl(databaseName?: string): string | undefined;
   query(sql: string, options?: QueryOptions): Promise<QueryResult>;
@@ -66,21 +73,54 @@ export interface AdminCredentials {
 
 export interface OpenDatabaseOptions {
   admin: AdminCredentials;
-  /** Where Postgres listens on the box's loopback. */
+  /** The port Postgres listens on, wherever it is reached. */
   remotePort?: number;
-  /** The Coolify Postgres container, for the `docker-exec` fallback. Omit to have none. */
+  /**
+   * What the Coolify Postgres container may be called, in the order to try them; Coolify's own
+   * naming depends on how the database was created. The address of the first one that exists is
+   * what the tunnel forwards to when the box's loopback has no listener, and `dockerExec` runs
+   * `psql` inside it. Omit to have neither, and the loopback is then the only route.
+   */
+  containers?: readonly string[];
+  /**
+   * One container, appended to `containers`.
+   *
+   * @deprecated Coolify's naming depends on how the database was created, so a caller that knows
+   * only the uuid has two names to try; pass `containers`. Removed in 0.2.0.
+   */
   container?: string;
+  /** Last resort when no address carries a query: `psql` inside the container. Default false. */
+  dockerExec?: boolean;
 }
 
 export const DEFAULT_POSTGRES_PORT = 5432;
 const DEFAULT_ADMIN_DATABASE = "postgres";
 
 /**
- * Opens the cluster over `runner`, preferring the tunnel and falling back to `docker exec`.
+ * Docker's network→IP map for one container, as whitespace-separated `network=ip` pairs.
  *
- * The probe is a real `SELECT 1` rather than a port check: an `ssh -L` forward accepts locally
- * and only then discovers that nothing is listening on the far side, so a forward to an
- * unpublished port looks healthy until the first query.
+ * A Go template rather than `--format json` and a parse: the output is one flat line, so nothing
+ * about it depends on which docker version the box has.
+ */
+const DOCKER_NETWORKS_FORMAT =
+  "{{range $k,$v := .NetworkSettings.Networks}}{{$k}}={{$v.IPAddress}} {{end}}";
+
+/** The network Coolify attaches its services to, and the one the box host can route to. */
+const COOLIFY_NETWORK = "coolify";
+
+/**
+ * Opens the cluster over `runner`: the box's loopback, else the container, else `docker exec`.
+ *
+ * Coolify publishes nothing for its Postgres — `docker inspect` reports `{"5432/tcp": null}`, so
+ * the box's `127.0.0.1:5432` is not a listener and forwarding to it can never work. The
+ * container's address on the `coolify` network is the route in: the box host routes to it, and
+ * `ssh -L localPort:<containerIP>:5432` makes the box the hop. Publishing the port would bind
+ * every interface, which is not a trade worth making for a forward that already works.
+ *
+ * The loopback is still tried first and costs one `ssh` when it fails, because some setups do
+ * publish it. Each probe is a real `SELECT 1` rather than a port check: an `ssh -L` forward
+ * accepts locally and only then discovers that nothing is listening on the far side, so a forward
+ * to an unpublished port looks healthy until the first query.
  */
 export async function openDatabase(
   runner: Runner,
@@ -88,33 +128,129 @@ export async function openDatabase(
 ): Promise<Database> {
   const remotePort = options.remotePort ?? DEFAULT_POSTGRES_PORT;
 
-  let tunnel: Tunnel | undefined;
-  try {
-    tunnel = await runner.tunnel(remotePort);
-    const database = tunnelDatabase(adminUrlOf(options.admin, tunnel.localPort), tunnel);
-    await database.query("SELECT 1");
-    return database;
-  } catch (cause) {
-    await tunnel?.close();
-    if (options.container === undefined) {
-      throw new DatabaseTransportError(
-        "tunnel",
-        `could not reach Postgres on 127.0.0.1:${String(remotePort)} on the box, and no ` +
-          "container was named to fall back to",
-        { cause },
-      );
-    }
+  const loopback = await tryTunnel(runner, options.admin, remotePort, TUNNEL_LOOPBACK);
+  if ("database" in loopback) return loopback.database;
+
+  const candidates = [
+    ...(options.containers ?? []),
+    ...(options.container === undefined ? [] : [options.container]),
+  ];
+  if (candidates.length === 0) {
+    throw new DatabaseTransportError(
+      "tunnel",
+      `could not reach Postgres on ${TUNNEL_LOOPBACK}:${String(remotePort)} on the box, and no ` +
+        "container was named to discover an address on the docker network",
+      { cause: loopback.failure },
+    );
   }
 
-  return dockerExecDatabase(runner, options.container, options.admin);
+  const found = await containerAddress(runner, candidates);
+  const direct = await tryTunnel(runner, options.admin, remotePort, found.address);
+  if ("database" in direct) return direct.database;
+
+  if (options.dockerExec !== true) {
+    throw new DatabaseTransportError(
+      "tunnel",
+      `could not reach Postgres on ${TUNNEL_LOOPBACK}:${String(remotePort)} on the box, nor on ` +
+        `${found.address}:${String(remotePort)}, which is where ${found.container} answers on ` +
+        "the docker network",
+      { cause: direct.failure },
+    );
+  }
+  return dockerExecDatabase(runner, found.container, options.admin);
 }
 
 /** The cluster at a URL this process can already dial — a test's Postgres, or a live tunnel. */
 export function openDatabaseUrl(adminUrl: string): Database {
-  return tunnelDatabase(adminUrl, undefined);
+  return tunnelDatabase(adminUrl, undefined, undefined);
 }
 
-function tunnelDatabase(adminUrl: string, tunnel: Tunnel | undefined): Database {
+type TunnelAttempt = { database: Database } | { failure: unknown };
+
+async function tryTunnel(
+  runner: Runner,
+  admin: AdminCredentials,
+  remotePort: number,
+  remoteHost: string,
+): Promise<TunnelAttempt> {
+  let tunnel: Tunnel | undefined;
+  try {
+    tunnel = await runner.tunnel(remotePort, remoteHost);
+    const database = tunnelDatabase(adminUrlOf(admin, tunnel.localPort), tunnel, {
+      host: remoteHost,
+      port: remotePort,
+    });
+    await database.query("SELECT 1");
+    return { database };
+  } catch (failure) {
+    await tunnel?.close();
+    return { failure };
+  }
+}
+
+/**
+ * The first of `containers` that exists, and its own address, asked of the box.
+ *
+ * The `coolify` network by name, because a Coolify service also sits on a per-service network
+ * that only its own stack is on; the first address is the fallback for a box that names its
+ * network something else. Every candidate that failed is reported, because which name a database
+ * got is a fact about how it was created and the operator is the one who knows it.
+ */
+async function containerAddress(
+  runner: Runner,
+  containers: readonly string[],
+): Promise<{ container: string; address: string }> {
+  const problems: string[] = [];
+  for (const container of containers) {
+    const command = ["docker", "inspect", "-f", DOCKER_NETWORKS_FORMAT, container];
+    const result = await runner.exec(command);
+    if (result.code !== 0) {
+      problems.push(
+        `${container}: ${shellQuote(command)} exited ${String(result.code)}: ` +
+          result.stderr.trim(),
+      );
+      continue;
+    }
+
+    const address = coolifyAddress(result.stdout);
+    if (address === undefined) {
+      problems.push(
+        `${container}: no IPv4 address on any docker network, ${shellQuote(command)} printed ` +
+          JSON.stringify(result.stdout.trim()),
+      );
+      continue;
+    }
+    return { container, address };
+  }
+
+  throw new DatabaseTransportError(
+    "tunnel",
+    `no Postgres container on the box under any name tried (${containers.join(", ")}): ` +
+      problems.join("; "),
+  );
+}
+
+/** The `coolify` network's address in `docker inspect`'s output, else the first one there is. */
+function coolifyAddress(stdout: string): string | undefined {
+  const networks = stdout
+    .split(/\s+/)
+    .filter((pair) => pair.includes("="))
+    .map((pair) => ({
+      network: pair.slice(0, pair.indexOf("=")),
+      address: pair.slice(pair.indexOf("=") + 1),
+    }))
+    // An IPv4 literal and nothing else: this goes into an `ssh -L` field, and a container with no
+    // address on a network reports the key with an empty value.
+    .filter((entry) => isIPv4(entry.address));
+
+  return (networks.find((entry) => entry.network === COOLIFY_NETWORK) ?? networks[0])?.address;
+}
+
+function tunnelDatabase(
+  adminUrl: string,
+  tunnel: Tunnel | undefined,
+  boxAddress: { host: string; port: number } | undefined,
+): Database {
   const clients = new Map<string, Client>();
 
   const clientFor = async (databaseName: string | undefined): Promise<Client> => {
@@ -129,6 +265,7 @@ function tunnelDatabase(adminUrl: string, tunnel: Tunnel | undefined): Database 
 
   return {
     kind: "tunnel",
+    boxAddress,
     adminUrl: (databaseName) => withDatabase(adminUrl, databaseName),
     query: async (sql, queryOptions) => {
       const client = await clientFor(queryOptions?.database);

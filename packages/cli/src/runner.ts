@@ -28,8 +28,13 @@ export interface Tunnel {
  */
 export interface Runner {
   exec(command: readonly string[], options?: ExecOptions): Promise<ExecResult>;
-  /** Forwards a local port to `127.0.0.1:<remotePort>` on the far side. */
-  tunnel(remotePort: number): Promise<Tunnel>;
+  /**
+   * Forwards a local port to `<remoteHost>:<remotePort>` as the far side sees it.
+   *
+   * `remoteHost` defaults to the far side's own loopback; it is an address on a network the far
+   * side can route to, which is how a container that publishes nothing is still reachable.
+   */
+  tunnel(remotePort: number, remoteHost?: string): Promise<Tunnel>;
 }
 
 export class RunnerError extends Error {
@@ -73,17 +78,26 @@ export function sshExecArgv(host: string, command: readonly string[]): string[] 
   return ["-T", ...SSH_OPTIONS, host, shellQuote(command)];
 }
 
-export function sshTunnelArgv(host: string, localPort: number, remotePort: number): string[] {
+export function sshTunnelArgv(
+  host: string,
+  localPort: number,
+  remotePort: number,
+  remoteHost: string = TUNNEL_LOOPBACK,
+): string[] {
   assertHost(host);
+  assertTunnelHost(remoteHost);
   return [
     "-N",
     "-T",
     ...SSH_OPTIONS,
     "-L",
-    `${String(localPort)}:127.0.0.1:${String(remotePort)}`,
+    `${String(localPort)}:${remoteHost}:${String(remotePort)}`,
     host,
   ];
 }
+
+/** Where a forward lands when the caller names no host: the far side's own loopback. */
+export const TUNNEL_LOOPBACK = "127.0.0.1";
 
 /** Single-quotes one word for a POSIX remote shell. */
 export function shellQuote(command: readonly string[]): string {
@@ -110,9 +124,9 @@ export function createSshRunner(options: SshRunnerOptions): Runner {
     exec: async (command, execOptions) =>
       await spawnCollecting(ssh, sshExecArgv(options.host, command), execOptions),
 
-    tunnel: async (remotePort) => {
+    tunnel: async (remotePort, remoteHost = TUNNEL_LOOPBACK) => {
       const localPort = await freeLocalPort();
-      const child = spawn(ssh, sshTunnelArgv(options.host, localPort, remotePort), {
+      const child = spawn(ssh, sshTunnelArgv(options.host, localPort, remotePort, remoteHost), {
         stdio: ["ignore", "ignore", "pipe"],
       });
 
@@ -132,7 +146,7 @@ export function createSshRunner(options: SshRunnerOptions): Runner {
         child.kill("SIGTERM");
         await exited;
         throw new RunnerError(
-          `ssh -L ${String(localPort)}:127.0.0.1:${String(remotePort)} never became ready` +
+          `ssh -L ${String(localPort)}:${remoteHost}:${String(remotePort)} never became ready` +
             (stderr === "" ? "" : `: ${stderr.trim()}`),
           { cause },
         );
@@ -280,6 +294,23 @@ async function canConnect(port: number): Promise<boolean> {
     socket.once("timeout", () => done(false));
   });
 }
+
+/**
+ * The far-side end of a `-L` forward, which is a bare address or hostname and nothing else.
+ *
+ * It arrives from `docker inspect` on the box rather than from the operator, and `-L` takes its
+ * three fields colon-separated, so a value carrying a colon or a space would silently become a
+ * different forward than the one asked for.
+ */
+function assertTunnelHost(remoteHost: string): void {
+  if (!TUNNEL_HOST.test(remoteHost)) {
+    throw new RunnerError(
+      `a tunnel's remote host must match ${TUNNEL_HOST.source}, got ${JSON.stringify(remoteHost)}`,
+    );
+  }
+}
+
+const TUNNEL_HOST = /^[A-Za-z0-9._-]+$/;
 
 function assertHost(host: string): void {
   if (!SSH_HOST.test(host)) {

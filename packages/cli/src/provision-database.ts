@@ -80,8 +80,8 @@ export async function provisionDatabase(
   if (adminUrl === undefined) {
     throw new ProvisionDatabaseError(
       `roles cannot be provisioned over the ${db.kind} transport: provisionRoles() is a pg ` +
-        "client and needs an address. Publish the Coolify Postgres port on the box's loopback " +
-        "so the tunnel works.",
+        "client and needs an address. Name the Postgres container — HF_DB_CONTAINER, or " +
+        "HF_COOLIFY_POSTGRES_UUID — so the tunnel can discover one.",
     );
   }
 

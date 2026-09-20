@@ -5,7 +5,12 @@ import {
   type BackupDump,
   type BackupSource,
 } from "./backup-source.js";
-import { loadOperatorConfig, requireOperatorConfig } from "./config.js";
+import {
+  loadOperatorConfig,
+  pgAdminUser,
+  postgresContainers,
+  requireOperatorConfig,
+} from "./config.js";
 import {
   openDatabase,
   openDatabaseUrl,
@@ -28,8 +33,6 @@ const MAX_IDENTIFIER_BYTES = 63;
 /** Older than this and the dump gets a warning line; it never changes the exit code. */
 export const STALE_DUMP_HOURS = 36;
 
-/** The box's Coolify Postgres superuser — the role the whole check runs as. */
-const CLUSTER_ADMIN_USER = "postgres";
 const CLUSTER_ADMIN_DATABASE = "postgres";
 
 export type RestoreVerdict = "ok" | "mismatch" | "live only" | "restored only";
@@ -122,7 +125,8 @@ export async function restoreCheck(options: RestoreCheckOptions): Promise<Restor
   if (clusterUrl === undefined) {
     throw new RestoreCheckError(
       `a restore cannot be run over the ${db.kind} transport: pg_restore needs an address. ` +
-        "Publish the Coolify Postgres port on the box's loopback so the tunnel works.",
+        "Name the Postgres container — HF_DB_CONTAINER, or HF_COOLIFY_POSTGRES_UUID — so the " +
+        "tunnel can discover one.",
     );
   }
   const restoreTarget = urlOnto(options.restoreAdminUrl ?? clusterUrl, scratchDatabase);
@@ -349,8 +353,8 @@ export async function restoreCheckApp(
   const { HF_SSH_HOST } = requireOperatorConfig(config, ["HF_SSH_HOST"], { env });
 
   const runner = createSshRunner({ host: HF_SSH_HOST });
-  const admin: AdminCredentials = { user: CLUSTER_ADMIN_USER, password: env.PGPASSWORD };
-  const db = await openDatabase(runner, { admin });
+  const admin: AdminCredentials = { user: pgAdminUser(config), password: env.PGPASSWORD };
+  const db = await openDatabase(runner, { admin, containers: postgresContainers(config) });
 
   try {
     return await restoreCheck({
@@ -362,17 +366,26 @@ export async function restoreCheckApp(
           : createLocalDirectoryBackupSource({ runner, directory: options.backupDir }),
       runner,
       database: db,
-      restoreAdminUrl: boxAdminUrl(admin),
+      restoreAdminUrl: boxAdminUrl(admin, db.boxAddress),
     });
   } finally {
     await db.close();
   }
 }
 
-/** The cluster as the box itself sees it, where `pg_restore` runs. */
-function boxAdminUrl(admin: AdminCredentials): string {
-  const url = new URL("postgresql://127.0.0.1");
-  url.port = String(DEFAULT_POSTGRES_PORT);
+/**
+ * The cluster as the box itself sees it, where `pg_restore` runs.
+ *
+ * `address` is whatever the tunnel settled on: with 5432 unpublished the box's loopback is no more
+ * a listener for `pg_restore` than for the forward, and the container's address on the docker
+ * network is what both have to dial.
+ */
+function boxAdminUrl(
+  admin: AdminCredentials,
+  address: { host: string; port: number } | undefined,
+): string {
+  const url = new URL(`postgresql://${address?.host ?? "127.0.0.1"}`);
+  url.port = String(address?.port ?? DEFAULT_POSTGRES_PORT);
   url.username = encodeURIComponent(admin.user);
   if (admin.password !== undefined) url.password = encodeURIComponent(admin.password);
   url.pathname = `/${CLUSTER_ADMIN_DATABASE}`;
