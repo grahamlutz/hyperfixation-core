@@ -101,6 +101,49 @@ describe("the cloud langfuse step", () => {
     expect(harness.requests[2]!.pathname).toBe("/api/public/projects/lp2/apiKeys");
   });
 
+  it("reuses the operator's project key pair without asking Langfuse anything", async () => {
+    const ctx = createStepContext({
+      dir: path.join(workspace, APP),
+      state,
+      config: {
+        HF_LANGFUSE_URL: LANGFUSE,
+        HF_LANGFUSE_PUBLIC_KEY: "pk-lf-existing",
+        HF_LANGFUSE_SECRET_KEY: SECRET_KEY,
+      },
+    });
+
+    await runSteps([langfuseStep], ctx);
+
+    expect(harness.requests).toEqual([]);
+    expect(state.isDone("langfuse")).toBe(true);
+    expect(state.state.langfuse).toEqual({
+      publicKey: "pk-lf-existing",
+      secretKey: SECRET_KEY,
+    });
+    expect(ctx.lines.join("\n")).toContain("pk-lf-existing");
+    expect(ctx.lines.join("\n")).toContain("traces into that one project");
+    expect(ctx.lines.join("\n")).not.toContain(SECRET_KEY);
+    expect(ctx.checklist).toEqual([]);
+  });
+
+  it("warns and leaves a checklist line when neither the org key nor a pair is set", async () => {
+    const ctx = createStepContext({
+      dir: path.join(workspace, APP),
+      state,
+      config: { HF_LANGFUSE_URL: LANGFUSE },
+    });
+
+    await runSteps([langfuseStep], ctx);
+
+    expect(harness.requests).toEqual([]);
+    expect(state.isDone("langfuse")).toBe(true);
+    expect(state.state.langfuse).toBeUndefined();
+    expect(ctx.lines.join("\n")).toContain("WARNING:");
+    expect(ctx.checklist).toHaveLength(1);
+    expect(ctx.checklist[0]).toContain("Langfuse tracing is not configured");
+    expect(ctx.checklist[0]).toContain("LANGFUSE_SECRET_KEY");
+  });
+
   it("records no key when the key create fails, and the rerun starts with the lookup", async () => {
     harness.server.use(
       harness.handler({

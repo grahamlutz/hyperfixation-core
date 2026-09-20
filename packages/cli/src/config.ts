@@ -30,7 +30,14 @@ export const CONFIG_KEYS = [
   "HF_SENTRY_TOKEN",
   "HF_SENTRY_ORG",
   "HF_LANGFUSE_URL",
+  // Optional, and all three are: an organization-scoped key pair creates the app its own project,
+  // but it is a paid-plan feature, so a Hobby account instead names an existing project's key pair
+  // here and every app it provisions traces into that one project. With none of them set the
+  // langfuse step records nothing and the three LANGFUSE_* variables are omitted rather than sent
+  // empty — an empty value in Coolify's UI reads as configured.
   "HF_LANGFUSE_ORG_KEY",
+  "HF_LANGFUSE_PUBLIC_KEY",
+  "HF_LANGFUSE_SECRET_KEY",
   "HF_BOX_IP",
   "HF_SMTP_URL",
   "HF_EMAIL_FROM",

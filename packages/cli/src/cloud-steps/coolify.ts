@@ -35,6 +35,19 @@ export const CONTAINER_PROVIDED_ENV = ["HF_PROCESS", "HF_BUILD_SHA"] as const;
  */
 export const OPTIONAL_PROVIDER_ENV = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"] as const;
 
+/**
+ * The three `hf new` omits when the `langfuse` step provisioned no keys.
+ *
+ * All three or none: the template's gate — `instrumentation.ts` in the web, `startWorker()` in the
+ * worker — registers the span processor only when none of them is empty, so a base URL on its own
+ * configures nothing and only reads as though it did.
+ */
+export const OPTIONAL_LANGFUSE_ENV = [
+  "LANGFUSE_BASE_URL",
+  "LANGFUSE_PUBLIC_KEY",
+  "LANGFUSE_SECRET_KEY",
+] as const;
+
 /** Which operator key carries each of them, in `REQUIRED_ENV` order. */
 const PROVIDER_ENV_SOURCE: readonly (readonly [string, ConfigKey])[] = [
   ["ANTHROPIC_API_KEY", "HF_ANTHROPIC_API_KEY"],
@@ -107,13 +120,14 @@ export async function neededEnvNames(dir: string): Promise<string[]> {
 /**
  * Refuses to PATCH an environment that is not the one the compose file needs.
  *
- * A provider key the operator has not configured is deliberately absent rather than missing, so it
- * is excused here and reported in the checklist instead.
+ * A provider key the operator has not configured, and the three Langfuse variables when the step
+ * provisioned no keys, are deliberately absent rather than missing: each is excused here and
+ * reported in the checklist instead.
  */
 export async function assertEnvsMatchCompose(dir: string, sent: readonly string[]): Promise<void> {
   const needed = await neededEnvNames(dir);
   const sentNames = new Set(sent);
-  const optional = new Set<string>(OPTIONAL_PROVIDER_ENV);
+  const optional = new Set<string>([...OPTIONAL_PROVIDER_ENV, ...OPTIONAL_LANGFUSE_ENV]);
 
   const missing = needed.filter((name) => !sentNames.has(name) && !optional.has(name));
   const extra = sent.filter((name) => !needed.includes(name));
@@ -121,7 +135,8 @@ export async function assertEnvsMatchCompose(dir: string, sent: readonly string[
 }
 
 /**
- * The twelve variables the deployed app runs on, or ten when no provider key is configured.
+ * The twelve variables the deployed app runs on, less any of the five optional ones — the two
+ * provider keys and the three Langfuse variables — that nothing provisioned.
  *
  * Generates `BETTER_AUTH_SECRET` on first sight and records it: it is the one value in the list
  * that no provider hands back, so a run that did not persist it would lock every existing session
@@ -162,10 +177,17 @@ export async function buildAppEnvs(context: CloudStepContext): Promise<CoolifyEn
     { key: "SMTP_URL", value: config.HF_SMTP_URL },
     { key: "EMAIL_FROM", value: config.HF_EMAIL_FROM },
     { key: "SENTRY_DSN", value: context.state.state.sentryDsn ?? "" },
-    { key: "LANGFUSE_BASE_URL", value: config.HF_LANGFUSE_URL },
-    { key: "LANGFUSE_PUBLIC_KEY", value: langfuse.publicKey ?? "" },
-    { key: "LANGFUSE_SECRET_KEY", value: langfuse.secretKey ?? "" },
   ];
+
+  // Omitted outright when the langfuse step reused nothing and created nothing: an empty trio
+  // would deploy the same telemetry — none — while reading as configured in Coolify's UI.
+  if (langfuse.publicKey !== undefined && langfuse.secretKey !== undefined) {
+    envs.push(
+      { key: "LANGFUSE_BASE_URL", value: config.HF_LANGFUSE_URL },
+      { key: "LANGFUSE_PUBLIC_KEY", value: langfuse.publicKey },
+      { key: "LANGFUSE_SECRET_KEY", value: langfuse.secretKey },
+    );
+  }
 
   for (const [key, value] of providerKeys(context.config)) envs.push({ key, value });
   return envs;

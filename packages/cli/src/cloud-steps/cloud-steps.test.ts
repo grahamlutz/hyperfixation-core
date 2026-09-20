@@ -379,8 +379,16 @@ async function fixture(options: {
   };
 }
 
-/** Marks steps 1-7 done and records what the later ones read out of the state. */
-async function seedUpstream(state: AppStateStore, name: string): Promise<void> {
+/**
+ * Marks steps 1-7 done and records what the later ones read out of the state.
+ *
+ * `langfuse: false` is the Hobby-plan shape: the step ran, recorded itself and provisioned no key.
+ */
+async function seedUpstream(
+  state: AppStateStore,
+  name: string,
+  options: { langfuse?: boolean } = {},
+): Promise<void> {
   const upstream: StepName[] = [
     "template",
     "install",
@@ -394,7 +402,9 @@ async function seedUpstream(state: AppStateStore, name: string): Promise<void> {
   await state.patch({
     repo: `${OWNER}/${name}`,
     sentryDsn: DSN,
-    langfuse: { publicKey: "pk-lf-1", secretKey: "sk-lf-1" },
+    ...(options.langfuse === false
+      ? {}
+      : { langfuse: { publicKey: "pk-lf-1", secretKey: "sk-lf-1" } }),
   });
 }
 
@@ -854,6 +864,26 @@ describe("the coolify and deploy steps on their own", () => {
 
       expect(envBody().map((env) => env.key)).toEqual(
         EXPECTED_ENV_KEYS.filter((key) => !key.endsWith("_API_KEY")),
+      );
+    } finally {
+      await run.close();
+    }
+  }, 60_000);
+
+  it("omits all three Langfuse variables when the step provisioned no keys", async () => {
+    const config = { ...CONFIG };
+    delete config.HF_LANGFUSE_ORG_KEY;
+
+    const state = await openAppState(name, { dir: stateDir });
+    await seedUpstream(state, name, { langfuse: false });
+    const run = await fixture({ name, state, workspace, config, committed: true });
+
+    try {
+      await runSteps(CLOUD_STEPS, run.context);
+
+      // Absent, not empty — and the drift assertion excuses them rather than refusing the PATCH.
+      expect(envBody().map((env) => env.key)).toEqual(
+        EXPECTED_ENV_KEYS.filter((key) => !key.startsWith("LANGFUSE_")),
       );
     } finally {
       await run.close();

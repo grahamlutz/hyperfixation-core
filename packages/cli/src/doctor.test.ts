@@ -167,6 +167,16 @@ describe("hf doctor", () => {
     expect(findingOf(lines, "core-bump")).toContain("no open core-bump pull request");
   });
 
+  it("says OK on an app whose state holds no Langfuse keys at all", async () => {
+    const dir = await stateDirWith(stateOf({ langfuse: undefined }));
+    harness.server.use(statusHandler(statusReport()));
+
+    const result = await doctor(options(dir, { name: APP }));
+
+    expect(result.ok).toBe(true);
+    expect(doctorLines(result).slice(1).every((line) => line.startsWith("  OK  "))).toBe(true);
+  });
+
   it("sends the read token from state as the bearer, and nothing else", async () => {
     const dir = await stateDirWith();
     const authorization: (string | null)[] = [];
