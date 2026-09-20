@@ -13,6 +13,9 @@
     "api-extractor:update": "turbo run api-extractor:update",
     "test": "turbo run test",
     "template:check": "pnpm --filter @hyperfixation/tools run template-check",
+    "release:publish": "pnpm --filter @hyperfixation/tools run release-publish",
+    "release:rehearse": "pnpm --filter @hyperfixation/tools run release-rehearse",
+    "release:verify": "pnpm --filter @hyperfixation/tools run release-verify",
     "plan:sync": "pnpm --filter @hyperfixation/tools run plan-sync",
     "changeset": "changeset"
   },
