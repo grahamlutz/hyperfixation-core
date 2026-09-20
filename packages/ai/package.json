@@ -1,6 +1,6 @@
 {
   "name": "@hyperfixation/ai",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "license": "MIT",
   "description": "Provider registry, prompt files by content hash, llm.run with the ledger and budget, Langfuse wiring",
   "repository": {

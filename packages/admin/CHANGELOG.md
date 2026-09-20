@@ -1,5 +1,13 @@
 # @hyperfixation/admin
 
+## 0.1.6
+
+### Patch Changes
+
+- @hyperfixation/auth@0.1.6
+  - @hyperfixation/core@0.1.6
+  - @hyperfixation/db@0.1.6
+
 ## 0.1.5
 
 ### Patch Changes
