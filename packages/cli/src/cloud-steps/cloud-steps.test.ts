@@ -116,6 +116,8 @@ interface RouteOptions {
   /** The project's environments; defaults to the `production` one every project starts with. */
   environments?: unknown[];
   applications?: unknown[];
+  /** The database's backup schedules; defaults to none, as a box that has never run `hf new`. */
+  backups?: unknown[];
   langfuseProjects?: unknown[];
   dnsRecords?: unknown[];
   deployment?: { status: string };
@@ -158,7 +160,25 @@ function routes(options: RouteOptions = {}): StubRoute[] {
       json: { total_count: 0, repository_selection: "all", repositories: [] },
     },
     // coolify
+    {
+      spec: "coolify",
+      method: "get",
+      url: `${COOLIFY}/api/v1/s3-storages`,
+      json: [{ uuid: "s3-1", name: "hetzner-backups", bucket: "hf", region: "fsn1", is_usable: true }],
+    },
+    {
+      spec: "coolify",
+      method: "get",
+      url: `${COOLIFY}/api/v1/databases/{uuid}/backups`,
+      json: options.backups ?? [],
+    },
     { spec: "coolify", method: "post", url: `${COOLIFY}/api/v1/databases/{uuid}/backups`, json: { uuid: "backup-1" } },
+    {
+      spec: "coolify",
+      method: "patch",
+      url: `${COOLIFY}/api/v1/databases/{uuid}/backups/{scheduled_backup_uuid}`,
+      json: { message: "updated" },
+    },
     { spec: "coolify", method: "get", url: `${COOLIFY}/api/v1/projects`, json: options.projects ?? [] },
     { spec: "coolify", method: "post", url: `${COOLIFY}/api/v1/projects`, json: { uuid: "project-1" } },
     {
@@ -450,7 +470,9 @@ function writes(): string[] {
 }
 
 function envBody(index = 0): { key: string; value: string }[] {
-  const patches = harness.requests.filter((request) => request.method === "PATCH");
+  const patches = harness.requests.filter(
+    (request) => request.operationPath === "/applications/{uuid}/envs/bulk",
+  );
   return (patches[index]!.body as { data: { key: string; value: string }[] }).data;
 }
 
@@ -529,6 +551,8 @@ describe("a cloud hf new, all ten steps", () => {
         "github GET /user/installations",
         "github GET /user/installations/{installation_id}/repositories",
         "github GET /user/installations/{installation_id}/repositories",
+        "coolify GET /s3-storages",
+        "coolify GET /databases/{uuid}/backups",
         "coolify POST /databases/{uuid}/backups",
         "sentry GET /api/0/projects/{organization_id_or_slug}/{project_id_or_slug}/keys/",
         "sentry POST /api/0/organizations/{organization_id_or_slug}/projects/",
@@ -589,8 +613,9 @@ describe("a cloud hf new, all ten steps", () => {
       });
       expect(state.state.betterAuthSecret).toHaveLength(43);
       expect(state.state.database?.applicationPassword).toBeTypeOf("string");
-      // The backup step's own line, which only the operator can settle.
-      expect(run.context.checklist.join("\n")).toContain("backup schedule");
+      // A box with one usable S3 storage and no schedule yet leaves the operator nothing to do
+      // about backups: the dump goes off the box and there is no second schedule to look for.
+      expect(run.context.checklist.join("\n")).not.toContain("backup");
     } finally {
       await run.close();
     }
@@ -672,6 +697,7 @@ describe("a cloud hf new, all ten steps", () => {
       projects: [{ uuid: "project-1", name }],
       applications: [{ uuid: "application-1", name }],
       langfuseProjects: [{ id: "lp1", name: deriveNames(name).appName }],
+      backups: [{ uuid: "backup-1", databases_to_backup: deriveNames(name).databaseName }],
       dnsRecords: [{ id: "record-1", type: "A", name: `${name}.${BASE_DOMAIN}`, content: BOX_IP }],
       sentryExists: true,
     });
@@ -686,10 +712,10 @@ describe("a cloud hf new, all ten steps", () => {
       await runSteps(CLOUD_STEPS, second.context);
 
       expect(second.context.rotated).toBe(true);
-      // Only what a cold run cannot look up: Coolify cannot list backup schedules and Langfuse
-      // hands a secret key back once. Nothing else is created a second time.
+      // Only what a cold run cannot look up: Langfuse hands a secret key back once. The backup
+      // schedule is found in the database's list and reconciled, not registered a second time.
       expect(writes()).toEqual([
-        "coolify POST /databases/{uuid}/backups",
+        "coolify PATCH /databases/{uuid}/backups/{scheduled_backup_uuid}",
         "langfuse POST /api/public/projects/{projectId}/apiKeys",
         "coolify PATCH /applications/{uuid}/envs/bulk",
         "coolify POST /deploy",

@@ -455,6 +455,18 @@ its evidence line pasted here.
 > already exists in this Coolify. The live schedule was PATCHed by hand and the next dump landed in the bucket; a
 > separate PR fixes the backup step's payload for new apps.
 
+> **Finding (step 4, 2026-09-20): what the backup step does about the finding above.** It resolves a
+> storage before it registers anything: `HF_COOLIFY_S3_STORAGE_UUID`, else the one `is_usable` entry
+> `GET /s3-storages` lists. With none or several it does not guess — it registers `save_s3: false`
+> and prints a `WARNING:` plus a closing-checklist line saying the backups are local-only, naming the
+> candidates when there are several. Coolify's own POST schema does say `s3_storage_uuid` is "required
+> if save_s3 is true", in a description no validator reads, which is why the msw harness was green
+> throughout. `PATCH /databases/{uuid}/backups/{backup_uuid}` — the call that fixed the live schedule
+> by hand — also closes **X1 q6**: the step lists the database's schedules and PATCHes the one whose
+> `databases_to_backup` is this app's database rather than registering a second. Coolify documents
+> that list as "Content is very complex", so the response is narrowed by hand and anything unreadable
+> falls back to the old behaviour: register, and say in the checklist that a duplicate is possible.
+
 > **Finding (pre-flight, 2026-09-20): Coolify publishes no port for its Postgres**, so the box's `127.0.0.1:5432` was
 > never a listener and every tunnel command failed at the first query. The container is reachable from the box host at
 > its address on the `coolify` docker network, and publishing the port would bind all interfaces, so the tunnel now asks

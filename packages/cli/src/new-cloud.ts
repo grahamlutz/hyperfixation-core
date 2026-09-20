@@ -175,11 +175,13 @@ export async function runSteps<Context extends CloudContext>(
 
 /**
  * The keys a cloud `hf new` runs without: three have a default derived from another key, the two
- * provider keys are what the checklist warns about when they are unset, and the three Langfuse
- * keys are three ways of configuring one step — an org key, a project key pair, or neither, which
- * the step degrades to a warning and a checklist line.
+ * provider keys are what the checklist warns about when they are unset, the three Langfuse keys
+ * are three ways of configuring one step — an org key, a project key pair, or neither, which the
+ * step degrades to a warning and a checklist line — and the S3 storage is one the backup step
+ * discovers when the box has exactly one, and warns about when it cannot.
  */
 export const OPTIONAL_CLOUD_CONFIG: readonly ConfigKey[] = [
+  "HF_COOLIFY_S3_STORAGE_UUID",
   "HF_DB_HOST_INTERNAL",
   "HF_DB_CONTAINER",
   "HF_PG_ADMIN_USER",

@@ -40,6 +40,7 @@ USAGE with `hf new <name>` and `--budget-usd`, `--email`, `--from`, `--into`. Be
 | `HF_COOLIFY_SERVER_UUID` | Coolify → Servers → the box → uuid in the URL |
 | `HF_COOLIFY_GITHUB_APP_UUID` | Coolify → Sources → the GitHub App → uuid in the URL |
 | `HF_COOLIFY_POSTGRES_UUID` | Coolify → the Postgres resource → uuid in the URL |
+| `HF_COOLIFY_S3_STORAGE_UUID` | optional; Coolify → Storages → the S3 storage → uuid in the URL. Unset, the backup step asks `GET /s3-storages` and takes the one `is_usable` storage when there is exactly one; with none or several it registers the schedule `save_s3: false` and warns that the dump is local-only. X1 question 6 |
 | `HF_DB_HOST_INTERNAL` | optional; the Postgres container's name on the `coolify` network; defaults to the uuid (`coolify.ts:148`). X1 question 3 |
 | `HF_DB_CONTAINER` | optional; the container `docker inspect` is asked for the cluster's address; defaults to trying the bare uuid and then `postgresql-<uuid>` (`config.ts`, `database.ts`) |
 | `HF_PG_ADMIN_USER` | optional; the cluster superuser to log in as, for a box whose Coolify `POSTGRES_USER` is not `postgres`; the password stays in `PGPASSWORD` |
@@ -91,7 +92,7 @@ nothing is prompted. `pnpm install` output streams live; every other step prints
 | 1 | template | `demo-app: template fetched into …` | `--from` wrong or no `.hyperfixation-template` marker; no directory left behind |
 | 2 | install | `demo-app: N file(s) in the initial commit` | `pnpm install exited …`; re-run resumes (a HEAD commit is the "done" mark) |
 | 3 | repo | `created the private repository grahamlutz/demo-app`, then a `WARNING:` that the app installations could not be verified with this token | Push rejected for a missing `workflow` scope; the repo is adopted only if its `main` equals local HEAD. The installations are only asserted for a token that may list them |
-| 4 | backup | `registered a daily backup of hf_demo_app` | Coolify 4xx; the step **cannot detect its previous work** (X1 q6) — a re-run after this succeeded once registers a second schedule; check Coolify → the database → Backups |
+| 4 | backup | `registered a daily backup of hf_demo_app to S3`, or `… on the box only` after a `WARNING:` naming what to set; a re-run prints `updated the daily backup of hf_demo_app …` | Coolify 4xx. The step now lists `GET /databases/{uuid}/backups` and PATCHes the schedule whose `databases_to_backup` is `hf_demo_app`, so a re-run reconciles rather than doubling (X1 q6). Only a list it cannot narrow falls back to a second POST, and then it says so in the checklist |
 | 5 | sentry | `created the Sentry project <org>/demo_app` | re-run adopts |
 | 6 | langfuse | `created the Langfuse project demo_app` | re-run adopts by name but always mints a new key pair |
 | 7 | dns | `demo-app.<base> A <ip>, DNS-only` | an existing record with another address aborts, never overwritten |
@@ -103,7 +104,7 @@ Then the checklist (section 5), including the **write token, printed once**; cop
 
 **Re-run rule.** The same command again is safe: recorded steps are skipped; a rerun after a rotation re-PATCHes and redeploys automatically
 (`new-cloud.ts:127-139`). **Do not delete the state file** unless you mean a cold run: it rotates all three passwords
-(`provision-database.ts:99-102`), mints a Langfuse key, may double the backup schedule, and if the run then stops before step 9 the deployed app is
+(`provision-database.ts:99-102`), mints a Langfuse key, and if the run then stops before step 9 the deployed app is
 locked out until you re-run (the runner refuses to call that "finished", `new-cloud.ts:110-117`). Watch progress in Coolify → the application →
 Deployments during step 10.
 
@@ -166,8 +167,9 @@ There is **no `hf destroy`**; `hf` removes nothing. Manual, in this order:
 9. **Restore-check needs a dump that `hf new` never triggers** (`backup_now: false`); trigger one from Coolify first. Answered by the run, and two defects found:
    - **Where the dumps are:** on the box's own disk at `/data/coolify/backups/databases/<team>/<name>-<uuid>/pg-dump-<db>-<epoch>.dmp`, custom-format `pg_dump -Fc`. `--from-s3` is still a refusal (`backup-source.ts:128-140`), and nothing needs it while the dumps are local.
    - **`pg_restore` ran on the wrong side.** The host has no Postgres client tools, so the restore exited 127. **Closed by `X1-fixes`:** it runs inside the discovered Postgres container with the dump on stdin, since the dump path is not mounted in.
-   - **The dumps never reach S3.** hf's backup step omits `s3_storage_uuid` while sending `save_s3: true`, so Coolify logs `S3 storage ID: null`, warns `S3 storage configuration is missing … S3 backup has been disabled`, and keeps the dump local — one box holding both the database and its only backup. The `hetzner-backups` storage (bucket `hyperfixation-backups`, `is_usable: true`) already exists and works; the live schedule was fixed by hand and a separate PR fixes the step. **Open until that PR lands.**
+   - **The dumps never reach S3.** hf's backup step omits `s3_storage_uuid` while sending `save_s3: true`, so Coolify logs `S3 storage ID: null`, warns `S3 storage configuration is missing … S3 backup has been disabled`, and keeps the dump local — one box holding both the database and its only backup. The `hetzner-backups` storage (bucket `hyperfixation-backups`, `is_usable: true`) already exists and works; the live schedule was fixed by hand and a separate PR fixes the step. **Closed by `X1-fixes`; see Gap 11.**
 10. **A local template checkout can be stale** (it was 22 commits behind); `hf new --local` from it would copy the `link:` layout. Irrelevant to the cloud run; `git pull` it anyway.
+11. **The daily backup never left the box, and the step could not see its own previous work** (X1 q6). Both closed by `X1-fixes`: the step resolves an S3 storage (`HF_COOLIFY_S3_STORAGE_UUID`, else the one `is_usable` storage `GET /s3-storages` lists) and sends `s3_storage_uuid` with `save_s3: true`; with none or several it registers `save_s3: false` and warns rather than guessing. It also lists `GET /databases/{uuid}/backups` and PATCHes this app's schedule instead of registering a second. See the Finding in the phase-3 order doc.
 
 **Recommended adversary targets before running:** the loopback-port assumption (pre-flight 2), the deploy step's `SOURCE_COMMIT` path, and the cold-run
 rotation ordering.
