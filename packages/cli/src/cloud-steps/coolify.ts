@@ -289,14 +289,13 @@ async function productionEnvironment(
 ): Promise<string> {
   const environments = await coolify.listEnvironments(projectUuid);
   const production = environments.find((environment) => environment.name === COOLIFY_ENVIRONMENT);
-  if (production === undefined) {
-    throw new StepFailed(
-      `the Coolify project ${context.names.given} has no ${COOLIFY_ENVIRONMENT} environment ` +
-        `(it has ${environments.map((environment) => environment.name).join(", ") || "none"}), ` +
-        "and the API has no endpoint that creates one: add it in Coolify and re-run hf new",
-    );
-  }
-  return production.uuid;
+  if (production !== undefined) return production.uuid;
+
+  const created = await coolify.createEnvironment(projectUuid, { name: COOLIFY_ENVIRONMENT });
+  context.io.out(
+    `${context.names.given}: created the ${COOLIFY_ENVIRONMENT} environment in the Coolify project`,
+  );
+  return created.uuid;
 }
 
 async function findOrCreateApplication(
