@@ -6,6 +6,17 @@ on:
   pull_request:
 
 jobs:
+  changeset:
+    runs-on: ubuntu-latest
+    steps:
+      # fetch-depth: 0 so the script can reach the merge base with the target branch.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: node .github/scripts/changeset-check.mjs
+        env:
+          CHANGESET_CHECK_BASE: ${{ github.base_ref || github.event.merge_group.base_ref || 'main' }}
+
   test:
     runs-on: ubuntu-latest
     services:
