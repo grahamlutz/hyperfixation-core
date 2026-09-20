@@ -164,7 +164,8 @@ async function assertTemplateSource(source: string): Promise<void> {
   }
 }
 
-async function substituteTree(dir: string, names: AppNames): Promise<string[]> {
+/** Substitutes every placeholder in a copied tree; the cloud `template` step reuses this one. */
+export async function substituteTree(dir: string, names: AppNames): Promise<string[]> {
   const changed: string[] = [];
   for (const file of await walk(dir)) {
     if (BINARY_EXTENSIONS.has(path.extname(file))) continue;
