@@ -327,6 +327,9 @@ export interface WaitForRunOptions {
     timeoutMs?: number;
 }
 
+// @public
+export function waitForWorkflowStatus(pool: Pool, workflowId: string, status: string, options?: WaitForRunOptions): Promise<WorkflowState>;
+
 // @public (undocumented)
 export function withClock(at: string | Date): TestClock;
 
@@ -375,6 +378,24 @@ export interface WorkerExit {
     code: number | null;
     // (undocumented)
     signal: NodeJS.Signals | null;
+}
+
+// @public (undocumented)
+export class WorkflowNeverMatched extends Error {
+    constructor(workflowId: string, status: string, timeoutMs: number, lastSeen?: WorkflowState);
+    readonly lastSeen: WorkflowState | undefined;
+    // (undocumented)
+    readonly workflowId: string;
+}
+
+// @public
+export interface WorkflowState {
+    // (undocumented)
+    applicationVersion: string | null;
+    // (undocumented)
+    status: string;
+    // (undocumented)
+    workflowId: string;
 }
 
 // (No @packageDocumentation comment for this package)

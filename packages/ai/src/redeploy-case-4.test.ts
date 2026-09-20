@@ -6,6 +6,7 @@ import {
   parkedMarker,
   spawnWorker,
   testBuildSha,
+  waitForWorkflowStatus,
   type TestDatabase,
 } from "@hyperfixation/testing";
 import { getClient, resetClient } from "@hyperfixation/workflows";
@@ -103,7 +104,9 @@ describe("redeploy case 4 — pause and resume across a redeploy", () => {
         assertNoFencingFailure(workerA);
         callsA = providerCalls(workerA.output());
 
-        expect(await workflowStatus(runId)).toBe("SUCCESS");
+        // Polled: `paused` is committed from inside the body, so DBOS marks the attempt
+        // SUCCESS only once that body returns.
+        await waitForWorkflowStatus(probe.pool, runId, "SUCCESS", { timeoutMs: 30_000 });
         expect((await runRow(probe, runId))?.attempt).toBe(1);
         expect(callsA).toBe(KEYS.indexOf(PAUSE_AT) + 1);
 
@@ -172,13 +175,5 @@ describe("redeploy case 4 — pause and resume across a redeploy", () => {
       "SELECT name, concurrency FROM dbos.queues ORDER BY name",
     );
     return Object.fromEntries(rows.map((row) => [row.name, row.concurrency]));
-  }
-
-  async function workflowStatus(workflowId: string): Promise<string | undefined> {
-    const { rows } = await probe.pool.query<{ status: string }>(
-      "SELECT status FROM dbos.workflow_status WHERE workflow_uuid = $1",
-      [workflowId],
-    );
-    return rows[0]?.status;
   }
 });
