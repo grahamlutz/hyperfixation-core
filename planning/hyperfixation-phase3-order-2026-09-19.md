@@ -413,9 +413,9 @@ its evidence line pasted here.
 > | Passkey | enrolled, and passkey sign-in works from the same browser |
 > | Demo loop | the draft flow started from the admin control; `hf_approval` 1 and 2 both `approved` and `decided` with one distinct `batch_id`, batch-approved from the browser; `hf_action_log` 2 rows, status `ok`; runs 44 done, 0 failed, 0 anomalies |
 > | Phone passkey enrolment | **not done** — same browser only, no phone proof yet |
-> | SIGTERM drain timing and `pg_locks` at exit | **not done** |
+> | SIGTERM drain timing and `pg_locks` at exit | `docker stop -t 90` on an **idle** worker (the fixtures finish instantly, so no run was in flight): `hf-worker: SIGTERM, calling DBOS.shutdown`, stopped in 0.27 s (limit 61 s), exit code 0; advisory locks on `hf_demo_app` 1 → 0 at exit → 1 after restart, new worker acquired it and launched DBOS at the same version. **Not shown on the box:** a run interrupted mid-step (covered by core's redeploy test cases) |
 > | First-of-month period row | **not done** — calendar, 2026-10-01 |
-> | 30-minute connection soak | soak: pending (running as this was written) |
+> | 30-minute connection soak | 180 samples, 17:08–17:38 UTC: peak 7 (limit 25, pass line 24), min 3, mean 3.50; mean of the first 10 min 3.47 vs the last 10 min 3.55 (no drift); at most 1 idle-in-transaction, none active at any sample |
 >
 > **`restore-check` must run right after a backup.** The first attempt used a 1.3-hour-old dump and mismatched 9 tables
 > purely from live churn — rows the app wrote after the dump. The 24-table match above is the same command against a
