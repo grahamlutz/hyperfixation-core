@@ -17,6 +17,20 @@ jobs:
       - run: node .github/scripts/changeset-check.mjs
         env:
           CHANGESET_CHECK_BASE: ${{ github.base_ref || github.event.merge_group.base_ref || 'main' }}
+      # `api:diff` reads the API reports at the same merge base and fails an unannounced removal.
+      # It needs the toolchain the check above deliberately does without, so it comes second: a
+      # missing changeset is reported in seconds, before this install runs.
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.4.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm api:diff
+        env:
+          CHANGESET_CHECK_BASE: ${{ github.base_ref || github.event.merge_group.base_ref || 'main' }}
 
   test:
     runs-on: ubuntu-latest
