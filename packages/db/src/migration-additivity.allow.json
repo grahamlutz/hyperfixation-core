@@ -1,0 +1,10 @@
+{
+  "//": "Files exempted from the additivity check in migration-additivity.test.ts. `replacedIn` names the release that shipped the replacement — the two-release rule in planning/hyperfixation-versioning-policy.md means a removal may only land once its replacement is already out.",
+  "entries": [
+    {
+      "file": "0007_score_spec_name.sql",
+      "reason": "Grandfathered: it shipped in 0.1.6, before this check existed. It drops hf_score_run_key_uq and creates hf_score_run_key_spec_uq over the same rows in the same migration, so no reader lost a unique key.",
+      "replacedIn": "0.1.6"
+    }
+  ]
+}
