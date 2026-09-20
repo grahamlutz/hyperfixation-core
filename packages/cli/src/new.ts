@@ -98,6 +98,11 @@ export interface NewAppOptions {
   local: boolean;
   /** The bootstrap admin's address, written to `.env` as `HF_BOOTSTRAP_EMAIL`. Skips the prompt. */
   email?: string;
+  /**
+   * The app's monthly LLM budget, written to `.env` as `HF_BOOTSTRAP_BUDGET_USD`. `hf up` seeds
+   * the app state from there instead of falling back to its dev default.
+   */
+  budgetUsd?: string;
   /** Overrides the real interactive prompt; for tests and other callers with their own stdin. */
   promptEmail?: () => Promise<string>;
 }
@@ -111,6 +116,8 @@ export interface NewAppResult extends AppNames {
   wroteEnv: boolean;
   /** True when `HF_BOOTSTRAP_EMAIL` was written to `.env`, from `--email` or the prompt. */
   wroteBootstrapEmail: boolean;
+  /** True when `HF_BOOTSTRAP_BUDGET_USD` was written to `.env`, from `--budget-usd`. */
+  wroteBootstrapBudget: boolean;
 }
 
 /**
@@ -155,6 +162,7 @@ export async function newApp(options: NewAppOptions): Promise<NewAppResult> {
   const example = path.join(dir, ".env.example");
   const wroteEnv = await exists(example);
   let wroteBootstrapEmail = false;
+  let wroteBootstrapBudget = false;
   if (wroteEnv) {
     let contents = await readFile(example, "utf8");
     const email = options.email ?? (await (options.promptEmail ?? promptForBootstrapEmail)());
@@ -162,10 +170,14 @@ export async function newApp(options: NewAppOptions): Promise<NewAppResult> {
       contents = `${contents.trimEnd()}\nHF_BOOTSTRAP_EMAIL=${email}\n`;
       wroteBootstrapEmail = true;
     }
+    if (options.budgetUsd !== undefined && options.budgetUsd !== "") {
+      contents = `${contents.trimEnd()}\nHF_BOOTSTRAP_BUDGET_USD=${options.budgetUsd}\n`;
+      wroteBootstrapBudget = true;
+    }
     await writeFile(path.join(dir, ".env"), contents);
   }
 
-  return { ...names, dir, substituted, wroteEnv, wroteBootstrapEmail };
+  return { ...names, dir, substituted, wroteEnv, wroteBootstrapEmail, wroteBootstrapBudget };
 }
 
 /** The one-time prompt: the address `hf up` later hands `hf bootstrap` via `.env`. */

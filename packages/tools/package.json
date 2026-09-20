@@ -9,6 +9,7 @@
     "lint": "eslint src",
     "test": "vitest run --passWithNoTests",
     "template-check": "tsx src/template-check.ts",
+    "scaffold-check": "tsx src/scaffold-check.ts",
     "api-diff": "tsx src/api-diff.ts",
     "downstream-matrix": "tsx src/downstream-matrix-ci.ts",
     "release-publish": "tsx src/publish.ts",
