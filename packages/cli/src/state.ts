@@ -73,6 +73,15 @@ export interface StatusTokenState {
  */
 export interface AppState {
   steps: Partial<Record<StepName, StepRecord>>;
+  /**
+   * ISO 8601, written just before the `template` step renames the substituted fetch into place.
+   *
+   * The proof that a directory at the app's path is this run's own: `steps.template` is only
+   * recorded after the rename, so a crash in between would otherwise leave a directory no state
+   * vouches for. Without it the step refuses to adopt a directory — a stale scaffold from an
+   * earlier `hf new --local` looks exactly like a lost run.
+   */
+  templateStartedAt?: string;
   /** `owner/name` of the app's GitHub repository. */
   repo?: string;
   coolify?: CoolifyState;
@@ -261,6 +270,7 @@ function parseAppState(contents: string, file: string): AppState {
         state.steps = parseSteps(value, file);
         break;
       case "repo":
+      case "templateStartedAt":
       case "sentryDsn":
       case "betterAuthSecret":
       case "lastRestoreCheckAt":

@@ -91,9 +91,14 @@ describe("the cloud template step", () => {
     expect(await readFile(path.join(dir, "package.json"), "utf8")).toContain("demo_app");
   });
 
-  it("adopts a directory that is already this app", async () => {
+  const writeSubstitutedApp = async (): Promise<void> => {
     await mkdir(dir, { recursive: true });
     await writeFile(path.join(dir, "package.json"), '{ "name": "demo_app" }\n');
+  };
+
+  it("adopts a directory that is already this app when the state says the step began", async () => {
+    await writeSubstitutedApp();
+    await state.patch({ templateStartedAt: "2026-09-20T12:00:00.000Z" });
     const context = contextWith(recordingFetch);
 
     await runSteps([templateStep], context);
@@ -102,7 +107,45 @@ describe("the cloud template step", () => {
     expect(context.lines.join("\n")).toContain("adopting the app directory");
   });
 
-  it("refuses a directory that is something else, and one that is still a template", async () => {
+  it("refuses a substituted directory on a first run, with no state to vouch for it", async () => {
+    await writeSubstitutedApp();
+    await writeFile(path.join(dir, "marker-of-an-old-local-run"), "");
+
+    await expect(runSteps([templateStep], contextWith(recordingFetch))).rejects.toThrow(
+      /no record of creating it, so it will not adopt it on a first run/,
+    );
+
+    expect(fetched).toEqual([]);
+    expect(state.isDone("template")).toBe(false);
+    expect(await exists(path.join(dir, "marker-of-an-old-local-run"))).toBe(true);
+  });
+
+  it("refuses a state that recorded only other steps", async () => {
+    await writeSubstitutedApp();
+    await state.markDone("install");
+
+    await expect(runSteps([templateStep], contextWith(recordingFetch))).rejects.toThrow(
+      TemplateError,
+    );
+  });
+
+  it("records the start before the rename, so a crash right after it resumes", async () => {
+    await runSteps([templateStep], contextWith(recordingFetch));
+    expect(state.state.templateStartedAt).toBeDefined();
+
+    // The crash: the directory is in place, the step never got recorded.
+    await state.clearDone("template");
+    const rerun = contextWith(recordingFetch);
+    fetched.length = 0;
+
+    await runSteps([templateStep], rerun);
+
+    expect(fetched).toEqual([]);
+    expect(rerun.lines.join("\n")).toContain("adopting the app directory");
+  });
+
+  it("refuses, on a resume, a directory that is something else or still a template", async () => {
+    await state.patch({ templateStartedAt: "2026-09-20T12:00:00.000Z" });
     await mkdir(dir, { recursive: true });
     await writeFile(path.join(dir, "package.json"), '{ "name": "someone-elses-app" }\n');
 
