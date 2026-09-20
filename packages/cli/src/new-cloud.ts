@@ -1,9 +1,14 @@
 import path from "node:path";
-import { bootstrapApp } from "./bootstrap.js";
 import { checklistLines } from "./checklist.js";
-import { coolifyStep, providerKeys } from "./cloud-steps/coolify.js";
-import { databaseStep } from "./cloud-steps/database.js";
-import { deployStep, gitHeadSha } from "./cloud-steps/deploy.js";
+import { providerKeys } from "./cloud-steps/coolify.js";
+import {
+  cloudCommands,
+  CLOUD_STEPS,
+  defaultTemplateFetch,
+  spawnStepExec,
+  type CloudCommands,
+  type CloudStepContext,
+} from "./cloud-steps/index.js";
 import {
   loadOperatorConfig,
   requireOperatorConfig,
@@ -11,12 +16,9 @@ import {
   type OperatorConfig,
 } from "./config.js";
 import { openDatabase, type AdminCredentials, type Database } from "./database.js";
-import { migrateApp } from "./migrate.js";
-import { deriveNames, type AppNames } from "./names.js";
-import { CoolifyClient } from "./providers/coolify.js";
+import { deriveNames } from "./names.js";
 import type { FetchLike } from "./providers/http.js";
 import { createSshRunner, type Runner } from "./runner.js";
-import { statusTokenApp } from "./status-token.js";
 import {
   openAppState,
   secretsHash,
@@ -27,7 +29,7 @@ import {
 } from "./state.js";
 
 /** The steps themselves; the runner is what orders and records them. */
-export { CLOUD_STEPS } from "./cloud-steps/index.js";
+export { CLOUD_STEPS };
 
 /**
  * The steps whose "done" depends on more than having run once.
@@ -39,29 +41,9 @@ export { CLOUD_STEPS } from "./cloud-steps/index.js";
 const SECRET_CARRYING_STEPS: readonly StepName[] = ["coolify", "deploy"];
 
 /**
- * The app's own commands, as the `coolify` step runs them through the tunnel.
- *
- * An interface rather than three direct calls because these are the three things a test cannot
- * run — each spawns the generated app's toolchain against a real database — and because the
- * `env` overlay they take is the whole point: the cloud path never reads or writes a `.env`.
+ * What the runner itself is handed. The steps get `CloudStepContext`, which extends it.
  */
-export interface CloudCommands {
-  migrate(options: { dir: string; env: Record<string, string> }): Promise<void>;
-  bootstrap(options: {
-    dir: string;
-    env: Record<string, string>;
-    email: string;
-    budgetUsd: string;
-  }): Promise<void>;
-  /** The plaintext of each token it generated — the only moment either exists outside a hash. */
-  statusToken(options: {
-    dir: string;
-    env: Record<string, string>;
-  }): Promise<{ read?: string; write?: string }>;
-}
-
-/** The two fields the runner itself reads; everything else on a context belongs to the steps. */
-export interface StepRunContext {
+export interface CloudContext {
   state: AppStateStore;
   /**
    * Set by the `database` step when it gave an existing role a new password.
@@ -73,41 +55,7 @@ export interface StepRunContext {
   rotated: boolean;
 }
 
-/** What every step of a cloud `hf new` is handed. */
-export interface CloudContext extends StepRunContext {
-  /** The name as typed: the directory, the Coolify project and application, the subdomain. */
-  name: string;
-  names: AppNames;
-  /** The app's checkout on this machine — `<into>/<name>`, whether or not it exists yet. */
-  dir: string;
-  /** `--from`: a giget specifier or a template checkout, passed through untouched. */
-  from?: string;
-  /** `<name>.<HF_BASE_DOMAIN>`. */
-  fqdn: string;
-  /** The bootstrap admin's address and the app's starting budget; both required in the cloud. */
-  email: string;
-  budgetUsd: string;
-  config: OperatorConfig;
-  env: NodeJS.ProcessEnv;
-  coolify: CoolifyClient;
-  runner: Runner;
-  /**
-   * The box's Postgres cluster, opened on first use and shared for the rest of the run.
-   *
-   * One tunnel, because `database` and `coolify` both need one and a second `ssh -L` would be a
-   * second thing to leak; the run closes it in a `finally`.
-   */
-  database(): Promise<Database>;
-  commands: CloudCommands;
-  /** `git rev-parse HEAD` in `dir` — the sha `deploy` waits for `/api/status` to report. */
-  headSha(): Promise<string>;
-  fetch: FetchLike;
-  now(): number;
-  sleep(ms: number): Promise<void>;
-  io: { out(line: string): void };
-}
-
-export interface Step<Context extends StepRunContext = StepRunContext> {
+export interface Step<Context extends CloudContext = CloudContext> {
   name: StepName;
   run(context: Context): Promise<void>;
 }
@@ -159,7 +107,7 @@ export function assertEnvsCurrent(state: AppState): void {
  * The state-only check above cannot see this case on its own: a list of steps that stops before
  * `coolify` leaves a consistent file and a deployed app on dead credentials.
  */
-export function assertRotationApplied(context: StepRunContext): void {
+export function assertRotationApplied(context: CloudContext): void {
   if (!context.rotated) return;
   if (context.state.isDone("coolify") && envsAreCurrent(context.state.state)) return;
   throw new StepInvariantViolated(
@@ -198,7 +146,7 @@ export async function invalidateStaleSecretSteps(
  * duplicate at worst while recording one that never happened costs an app nobody can finish.
  * Errors propagate untouched: the caller prints them, and the state file is the resume point.
  */
-export async function runSteps<Context extends StepRunContext>(
+export async function runSteps<Context extends CloudContext>(
   steps: readonly Step<Context>[],
   context: Context,
 ): Promise<RunStepsResult> {
@@ -221,18 +169,6 @@ export async function runSteps<Context extends StepRunContext>(
   assertRotationApplied(context);
   return { ran, skipped, invalidated };
 }
-
-/**
- * The steps of a cloud `hf new`, in `STEPS` order — which `runSteps` asserts.
- *
- * One list, so that "what does hf new do" has one answer. A step is registered here and
- * implemented under `cloud-steps/`.
- */
-export const CLOUD_STEPS: readonly Step<CloudContext>[] = [
-  databaseStep(),
-  coolifyStep(),
-  deployStep(),
-];
 
 /**
  * Every operator config key a cloud `hf new` needs, checked before the first step.
@@ -258,21 +194,6 @@ export const REQUIRED_CLOUD_CONFIG: readonly ConfigKey[] = [
 /** The cluster role `hf new` provisions the app's database and roles as. */
 const CLUSTER_ADMIN_USER = "postgres";
 
-/** The real three, each under the env overlay the `coolify` step builds. */
-export const cloudCommands: CloudCommands = {
-  // `skipRoles`: the database step created all three, and the cloud migrator cannot create one.
-  migrate: async ({ dir, env }) => {
-    await migrateApp({ dir, skipRoles: true, env });
-  },
-  bootstrap: async ({ dir, env, email, budgetUsd }) => {
-    await bootstrapApp({ dir, env, email, budgetUsd });
-  },
-  // `rotate`, because reaching this call at all means the state cache has no plaintext to reuse:
-  // whatever hash the column holds is one nothing can authenticate against any more.
-  statusToken: async ({ dir, env }) =>
-    (await statusTokenApp({ dir, env, kinds: ["read", "write"], rotate: true })).tokens,
-};
-
 export interface NewAppCloudOptions {
   name: string;
   /** Required in the cloud: a deployed app never starts under a cap nobody chose. */
@@ -288,7 +209,7 @@ export interface NewAppCloudOptions {
   /** Where the per-app state files are. Defaults to `stateDir()`. */
   stateDir?: string;
   /** Replaces `CLOUD_STEPS`; the tests run a shorter list, never a different order. */
-  steps?: readonly Step<CloudContext>[];
+  steps?: readonly Step<CloudStepContext>[];
   commands?: CloudCommands;
   runner?: Runner;
   /** The cluster admin the database is provisioned as. Defaults to `postgres`/`PGPASSWORD`. */
@@ -296,7 +217,6 @@ export interface NewAppCloudOptions {
   fetch?: FetchLike;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
-  headSha?: (dir: string) => Promise<string>;
 }
 
 export interface NewAppCloudResult extends RunStepsResult {
@@ -330,24 +250,22 @@ export async function newAppCloud(options: NewAppCloudOptions): Promise<NewAppCl
   let database: Database | undefined;
   const hadWriteToken = state.state.statusTokens?.write !== undefined;
 
-  const context: CloudContext = {
+  const fqdn = `${names.given}.${required.HF_BASE_DOMAIN}`;
+  const context: CloudStepContext = {
     state,
     rotated: false,
-    name: names.given,
     names,
     dir: path.resolve(options.into ?? process.cwd(), names.given),
-    from: options.from,
-    fqdn: `${names.given}.${required.HF_BASE_DOMAIN}`,
-    email: options.email,
-    budgetUsd: options.budgetUsd,
     config,
     env,
-    coolify: new CoolifyClient({
-      url: required.HF_COOLIFY_URL,
-      token: required.HF_COOLIFY_TOKEN,
-      fetch: options.fetch,
-    }),
-    runner,
+    io: options.io,
+    checklist: [],
+    exec: spawnStepExec,
+    from: options.from,
+    fetchTemplate: defaultTemplateFetch,
+    fetch: options.fetch,
+    email: options.email,
+    budgetUsd: options.budgetUsd,
     database: async () => {
       // No `container`: the `docker exec psql` transport has no address, and every use of the
       // cluster here — `provisionRoles`, the migrator, the tokens — is a pg client.
@@ -355,11 +273,8 @@ export async function newAppCloud(options: NewAppCloudOptions): Promise<NewAppCl
       return database;
     },
     commands: options.commands ?? cloudCommands,
-    headSha: async () => await (options.headSha ?? gitHeadSha)(context.dir),
-    fetch: options.fetch ?? ((input, init) => globalThis.fetch(input, init)),
     now: options.now ?? (() => Date.now()),
     sleep: options.sleep ?? (async (ms) => await new Promise((resolve) => setTimeout(resolve, ms))),
-    io: options.io,
   };
 
   let result: RunStepsResult;
@@ -371,17 +286,19 @@ export async function newAppCloud(options: NewAppCloudOptions): Promise<NewAppCl
 
   const checklist = checklistLines({
     names,
-    fqdn: context.fqdn,
+    fqdn,
     repo: state.state.repo,
     dbHost: config.HF_DB_HOST_INTERNAL ?? required.HF_COOLIFY_POSTGRES_UUID,
     stateFile: state.file,
     providerKeysSent: providerKeys(config).map(([key]) => key),
-    backupRegistered: state.isDone("backup"),
+    // Whatever the steps themselves asked the operator to look at — the backup schedule included,
+    // which is the one thing Coolify's API cannot be asked about.
+    fromSteps: context.checklist,
     // Shown once means the run that minted it; every later run leaves it in the state file alone.
     writeToken: hadWriteToken ? undefined : state.state.statusTokens?.write,
   });
 
-  return { ...result, dir: context.dir, fqdn: context.fqdn, checklist };
+  return { ...result, dir: context.dir, fqdn, checklist };
 }
 
 /**

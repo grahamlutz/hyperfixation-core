@@ -13,8 +13,8 @@ export interface ChecklistInput {
   stateFile: string;
   /** Which of `ANTHROPIC_API_KEY`/`OPENAI_API_KEY` the environment carries. */
   providerKeysSent: readonly string[];
-  /** True when a `backup` step recorded a schedule for this app. */
-  backupRegistered: boolean;
+  /** Lines the steps themselves appended to `context.checklist`, in the order they ran. */
+  fromSteps?: readonly string[];
   /** The `/api/status` write token, and only on the run that minted it. */
   writeToken?: string;
 }
@@ -71,12 +71,10 @@ export function checklistLines(input: ChecklistInput): string[] {
     "relying-party origin, and a different host enrols a credential the app will never accept.",
   );
 
-  add(
-    input.backupRegistered
-      ? `A Coolify backup is registered for ${names.databaseName}: prove it restores with`
-      : `No backup is registered for ${names.databaseName}: add a daily one in Coolify, then`,
-    `hf restore-check ${names.given}.`,
-  );
+  add(`Prove the backup restores: hf restore-check ${names.given}.`);
+
+  // Each step's own line, last: a step knows something about its half that nothing here does.
+  for (const line of input.fromSteps ?? []) add(line);
 
   if (input.writeToken !== undefined) {
     add(

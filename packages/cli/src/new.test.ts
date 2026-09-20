@@ -293,7 +293,6 @@ describe("the checklist", () => {
     dbHost: "postgres-uuid",
     stateFile: "/home/g/.config/hf/state/demo-app.json",
     providerKeysSent: ["ANTHROPIC_API_KEY"],
-    backupRegistered: true,
   };
 
   it("shows the write token once, and no other secret ever", () => {
@@ -307,11 +306,14 @@ describe("the checklist", () => {
     expect(later).toContain("postgres://hf_demo_app_ro:<password>@postgres-uuid:5432/hf_demo_app");
   });
 
-  it("says whether a backup is registered, because only one of the two needs doing", () => {
-    expect(checklistLines(input).join("\n")).toContain("A Coolify backup is registered");
-    expect(checklistLines({ ...input, backupRegistered: false }).join("\n")).toContain(
-      "No backup is registered",
-    );
+  it("carries through what a step asked the operator to look at", () => {
+    const lines = checklistLines({
+      ...input,
+      fromSteps: ["check Coolify for a second backup schedule"],
+    }).join("\n");
+
+    expect(lines).toContain("check Coolify for a second backup schedule");
+    expect(lines).toContain(`hf restore-check ${input.names.given}`);
   });
 
   it("prints the downstream.txt line Phase 4's bump needs", () => {

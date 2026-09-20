@@ -2,9 +2,10 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { requireOperatorConfig, type ConfigKey, type OperatorConfig } from "../config.js";
 import { declaredNames } from "../env-file.js";
-import type { CloudContext, Step } from "../new-cloud.js";
-import type { CoolifyEnvironmentVariable } from "../providers/coolify.js";
+import type { Step } from "../new-cloud.js";
+import { CoolifyClient, type CoolifyEnvironmentVariable } from "../providers/coolify.js";
 import { generateBetterAuthSecret, secretsHash } from "../state.js";
+import { appFqdn, StepFailed, type CloudStepContext } from "./context.js";
 
 /** The Coolify environment every `hf new` application lives in; created with the project. */
 export const COOLIFY_ENVIRONMENT = "production";
@@ -16,9 +17,9 @@ export const COMPOSE_LOCATION = "/docker-compose.prod.yml";
 export const PROD_COMPOSE_FILE = "docker-compose.prod.yml";
 
 /**
- * Set by compose itself rather than by us: `DOCKER_IMAGE` has a default in the `x-app` anchor
- * and `SOURCE_COMMIT` is what Coolify's builder exports for the image tag and the build arg.
- * Sending either as an application environment variable would override the deploy's own.
+ * Set by compose itself rather than by us: `DOCKER_IMAGE` has a default in the `x-app` anchor and
+ * `SOURCE_COMMIT` is what Coolify's builder exports for the image tag and the build arg. Sending
+ * either as an application environment variable would override the deploy's own.
  */
 export const COMPOSE_PROVIDED_ENV = ["DOCKER_IMAGE", "SOURCE_COMMIT"] as const;
 
@@ -40,31 +41,22 @@ const PROVIDER_ENV_SOURCE: readonly (readonly [string, ConfigKey])[] = [
   ["OPENAI_API_KEY", "HF_OPENAI_API_KEY"],
 ];
 
-/** The operator config the `coolify` step cannot run without. */
-const REQUIRED = [
-  "HF_COOLIFY_SERVER_UUID",
-  "HF_COOLIFY_GITHUB_APP_UUID",
+/** The operator config the environment itself is built out of. */
+const REQUIRED_FOR_ENVS = [
   "HF_COOLIFY_POSTGRES_UUID",
   "HF_SMTP_URL",
   "HF_EMAIL_FROM",
   "HF_LANGFUSE_URL",
 ] as const;
 
-export class CoolifyStepError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "CoolifyStepError";
-  }
-}
-
 /**
  * The app's environment and what `docker-compose.prod.yml` interpolates have diverged.
  *
- * Raised before the first Coolify request of the run, because the failure it prevents is silent:
- * a variable the template added and nothing sent is an empty string in three containers, and
- * only the one that reads it finds out.
+ * Raised before the first Coolify request of the run, because the failure it prevents is silent: a
+ * variable the template added and nothing sent is an empty string in three containers, and only
+ * the one that reads it finds out.
  */
-export class EnvDrift extends Error {
+export class EnvDrift extends StepFailed {
   readonly missing: readonly string[];
   readonly extra: readonly string[];
 
@@ -115,8 +107,8 @@ export async function neededEnvNames(dir: string): Promise<string[]> {
 /**
  * Refuses to PATCH an environment that is not the one the compose file needs.
  *
- * A provider key the operator has not configured is deliberately absent rather than missing, so
- * it is excused here and reported in the checklist instead.
+ * A provider key the operator has not configured is deliberately absent rather than missing, so it
+ * is excused here and reported in the checklist instead.
  */
 export async function assertEnvsMatchCompose(dir: string, sent: readonly string[]): Promise<void> {
   const needed = await neededEnvNames(dir);
@@ -132,16 +124,16 @@ export async function assertEnvsMatchCompose(dir: string, sent: readonly string[
  * The twelve variables the deployed app runs on, or ten when no provider key is configured.
  *
  * Generates `BETTER_AUTH_SECRET` on first sight and records it: it is the one value in the list
- * that no provider hands back, so a run that did not persist it would lock every existing
- * session out on the next deploy.
+ * that no provider hands back, so a run that did not persist it would lock every existing session
+ * out on the next deploy.
  */
-export async function buildAppEnvs(context: CloudContext): Promise<CoolifyEnvironmentVariable[]> {
-  const config = requireOperatorConfig(context.config, REQUIRED, { env: context.env });
+export async function buildAppEnvs(context: CloudStepContext): Promise<CoolifyEnvironmentVariable[]> {
+  const config = requireOperatorConfig(context.config, REQUIRED_FOR_ENVS, { env: context.env });
   const { names } = context;
   const database = context.state.state.database ?? {};
 
   if (database.applicationPassword === undefined || database.migratorPassword === undefined) {
-    throw new CoolifyStepError(
+    throw new StepFailed(
       "no database passwords in the state cache: the database step has not run for this app",
     );
   }
@@ -165,7 +157,7 @@ export async function buildAppEnvs(context: CloudContext): Promise<CoolifyEnviro
       key: "MIGRATOR_DATABASE_URL",
       value: internalUrl(names.migratorRole, database.migratorPassword, host, names.databaseName),
     },
-    { key: "APP_URL", value: `https://${context.fqdn}` },
+    { key: "APP_URL", value: `https://${appFqdn(context)}` },
     { key: "BETTER_AUTH_SECRET", value: context.state.state.betterAuthSecret ?? "" },
     { key: "SMTP_URL", value: config.HF_SMTP_URL },
     { key: "EMAIL_FROM", value: config.HF_EMAIL_FROM },
@@ -190,79 +182,99 @@ export function providerKeys(config: OperatorConfig): [string, string][] {
 }
 
 /**
- * Step 9: the Coolify project, environment and application, the app's whole environment, and the
- * three commands that have to run against the database before the first deploy.
+ * The Coolify project, environment and application, the app's whole environment, and the three
+ * commands that have to run against the database before the first deploy.
  *
  * Every sub-action is found by name before it is created, and every uuid is recorded the moment
  * the API hands it back, so a crash anywhere in here leaves a rerun with something to find rather
  * than a second project beside the first.
  */
-export function coolifyStep(): Step {
-  return { name: "coolify", run: runCoolifyStep };
-}
+export const coolifyStep: Step<CloudStepContext> = {
+  name: "coolify",
+  run: async (context) => {
+    const { state, names } = context;
+    const required = requireOperatorConfig(
+      context.config,
+      ["HF_COOLIFY_URL", "HF_COOLIFY_TOKEN"],
+      { env: context.env },
+    );
+    const coolify = new CoolifyClient({
+      url: required.HF_COOLIFY_URL,
+      token: required.HF_COOLIFY_TOKEN,
+      fetch: context.fetch,
+    });
 
-async function runCoolifyStep(context: CloudContext): Promise<void> {
-  const { state, coolify, io } = context;
+    // Before the first request, so drift costs nothing but the message.
+    const envs = await buildAppEnvs(context);
+    await assertEnvsMatchCompose(
+      context.dir,
+      envs.map((env) => env.key),
+    );
 
-  // Before the first request, so drift costs nothing but the message.
-  const envs = await buildAppEnvs(context);
-  await assertEnvsMatchCompose(context.dir, envs.map((env) => env.key));
+    const projectUuid = await findOrCreateProject(context, coolify);
+    const environmentUuid = await productionEnvironment(context, coolify, projectUuid);
+    const appUuid = await findOrCreateApplication(context, coolify, projectUuid, environmentUuid);
 
-  const projectUuid = await findOrCreateProject(context);
-  const environmentUuid = await productionEnvironment(context, projectUuid);
-  const appUuid = await findOrCreateApplication(context, projectUuid, environmentUuid);
+    // Unconditionally, every time this step runs. The step is recorded only while
+    // `coolify.envsSecretsHash` still matches the state's secrets, so a rotation has already made
+    // the runner forget it — which means "not done" and "the secrets moved" both land here.
+    await coolify.updateEnvsBulk(appUuid, envs);
+    context.io.out(`${names.given}: ${String(envs.length)} environment variable(s) set in Coolify`);
 
-  // Unconditionally, every time this step runs. The step is recorded only while
-  // `coolify.envsSecretsHash` still matches the state's secrets, so a rotation has already made
-  // the runner forget it — which means "not done" and "the secrets moved" both land here.
-  await coolify.updateEnvsBulk(appUuid, envs);
-  io.out(`coolify: ${String(envs.length)} environment variable(s) set on ${context.name}`);
+    await runThroughTunnel(context, envs);
 
-  await runThroughTunnel(context, envs);
+    // Last, not straight after the PATCH: `status-token` mints secrets that `secretsHash` covers,
+    // so a hash recorded before it would be stale the moment this step returned.
+    await state.patch({ coolify: { envsSecretsHash: secretsHash(state.state) } });
+  },
+};
 
-  // Last, not straight after the PATCH: `status-token` mints secrets that `secretsHash` covers,
-  // so a hash recorded before it would be stale the moment this step returned.
-  await state.patch({ coolify: { envsSecretsHash: secretsHash(state.state) } });
-}
-
-async function findOrCreateProject(context: CloudContext): Promise<string> {
-  const existing = (await context.coolify.listProjects()).find(
-    (project) => project.name === context.name,
-  );
+async function findOrCreateProject(
+  context: CloudStepContext,
+  coolify: CoolifyClient,
+): Promise<string> {
+  const name = context.names.given;
+  const existing = (await coolify.listProjects()).find((project) => project.name === name);
   if (existing !== undefined) {
     await context.state.patch({ coolify: { projectUuid: existing.uuid } });
     return existing.uuid;
   }
 
-  const created = await context.coolify.createProject({
-    name: context.name,
-    description: `hyperfixation app ${context.name}`,
+  const created = await coolify.createProject({
+    name,
+    description: `hyperfixation app ${name}`,
   });
   await context.state.patch({ coolify: { projectUuid: created.uuid } });
-  context.io.out(`coolify: created project ${context.name}`);
+  context.io.out(`${name}: created the Coolify project ${name}`);
   return created.uuid;
 }
 
-async function productionEnvironment(context: CloudContext, projectUuid: string): Promise<string> {
-  const environments = await context.coolify.listEnvironments(projectUuid);
+async function productionEnvironment(
+  context: CloudStepContext,
+  coolify: CoolifyClient,
+  projectUuid: string,
+): Promise<string> {
+  const environments = await coolify.listEnvironments(projectUuid);
   const production = environments.find((environment) => environment.name === COOLIFY_ENVIRONMENT);
   if (production === undefined) {
-    throw new CoolifyStepError(
-      `Coolify project ${context.name} has no ${COOLIFY_ENVIRONMENT} environment ` +
+    throw new StepFailed(
+      `the Coolify project ${context.names.given} has no ${COOLIFY_ENVIRONMENT} environment ` +
         `(it has ${environments.map((environment) => environment.name).join(", ") || "none"}), ` +
-        "and the API has no endpoint that creates one: add it in Coolify and rerun",
+        "and the API has no endpoint that creates one: add it in Coolify and re-run hf new",
     );
   }
   return production.uuid;
 }
 
 async function findOrCreateApplication(
-  context: CloudContext,
+  context: CloudStepContext,
+  coolify: CoolifyClient,
   projectUuid: string,
   environmentUuid: string,
 ): Promise<string> {
-  const existing = (await context.coolify.listApplications()).find(
-    (application) => application.name === context.name,
+  const name = context.names.given;
+  const existing = (await coolify.listApplications()).find(
+    (application) => application.name === name,
   );
   if (existing !== undefined) {
     await context.state.patch({ coolify: { appUuid: existing.uuid } });
@@ -271,69 +283,70 @@ async function findOrCreateApplication(
 
   const repo = context.state.state.repo;
   if (repo === undefined) {
-    throw new CoolifyStepError(
+    throw new StepFailed(
       "no owner/name repository in the state cache: the repo step has not run for this app",
     );
   }
-  const config = requireOperatorConfig(
+  const required = requireOperatorConfig(
     context.config,
     ["HF_COOLIFY_SERVER_UUID", "HF_COOLIFY_GITHUB_APP_UUID"],
     { env: context.env },
   );
+  const fqdn = appFqdn(context);
 
-  const created = await context.coolify.createPrivateGithubAppApplication({
+  const created = await coolify.createPrivateGithubAppApplication({
     project_uuid: projectUuid,
-    server_uuid: config.HF_COOLIFY_SERVER_UUID,
+    server_uuid: required.HF_COOLIFY_SERVER_UUID,
     environment_name: COOLIFY_ENVIRONMENT,
     environment_uuid: environmentUuid,
-    github_app_uuid: config.HF_COOLIFY_GITHUB_APP_UUID,
+    github_app_uuid: required.HF_COOLIFY_GITHUB_APP_UUID,
     git_repository: repo,
     git_branch: "main",
     build_pack: "dockercompose",
     docker_compose_location: COMPOSE_LOCATION,
     connect_to_docker_network: true,
-    name: context.name,
-    domains: `https://${context.fqdn}`,
+    name,
+    domains: `https://${fqdn}`,
     // The `deploy` step is what deploys, once the environment is set and the database migrated.
     instant_deploy: false,
   });
   await context.state.patch({ coolify: { appUuid: created.uuid } });
-  context.io.out(`coolify: created application ${context.name} at https://${context.fqdn}`);
+  context.io.out(`${name}: created the Coolify application at https://${fqdn}`);
   return created.uuid;
 }
 
 /**
  * `migrate`, `bootstrap` and `status-token` against the new database, through the E2 tunnel.
  *
- * The children get the app's own environment with the two connection URLs pointed at the tunnel
- * — never a `.env`, and never this laptop's: an operator with their own `DATABASE_URL` exported
- * would otherwise have the tokens provisioned into a dev database.
+ * The children get the app's own environment with the two connection URLs pointed at the tunnel —
+ * never a `.env`, and never this laptop's: an operator with their own `DATABASE_URL` exported would
+ * otherwise have the tokens provisioned into a dev database.
  */
 async function runThroughTunnel(
-  context: CloudContext,
+  context: CloudStepContext,
   envs: readonly CoolifyEnvironmentVariable[],
 ): Promise<void> {
+  const { names } = context;
   const database = await context.database();
-  const local = database.adminUrl(context.names.databaseName);
+  const local = database.adminUrl(names.databaseName);
   if (local === undefined) {
-    throw new CoolifyStepError(
-      `migrate, bootstrap and status-token cannot run over the ${database.kind} transport: ` +
-        "each is a pg client and needs an address. Publish the Coolify Postgres port on the " +
-        "box's loopback so the tunnel works.",
+    throw new StepFailed(
+      `migrate, bootstrap and status-token cannot run over the ${database.kind} transport: each ` +
+        "is a pg client and needs an address. Publish the Coolify Postgres port on the box's " +
+        "loopback so the tunnel works.",
     );
   }
 
-  const { names } = context;
   const stored = context.state.state.database ?? {};
   const overlay: Record<string, string> = {};
   for (const env of envs) overlay[env.key] = env.value;
   overlay.DATABASE_URL = asRole(local, names.applicationRole, stored.applicationPassword ?? "");
   overlay.MIGRATOR_DATABASE_URL = asRole(local, names.migratorRole, stored.migratorPassword ?? "");
 
-  // The roles already exist — the database step created them — and the migrator role in the
-  // cloud cannot create one anyway.
+  // The roles already exist — the database step created them — and the migrator role in the cloud
+  // cannot create one anyway.
   await context.commands.migrate({ dir: context.dir, env: overlay });
-  context.io.out(`coolify: migrated ${context.names.databaseName}`);
+  context.io.out(`${names.given}: migrated ${names.databaseName}`);
 
   await context.commands.bootstrap({
     dir: context.dir,
@@ -341,7 +354,7 @@ async function runThroughTunnel(
     email: context.email,
     budgetUsd: context.budgetUsd,
   });
-  context.io.out(`coolify: bootstrapped ${context.email} with a $${context.budgetUsd} budget`);
+  context.io.out(`${names.given}: bootstrapped ${context.email} with a $${context.budgetUsd} budget`);
 
   // The state file is the only copy of the plaintext, so "already minted" means "in the state",
   // not "hashed in the database" — and a rerun that finds a hash it has no plaintext for has to
@@ -349,7 +362,7 @@ async function runThroughTunnel(
   if (context.state.state.statusTokens?.read === undefined) {
     const tokens = await context.commands.statusToken({ dir: context.dir, env: overlay });
     await context.state.patch({ statusTokens: tokens });
-    context.io.out("coolify: minted the /api/status read and write tokens");
+    context.io.out(`${names.given}: minted the /api/status read and write tokens`);
   }
 }
 
