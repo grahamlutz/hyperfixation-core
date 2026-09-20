@@ -39,6 +39,9 @@ Regenerate with `pnpm plan:sync --write`; the chunk markers on each heading belo
 | E4 | [core #55](https://github.com/grahamlutz/hyperfixation-core/pull/55) | 2026-09-20 | Give the cloud path hf doctor, one line per finding |
 | E5 | [core #56](https://github.com/grahamlutz/hyperfixation-core/pull/56) | 2026-09-20 | Give hf a restore-check that proves a backup restores |
 | misc | [core #60](https://github.com/grahamlutz/hyperfixation-core/pull/60), [core #57](https://github.com/grahamlutz/hyperfixation-core/pull/57) | 2026-09-20 | Stop a child that exits before reading its stdin from failing the run with EPIPE |
+| tooling | [core #68](https://github.com/grahamlutz/hyperfixation-core/pull/68), [core #71](https://github.com/grahamlutz/hyperfixation-core/pull/71) | 2026-09-20 | Generate the phase-order status table from merged PR bodies |
+| X1 | [core #73](https://github.com/grahamlutz/hyperfixation-core/pull/73) | 2026-09-20 | Add the X1 runbook for the first real-box deployment |
+| X1-fixes | [core #74](https://github.com/grahamlutz/hyperfixation-core/pull/74), [template #33](https://github.com/grahamlutz/hyperfixation-template/pull/33), [template #34](https://github.com/grahamlutz/hyperfixation-template/pull/34) | 2026-09-20 | Fix two X1 blockers: hf doctor on an older /api/status, and hf new's config check |
 <!-- plan-sync:end -->
 
 ## Where Phase 3 starts from
@@ -124,7 +127,17 @@ CI's `next build`; delete the core checkout/build steps in `ci.yml`; regenerate 
 > skipping authentication for sensitive operations, and around January 2027 they lose direct publishing (only staged
 > publishes pending human approval); manual laptop publishing with 2FA is unaffected. Trusted publishing is configured
 > per package on npm after the package exists, so it can be set up now. npm v12 also disables install scripts and blocks
-> git and remote-URL dependencies by default; the CLI's dependency list should be checked for any that need a script.
+> git and remote-URL dependencies by default; the CLI's dependency list should be checked for any that need a script (checked
+> 2026-09-20: none do).
+>
+> **`0.1.1` published 2026-09-20** with `pnpm release:publish 0.1.1` (all nine packages; carries the cloud `hf new`, `doctor`,
+> `restore-check` and the EPIPE fix). More lessons, all from that run:
+> - The npm login session expires overnight: `npm whoami` was a 401 the next morning; `npm login` again before publishing.
+> - The script's post-publish check saw a 404 for a version that was live. The per-version registry document lags `npm view`
+>   by about a minute; it is not a failed publish.
+> - `release:verify` reported a CLI integrity mismatch because it compared against the *checked-out* tree, which was a
+>   branch other than `main`. **Gap, to fix:** compare against a fresh build of `main` (or the release commit), and retry
+>   while the registry propagates.
 
 ## Track D — the deploy shape (template)
 
@@ -374,10 +387,28 @@ is gone afterwards.
 > verdict. `restoreCheckApp` takes the cluster admin password from `PGPASSWORD` until E3 records Coolify's.
 
 
-## Exit — X1, the real box (manual; records into this doc) — ⬜ Not started
+## Exit — X1, the real box (manual; records into this doc) — 🚧 Ready to run
 
 `hf new demo-app` from a laptop with only `~/.config/hf/config.json` populated. Then the manual list below, each with
 its evidence line pasted here.
+
+> **Prepared 2026-09-20.** [The runbook](hyperfixation-x1-runbook-2026-09-20.md) (core #73) has the prerequisites, the
+> config key table, read-only pre-flights, the run, verification, a checklist, manual teardown and ten gaps it found. Its
+> blockers are fixed and merged:
+> - **`hf doctor` crashed on an older `/api/status`** (core #74): a missing `llm` block now normalises to `unknown` and
+>   warns only on `fixtures`; the read is no longer trusted blindly.
+> - **`hf new` checked config too late** (core #74): missing operator keys now fail before any step runs.
+> - **Non-EPIPE stdin errors on the runner** (core #72) now fail the exec instead of being swallowed alongside EPIPE.
+> - **`llm.mode` on `/api/status`** (template #33): the worker records `live|fixtures` in `hf_app_state.llm_mode` (core
+>   migration 0008) via `reportProvidersMode(pool)`, so `hf doctor` can say whether provider keys reached the app.
+> - **No way to start the draft flow from the UI** (template #34): an admin-only form on the admin index (`minScore`,
+>   `limit`) starts `draftDemoOutreach` through `app.runs.start`; the form key derives the run id, so a double click
+>   starts one run. No e2e (a scratch app needs the built `hf`); covered by a real-database action test. The same PR added
+>   the template's PR template with the `Chunk:` and `## Built` convention.
+>
+> Still unknown until the box answers (risks 1–3 and 5): Langfuse's org-key lookup, Coolify's `production` environment
+> name, the Postgres hostname and loopback port, `SOURCE_COMMIT` under Coolify, and where backups live. Re-vendor
+> Coolify's OpenAPI from the box's own version before running.
 
 ---
 
