@@ -15,7 +15,7 @@ export {
   TEMPLATE_DIR_ENV,
 } from "./template-source.js";
 export { deriveNames, APP_ID, GIVEN_NAME, InvalidAppName, type AppNames } from "./names.js";
-export { resolveApp, NotAnApp, type ResolvedApp } from "./app.js";
+export { resolveApp, NotAnApp, type ResolveAppOptions, type ResolvedApp } from "./app.js";
 export { declaredNames, parseEnvFile, readEnvFile } from "./env-file.js";
 export { MissingEnv, requireEnv } from "./require-env.js";
 export {

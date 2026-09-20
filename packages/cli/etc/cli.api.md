@@ -72,6 +72,7 @@ export interface BootstrapAppOptions {
     // (undocumented)
     dir?: string;
     email?: string;
+    env?: Record<string, string>;
     // (undocumented)
     name?: string;
 }
@@ -307,6 +308,7 @@ export function migrateApp(options?: MigrateAppOptions): Promise<MigrateAppResul
 export interface MigrateAppOptions {
     // (undocumented)
     dir?: string;
+    env?: Record<string, string>;
     skipRoles?: boolean;
 }
 
@@ -447,7 +449,12 @@ export function requireEnv(app: ResolvedApp, name: string): string;
 export function requireTemplateSource(cwd?: string): Promise<string>;
 
 // @public
-export function resolveApp(dir?: string): Promise<ResolvedApp>;
+export function resolveApp(dir?: string, options?: ResolveAppOptions): Promise<ResolvedApp>;
+
+// @public (undocumented)
+export interface ResolveAppOptions {
+    env?: Record<string, string>;
+}
 
 // @public (undocumented)
 export interface ResolvedApp {
@@ -457,6 +464,7 @@ export interface ResolvedApp {
     dir: string;
     env: Record<string, string | undefined>;
     envFile: Record<string, string>;
+    envOverlay: Record<string, string>;
     migrationsDir: string;
     // (undocumented)
     names: AppNames;
@@ -588,6 +596,7 @@ export function statusTokenApp(options?: StatusTokenAppOptions): Promise<StatusT
 export interface StatusTokenAppOptions {
     // (undocumented)
     dir?: string;
+    env?: Record<string, string>;
     explicit?: boolean;
     kinds?: readonly StatusTokenKind[];
     rotate?: boolean;
