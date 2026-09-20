@@ -237,6 +237,15 @@ describe("hf new in the cloud", () => {
     HF_SMTP_URL: "smtp://smtp.test:587",
     HF_EMAIL_FROM: "demo@hf.test",
     HF_LANGFUSE_URL: "https://langfuse.test",
+    HF_LANGFUSE_ORG_KEY: "langfuse-org-key",
+    HF_GITHUB_TOKEN: "github-token",
+    HF_GITHUB_OWNER: "grahamlutz",
+    HF_GITHUB_APP_SLUGS: "coolify-app,bump-bot",
+    HF_SENTRY_TOKEN: "sentry-token",
+    HF_SENTRY_ORG: "hf",
+    HF_CLOUDFLARE_TOKEN: "cloudflare-token",
+    HF_CLOUDFLARE_ZONE_ID: "zone-1",
+    HF_BOX_IP: "203.0.113.10",
   };
 
   /** No steps: this is the run's own wiring — config, names, state file, checklist. */
@@ -255,10 +264,42 @@ describe("hf new in the cloud", () => {
     });
 
   it("names every unset operator config key before it creates anything", async () => {
-    const refusal = await cloudRun({}).catch((error: unknown) => error);
+    const requested: string[] = [];
+    const stateDir = path.join(workspace, "state-untouched");
+    const refusal = await newAppCloud({
+      name: "demo-app",
+      email: "admin@hf.test",
+      budgetUsd: "25",
+      into: workspace,
+      stateDir,
+      config: {},
+      env: {},
+      steps: [],
+      runner: createLocalRunner(),
+      io: { out: () => undefined },
+      fetch: (input) => {
+        requested.push(String(input));
+        throw new Error("a request was made before the config check");
+      },
+    }).catch((error: unknown) => error);
 
     expect(refusal).toBeInstanceOf(MissingConfig);
     expect((refusal as MissingConfig).names).toEqual(REQUIRED_CLOUD_CONFIG);
+    expect(requested).toEqual([]);
+    // Not even the state file: the refusal has to leave nothing behind to resume from.
+    await expect(readdir(stateDir)).rejects.toThrow();
+  });
+
+  it("names a key only one step reads, so no step is the one that discovers it", async () => {
+    for (const key of REQUIRED_CLOUD_CONFIG) {
+      const config = { ...CONFIG };
+      delete config[key];
+
+      const refusal = await cloudRun(config).catch((error: unknown) => error);
+
+      expect(refusal, key).toBeInstanceOf(MissingConfig);
+      expect((refusal as MissingConfig).names, key).toEqual([key]);
+    }
   });
 
   it("derives the directory and the host, and returns the checklist", async () => {
