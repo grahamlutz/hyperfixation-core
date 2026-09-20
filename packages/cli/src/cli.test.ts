@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -83,6 +83,8 @@ describe("hf new through main", () => {
         workspace,
         "--email",
         "graham@example.com",
+        "--budget-usd",
+        "10",
       ],
       sink,
     );
@@ -97,11 +99,36 @@ describe("hf new through main", () => {
   it("turns a refusal into one line and a non-zero code, not a stack", async () => {
     const { io: sink, err } = io();
 
-    const code = await main(["new", "Demo", "--local", "--from", source], sink);
+    const code = await main(
+      ["new", "Demo", "--local", "--from", source, "--email", "g@example.com", "--budget-usd", "10"],
+      sink,
+    );
 
     expect(code).toBe(1);
     expect(err).toHaveLength(1);
     expect(err[0]).toContain("app name must match");
+  });
+
+  it("refuses a local run without a budget and an admin address, naming both", async () => {
+    const { io: sink, err } = io();
+
+    expect(
+      await main(["new", "demo-app", "--local", "--from", source, "--into", workspace], sink),
+    ).toBe(1);
+    expect(err[0]).toContain("--budget-usd <amount> and --email <address>");
+    expect(await readdir(workspace)).not.toContain("demo-app");
+  });
+
+  it("names only the local flag that is missing", async () => {
+    const { io: sink, err } = io();
+
+    expect(
+      await main(
+        ["new", "demo-app", "--local", "--from", source, "--budget-usd", "10"],
+        sink,
+      ),
+    ).toBe(1);
+    expect(err[0]).toContain("--email <address>:");
   });
 
   it("refuses a cloud run without a budget and an admin address, naming both", async () => {

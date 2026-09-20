@@ -1,13 +1,12 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { basename, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { withTarballOverrides } from "./overrides.js";
-
-const CORE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+import { packPublishable } from "./pack.js";
+import { CORE_ROOT } from "./proc.js";
 
 const USAGE = `Usage: pnpm template:check [--full] [--registry <url>] [--keep]
 
@@ -60,34 +59,6 @@ function run(
   return result.status === 0;
 }
 
-/** `pnpm -r pack` packs private packages too — unlike `pnpm -r publish`, which skips them. */
-async function publishableFilters(): Promise<string[]> {
-  const packages = join(CORE_ROOT, "packages");
-  const manifests = await readdir(packages, { withFileTypes: true });
-  const filters: string[] = [];
-  for (const entry of manifests.filter((e) => e.isDirectory())) {
-    const manifest = join(packages, entry.name, "package.json");
-    if (!existsSync(manifest)) continue;
-    const { name, private: isPrivate } = JSON.parse(await readFile(manifest, "utf8")) as {
-      name: string;
-      private?: boolean;
-    };
-    if (isPrivate !== true) filters.push("--filter", name);
-  }
-  return filters;
-}
-
-function packCorePackages(destination: string, filters: readonly string[]): Map<string, string> {
-  const result = spawnSync(
-    "pnpm",
-    ["-r", ...filters, "pack", "--pack-destination", destination, "--json"],
-    { cwd: CORE_ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] },
-  );
-  if (result.status !== 0) throw new Error("pnpm -r pack failed");
-  const packed = JSON.parse(result.stdout) as { name: string; filename: string }[];
-  return new Map(packed.map(({ name, filename }) => [name, filename]));
-}
-
 async function main(): Promise<number> {
   const { values } = parseArgs({
     options: {
@@ -138,7 +109,7 @@ async function main(): Promise<number> {
 
     let tarballs = new Map<string, string>();
     await step("pack core", async () => {
-      tarballs = packCorePackages(tarballDir, await publishableFilters());
+      tarballs = await packPublishable(tarballDir);
       console.log([...tarballs.values()].map((t) => `  ${basename(t)}`).join("\n"));
       return tarballs.size > 0;
     });

@@ -117,6 +117,22 @@ describe("hf new --local", () => {
     );
   });
 
+  it("writes --budget-usd to .env as HF_BOOTSTRAP_BUDGET_USD, so hf up seeds no default", async () => {
+    const result = await newApp({
+      name: "demo-app",
+      from: source,
+      into: workspace,
+      local: true,
+      email: "graham@example.com",
+      budgetUsd: "10",
+    });
+
+    expect(result.wroteBootstrapBudget).toBe(true);
+    expect(await readFile(path.join(result.dir, ".env"), "utf8")).toContain(
+      "HF_BOOTSTRAP_BUDGET_USD=10",
+    );
+  });
+
   it("prompts for the bootstrap email when --email is not given", async () => {
     let asked = false;
     const result = await newApp({

@@ -42,10 +42,11 @@ export const USAGE = `hf — the hyperfixation CLI
       --into <dir>            where to create <name> (default: the working directory)
 
   hf new <name> --local     copy the template into ./<name>, substitute its placeholders, and
-                            prompt for the bootstrap admin's email
+                            write both bootstrap answers into its .env
+      --budget-usd <amount>   the app's monthly LLM budget (required; no default)
+      --email <address>       the bootstrap admin's address (required)
       --from <dir>            template checkout (default: the sibling hyperfixation-template)
       --into <dir>            where to create <name> (default: the working directory)
-      --email <address>       the bootstrap admin's address; skips the prompt
 
   hf up                     install, infra, migrate, bootstrap, status tokens, then hf dev —
                             the whole local loop after hf new, safe to rerun; seeds a $10
@@ -177,6 +178,18 @@ async function commandNew(argv: readonly string[], io: Io): Promise<number> {
     return await commandNewCloud(name, values, io);
   }
 
+  // Refused here rather than prompted for: `hf up` reads both out of the app's `.env`, so a
+  // local app started without them is the same half-answered app the cloud path has refused
+  // since Phase 3 — one that either cannot spend or cannot stop.
+  const missing = missingBootstrapFlags(values);
+  if (missing.length > 0) {
+    io.err(
+      `hf new ${name} --local needs ${missing.join(" and ")}: hf up reads both from the app's ` +
+        ".env and neither has a default.",
+    );
+    return 1;
+  }
+
   const from = values.from ?? (await requireTemplateSource());
   const result = await newApp({
     name,
@@ -184,6 +197,7 @@ async function commandNew(argv: readonly string[], io: Io): Promise<number> {
     into: values.into,
     local: values.local,
     email: values.email,
+    budgetUsd: values["budget-usd"],
   });
 
   io.out(`created ${result.dir} from ${from}`);
@@ -191,30 +205,34 @@ async function commandNew(argv: readonly string[], io: Io): Promise<number> {
   io.out(
     `  ${result.substituted.length} file(s) substituted` +
       (result.wroteEnv ? ", .env written from .env.example" : "") +
-      (result.wroteBootstrapEmail ? ", HF_BOOTSTRAP_EMAIL set" : ""),
+      (result.wroteBootstrapEmail ? ", HF_BOOTSTRAP_EMAIL set" : "") +
+      (result.wroteBootstrapBudget ? ", HF_BOOTSTRAP_BUDGET_USD set" : ""),
   );
   io.out("");
   io.out(`next: cd ${result.given} && hf up`);
   return 0;
 }
 
+type NewValues = { from?: string; into?: string; email?: string; "budget-usd"?: string };
+
 /**
- * The cloud half: both inputs it cannot invent are refused up front.
+ * The two answers `hf new` cannot invent, named in the order the usage lists them.
  *
- * Neither has a default. `--email` designates the one admin an app is ever granted without an
- * admin behind it, and a budget nobody chose is a deployed app that either cannot spend or
- * cannot stop — `hf bootstrap` has refused an unset one since Phase 1, and this is the same rule
- * one command earlier, where the answer costs nothing yet.
+ * `--email` designates the one admin an app is ever granted without an admin behind it, and a
+ * budget nobody chose is an app that either cannot spend or cannot stop — `hf bootstrap` has
+ * refused an unset one since Phase 1, and this is the same rule one command earlier, where the
+ * answer costs nothing yet.
  */
-async function commandNewCloud(
-  name: string,
-  values: { from?: string; into?: string; email?: string; "budget-usd"?: string },
-  io: Io,
-): Promise<number> {
-  const missing = [
+function missingBootstrapFlags(values: NewValues): string[] {
+  return [
     ...(values["budget-usd"] === undefined ? ["--budget-usd <amount>"] : []),
     ...(values.email === undefined ? ["--email <address>"] : []),
   ];
+}
+
+/** The cloud half: both inputs are refused up front, with nowhere else to carry them. */
+async function commandNewCloud(name: string, values: NewValues, io: Io): Promise<number> {
+  const missing = missingBootstrapFlags(values);
   if (missing.length > 0) {
     io.err(
       `hf new ${name} needs ${missing.join(" and ")}: a cloud app has no prompt and no .env to ` +
