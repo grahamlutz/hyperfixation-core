@@ -8,9 +8,10 @@ approves → perform an action** (send an email, mail a letter). Crashes and red
 double-bill or double-send: every LLM call and action is keyed and fenced, so a restarted run
 picks up exactly where it stopped.
 
-> **Status:** early. Phases 1–2 (run model and the local demo loop) are done, and the nine
-> `@hyperfixation/*` packages are on npm (0.1.3, with provenance). The cloud `hf new` is built but
-> has not yet completed a run against a real box. See [Roadmap](#roadmap).
+> **Status:** early. Phases 1–3 are done — the run model, the local demo loop, and a first app
+> (`demo-app`) provisioned by the cloud `hf new` and running on a real box. The nine
+> `@hyperfixation/*` packages are on npm (0.1.6, released by CI with provenance). See
+> [Roadmap](#roadmap).
 
 ## What it will do
 
@@ -100,8 +101,8 @@ to point it elsewhere, `--full` to add its lint and `next build`). CI runs it as
 | --- | --- | --- |
 | 1 | Core skeleton and run model: `db`, `workflows`, `auth`, `admin`, `cli`, redeploy/fence proofs | Done |
 | 2 | The demo loop, locally: approval inbox, pipeline board, tasks, Telegram, Langfuse | Done |
-| 3 | Cloud `hf new`, backups, `hf doctor`, restore checks | Built; first real-box run pending |
-| 4 | npm publish, API-diff gate, automated downstream bumps | Mostly built; bump PRs landing on apps unconfirmed |
+| 3 | Cloud `hf new`, backups, `hf doctor`, restore checks | Done: `demo-app` is deployed on the real box |
+| 4 | npm publish, API-diff gate, automated downstream bumps | Done but for X2: bump PRs land on the template, not yet on apps |
 | 5 | A second app; per-app isolation | Planned |
 | 6 | Channels, fetch cache, cadences, documents, digests | Planned |
 | 7 | `business-acquisition`: the first real app | Planned |
