@@ -143,10 +143,10 @@ describe("editing a period's budget from the admin", () => {
         period: PAST_PERIOD,
         budgetUsd: "42.5000",
         previousBudgetUsd: "10.0000",
-        spentUsd: "5.0000",
+        spentUsd: "5.000000",
       });
 
-      expect(await budgetRow(PAST_PERIOD)).toEqual({ budget: "42.5000", spent: "5.0000" });
+      expect(await budgetRow(PAST_PERIOD)).toEqual({ budget: "42.5000", spent: "5.000000" });
       const { rows } = await pool.query<{ budget: string }>(
         "SELECT budget_usd::text AS budget FROM hf_app_state WHERE id = 1",
       );
@@ -171,7 +171,7 @@ describe("editing a period's budget from the admin", () => {
         meta: {
           previousBudgetUsd: "42.5000",
           budgetUsd: "7.0000",
-          spentUsd: "5.0000",
+          spentUsd: "5.000000",
           reason: "cut",
         },
       });
@@ -202,7 +202,7 @@ describe("editing a period's budget from the admin", () => {
     it("takes effect at the next gate: the call the old budget refused now goes through", async () => {
       // The month's row does not exist until a gate opens it, from hf_app_state's 0.01.
       await expect(gate("b-first", APP_STATE_BUDGET)).resolves.toEqual({ text: "ok" });
-      expect(await budgetRow(period)).toEqual({ budget: "0.0100", spent: "0.0100" });
+      expect(await budgetRow(period)).toEqual({ budget: "0.0100", spent: "0.010000" });
 
       // 0.0100 spent + 0.0100 estimated is over the 0.0100 ceiling.
       await expect(gate("b-refused", APP_STATE_BUDGET)).rejects.toBeInstanceOf(BudgetExceeded);
@@ -214,7 +214,7 @@ describe("editing a period's budget from the admin", () => {
       });
 
       await expect(gate("b-after", APP_STATE_BUDGET)).resolves.toEqual({ text: "ok" });
-      expect(await budgetRow(period)).toEqual({ budget: "1.0000", spent: "0.0200" });
+      expect(await budgetRow(period)).toEqual({ budget: "1.0000", spent: "0.020000" });
     });
 
     it("is the kill lever below what the period already spent: the next gate refuses", async () => {

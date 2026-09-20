@@ -5,6 +5,11 @@
       "file": "0007_score_spec_name.sql",
       "reason": "Grandfathered: it shipped in 0.1.6, before this check existed. It drops hf_score_run_key_uq and creates hf_score_run_key_spec_uq over the same rows in the same migration, so no reader lost a unique key.",
       "replacedIn": "0.1.6"
+    },
+    {
+      "file": "0009_budget_spent_scale.sql",
+      "reason": "A lossless widening: hf_budget_period.spent_usd numeric(12,4) -> numeric(12,6), the scale hf_llm_call.cost_usd already has. No value can fail to fit and no reader loses a column, so N-1 runs against it unchanged — it is only on the allowlist because the check refuses every ALTER COLUMN … TYPE. It repairs, in the same migration, the rounding the narrow column had already accumulated.",
+      "replacedIn": "0.1.8"
     }
   ]
 }

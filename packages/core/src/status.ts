@@ -46,12 +46,19 @@ const QUEUES_STATEMENT =
  * Per-period spend against budget, with the exact drift `reconcile()` reports and never
  * corrects: a call is billed to the period stamped on its own row, so this comparison is not
  * an estimate.
+ *
+ * The subtraction happens in Postgres at the scale both sides are stored in, so the drift of a
+ * period whose counter agrees with its ledger is exactly `0.000000` — no float, no tolerance.
  */
 const BUDGET_STATEMENT =
-  "SELECT b.period, b.budget_usd::text AS budget_usd, b.spent_usd::text AS spent_usd, " +
-  "COALESCE((SELECT SUM(l.cost_usd) FROM hf_llm_call l " +
-  "WHERE l.period = b.period AND l.status = 'ok'), 0)::text AS ledger_usd " +
-  "FROM hf_budget_period b WHERE b.period = ANY($1::text[])";
+  "SELECT b.period, b.budget_usd::text AS budget_usd, " +
+  "b.spent_usd::numeric(12,6)::text AS spent_usd, " +
+  "l.ledger::numeric(12,6)::text AS ledger_usd, " +
+  "(b.spent_usd - l.ledger)::numeric(12,6)::text AS drift_usd " +
+  "FROM hf_budget_period b CROSS JOIN LATERAL (" +
+  "SELECT COALESCE(SUM(c.cost_usd), 0) AS ledger FROM hf_llm_call c " +
+  "WHERE c.period = b.period AND c.status = 'ok') l " +
+  "WHERE b.period = ANY($1::text[])";
 
 /**
  * `reconcile()`'s step (1) invariant violation, counted live rather than accumulated: a
@@ -74,6 +81,7 @@ export interface QueueStatus {
 export interface PeriodStatus {
   period: string;
   budgetUsd: string;
+  /** The period counter, printed at the ledger's scale — six decimals, like the two below. */
   spentUsd: string;
   /** `SUM(cost_usd)` of the period's `ok` rows, for the drift below. */
   ledgerUsd: string;
@@ -146,6 +154,7 @@ export async function appStatus(pool: Pool, options: StatusOptions): Promise<Sta
     budget_usd: string;
     spent_usd: string;
     ledger_usd: string;
+    drift_usd: string;
   }>(BUDGET_STATEMENT, [[current, previous]]);
   const periodStatus = (period: string): PeriodStatus | null => {
     const row = budget.rows.find((candidate) => candidate.period === period);
@@ -155,7 +164,7 @@ export async function appStatus(pool: Pool, options: StatusOptions): Promise<Sta
       budgetUsd: row.budget_usd,
       spentUsd: row.spent_usd,
       ledgerUsd: row.ledger_usd,
-      driftUsd: (Number(row.spent_usd) - Number(row.ledger_usd)).toFixed(6),
+      driftUsd: row.drift_usd,
     };
   };
 

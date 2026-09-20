@@ -238,7 +238,7 @@ one real call reconciled to a real usage line.
 |---|---|---|
 | Deploy failed: `Bind for :::3000 … port is already allocated`. A published host port is one per box, and `demo-app` had it | the prod compose `expose`s the port instead of publishing it; test-only overlay for the e2e; `compose-ports.test.ts` | template #47 ✅ |
 | `hf_budget_period.spent_usd` was `numeric(12,4)` while `hf_llm_call.cost_usd` is `numeric(12,6)`, so the period total rounded on every settle: `/api/status` read `spentUsd 0.0017` against `ledgerUsd 0.001693`, drift `0.000007`, health `degraded`. Measured: 200 settles of ~$0.0008 end $0.0007 off the ledger, and a $0.0049 cap admits six calls where five fit | migration `0009` widens `spent_usd` to the ledger's scale; a bounded backfill repairs only rows whose gap is explainable as rounding; `packages/ai/src/budget-scale.test.ts` | core #118 🚧 in progress |
-| core #118's `downstream` and `scaffold` jobs fail on the template's `tests/admin-budget.test.ts`, which pins `spent_usd` at four decimals | the assertions read the value at whatever scale the ledger stores | template #48 🚧 in progress |
+| core #118's `downstream` and `scaffold` jobs fail on the template's `tests/admin-budget.test.ts`, which pins `spent_usd` at four decimals | the assertions read the value at whatever scale the ledger stores | template #48 ✅ |
 
 > **After #47.** `demo-two` serves `https://demo-two.hyperfixation.ai` on `3bf4cef`, core `0.1.7`, `llm.mode` `live`;
 > Coolify routes to it with only `expose`, so that assumption is no longer unverified. `hf doctor` shows both apps'
@@ -249,6 +249,16 @@ one real call reconciled to a real usage line.
 > **Pending:** Graham's comparison with the Anthropic console usage page; **W2** — one core PR adding
 > `grahamlutz/demo-two` to `downstream.txt` **and** to `release.yml`'s repository list (W1's lesson); `hf restore-check
 > demo-two` after a backup; whether Langfuse identifies the app on a trace (open question 3).
+
+> **Finding (X3, 2026-09-20): the first two real calls put `/api/status` into `degraded` on a drift that was only a
+> column's scale.** Haiku 4.5 billed $0.000838 and $0.000855 — exactly list price for 488/70 and 485/74 tokens — but
+> `hf_budget_period.spent_usd` was `numeric(12,4)` against `hf_llm_call.cost_usd`'s `numeric(12,6)`, so the period read
+> `spentUsd "0.0017"`, `ledgerUsd "0.001693"`, `driftUsd "0.000007"`, and `hf doctor` WARNed `drift`. Fixtures cost 0, so
+> nothing before a real call could show it. The settle is `spent_usd = spent_usd + cost_usd`, so the rounding was of the
+> running total and grew per call: 200 settles of those two prices land on `0.1700` against a ledger of `0.169300`, and a
+> period capped at `$0.004900` admits six calls of $0.000838 where five fit. Fixed in core 0.1.8 — migration
+> `0009_budget_spent_scale` widens the column to `numeric(12,6)` and repairs the rounding it had already accumulated;
+> drift is now subtracted in Postgres at that scale, so a settled period reads `0.000000` and not a tolerance.
 
 ## X4 — Isolation exit (user; after X3; D1 makes it two commands) — ⬜
 
