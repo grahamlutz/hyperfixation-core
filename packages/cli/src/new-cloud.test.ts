@@ -9,7 +9,7 @@ import {
   invalidateStaleSecretSteps,
   runSteps,
   StepInvariantViolated,
-  type CloudContext,
+  type StepRunContext,
   type Step,
 } from "./new-cloud.js";
 import { openAppState, secretsHash, type AppStateStore, type StepName } from "./state.js";
@@ -17,7 +17,7 @@ import { openAppState, secretsHash, type AppStateStore, type StepName } from "./
 describe("the cloud hf new step runner", () => {
   let dir: string;
   let state: AppStateStore;
-  let context: CloudContext;
+  let context: StepRunContext;
   let ran: StepName[];
 
   beforeEach(async () => {

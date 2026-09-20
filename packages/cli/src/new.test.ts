@@ -2,8 +2,12 @@ import { cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/pr
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { InvalidAppName } from "./names.js";
+import { checklistLines } from "./checklist.js";
+import { MissingConfig, type OperatorConfig } from "./config.js";
+import { deriveNames, InvalidAppName } from "./names.js";
+import { newAppCloud, REQUIRED_CLOUD_CONFIG } from "./new-cloud.js";
 import { newApp, TEMPLATE_MARKER, TemplateError } from "./new.js";
+import { createLocalRunner } from "./runner.js";
 import {
   fetchTemplate,
   findTemplateSource,
@@ -218,6 +222,100 @@ describe("fetchTemplate", () => {
     await expect(
       fetchTemplate(undefined, path.join(workspace, "f3"), { download: empty }),
     ).rejects.toThrow(TemplateError);
+  });
+});
+
+describe("hf new in the cloud", () => {
+  const CONFIG: OperatorConfig = {
+    HF_COOLIFY_URL: "https://coolify.test",
+    HF_COOLIFY_TOKEN: "coolify-token",
+    HF_COOLIFY_SERVER_UUID: "server-1",
+    HF_COOLIFY_GITHUB_APP_UUID: "github-app-1",
+    HF_COOLIFY_POSTGRES_UUID: "postgres-uuid",
+    HF_SSH_HOST: "box",
+    HF_BASE_DOMAIN: "hf.test",
+    HF_SMTP_URL: "smtp://smtp.test:587",
+    HF_EMAIL_FROM: "demo@hf.test",
+    HF_LANGFUSE_URL: "https://langfuse.test",
+  };
+
+  /** No steps: this is the run's own wiring — config, names, state file, checklist. */
+  const cloudRun = async (config: OperatorConfig) =>
+    await newAppCloud({
+      name: "demo-app",
+      email: "admin@hf.test",
+      budgetUsd: "25",
+      into: workspace,
+      stateDir: path.join(workspace, "state"),
+      config,
+      env: {},
+      steps: [],
+      runner: createLocalRunner(),
+      io: { out: () => undefined },
+    });
+
+  it("names every unset operator config key before it creates anything", async () => {
+    const refusal = await cloudRun({}).catch((error: unknown) => error);
+
+    expect(refusal).toBeInstanceOf(MissingConfig);
+    expect((refusal as MissingConfig).names).toEqual(REQUIRED_CLOUD_CONFIG);
+  });
+
+  it("derives the directory and the host, and returns the checklist", async () => {
+    const result = await cloudRun(CONFIG);
+
+    expect(result.dir).toBe(path.join(workspace, "demo-app"));
+    expect(result.fqdn).toBe("demo-app.hf.test");
+
+    const checklist = result.checklist.join("\n");
+    // No provider key in this config, which is the one failure a deployed app hides.
+    expect(checklist).toContain("FIXTURE");
+    expect(checklist).toContain("hf_demo_app_ro");
+    expect(checklist).toContain("downstream.txt");
+    expect(checklist).toContain("core-bump/*");
+    expect(checklist).toContain("Enrol your passkey from exactly https://demo-app.hf.test");
+    // Dropped until the template has a Google provider; a line for one is a wrong instruction.
+    expect(checklist).not.toContain("Google");
+  });
+
+  it("names the provider keys as configured rather than warning about fixtures", async () => {
+    const result = await cloudRun({ ...CONFIG, HF_OPENAI_API_KEY: "sk-openai" });
+
+    expect(result.checklist.join("\n")).not.toContain("FIXTURE");
+  });
+});
+
+describe("the checklist", () => {
+  const input = {
+    names: deriveNames("demo-app"),
+    fqdn: "demo-app.hf.test",
+    repo: "grahamlutz/demo-app",
+    dbHost: "postgres-uuid",
+    stateFile: "/home/g/.config/hf/state/demo-app.json",
+    providerKeysSent: ["ANTHROPIC_API_KEY"],
+    backupRegistered: true,
+  };
+
+  it("shows the write token once, and no other secret ever", () => {
+    const shown = checklistLines({ ...input, writeToken: "write-token-plaintext" }).join("\n");
+    const later = checklistLines(input).join("\n");
+
+    expect(shown).toContain("write-token-plaintext");
+    expect(later).not.toContain("write-token-plaintext");
+    // The read-only password is named by where it is, not printed.
+    expect(later).toContain("database.readonlyPassword in /home/g/.config/hf/state/demo-app.json");
+    expect(later).toContain("postgres://hf_demo_app_ro:<password>@postgres-uuid:5432/hf_demo_app");
+  });
+
+  it("says whether a backup is registered, because only one of the two needs doing", () => {
+    expect(checklistLines(input).join("\n")).toContain("A Coolify backup is registered");
+    expect(checklistLines({ ...input, backupRegistered: false }).join("\n")).toContain(
+      "No backup is registered",
+    );
+  });
+
+  it("prints the downstream.txt line Phase 4's bump needs", () => {
+    expect(checklistLines(input).join("\n")).toContain('"grahamlutz/demo-app" to downstream.txt');
   });
 });
 

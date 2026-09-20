@@ -34,6 +34,12 @@ export const CONFIG_KEYS = [
   "HF_BOX_IP",
   "HF_SMTP_URL",
   "HF_EMAIL_FROM",
+  // The two model-provider keys, and the only optional ones here. An app deployed without
+  // either serves fixture drafts (`/api/status` reports `llm.mode`), so `hf new` omits the
+  // variable altogether rather than sending an empty one and printing a checklist line — an
+  // empty value in Coolify's UI reads as configured.
+  "HF_ANTHROPIC_API_KEY",
+  "HF_OPENAI_API_KEY",
 ] as const;
 
 export type ConfigKey = (typeof CONFIG_KEYS)[number];
