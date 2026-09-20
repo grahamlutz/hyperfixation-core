@@ -41,6 +41,9 @@ export const templateStep: Step<CloudStepContext> = {
     await substituteTree(fetched, names);
     // The marker is what `assertTemplateSource` looks for: an app is never a template twice.
     await rm(path.join(fetched, TEMPLATE_MARKER));
+    // Recorded before the rename, not after: a crash between the two must leave a directory this
+    // run's state vouches for, or the rerun would refuse the app it just made.
+    await context.state.patch({ templateStartedAt: new Date(context.now()).toISOString() });
     await rename(fetched, dir);
 
     context.io.out(`${names.given}: template fetched into ${dir}`);
@@ -48,14 +51,27 @@ export const templateStep: Step<CloudStepContext> = {
 };
 
 /**
- * A directory already at the target: this app on a run whose state was lost, or something else.
+ * A directory already at the target: this app on a run that crashed after the rename, or
+ * something else.
  *
- * "This app" means a substituted template — its `package.json` carries the underscored app name
- * and the marker is gone. Anything else is the local flow's rule, refused rather than written
- * into.
+ * Adopted only on a genuine resume — the state cache records that this app's template step began
+ * (`templateStartedAt`) or finished. With no such record the directory is not ours however much it
+ * looks like it: an earlier `hf new --local` leaves a substituted scaffold with the right
+ * `package.json` name, and adopting it once pushed a stale template to a new repo.
+ *
+ * On a resume, "this app" means a substituted template — its `package.json` carries the
+ * underscored app name and the marker is gone. Anything else is the local flow's rule, refused
+ * rather than written into.
  */
 async function adoptOrRefuse(context: CloudStepContext): Promise<void> {
-  const { dir, names } = context;
+  const { dir, names, state } = context;
+  const resuming = state.state.templateStartedAt !== undefined || state.isDone("template");
+  if (!resuming) {
+    throw new TemplateError(
+      `${dir} already exists and hf has no record of creating it, so it will not adopt it on a ` +
+        `first run. Move it away (or delete it) and rerun; the template is fetched fresh.`,
+    );
+  }
   const substituted =
     !(await exists(path.join(dir, TEMPLATE_MARKER))) && (await packageName(dir)) === names.appName;
   if (!substituted) {

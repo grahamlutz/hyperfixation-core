@@ -677,7 +677,9 @@ describe("a cloud hf new, all ten steps", () => {
     });
 
     // The state file is gone; the roles are not. Every password is regenerated, and the deployed
-    // app holds the old one until the PATCH and the redeploy below.
+    // app holds the old one until the PATCH and the redeploy below. The old app directory is
+    // moved away, as the template step's refusal to adopt it on a first run tells the operator.
+    await rm(path.join(workspace, name), { recursive: true, force: true });
     const cold = await openAppState(name, { dir: await tempDir() });
     const second = await fixture({ name, state: cold, workspace, committed: true });
     try {
