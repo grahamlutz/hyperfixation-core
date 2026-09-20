@@ -43,6 +43,15 @@ reads. `docker-compose.prod.yml` runs `migrate` before the new `web`/`worker`, s
 two steps the old code is live against the new schema. Splitting a rename across two releases
 (add, backfill, then drop in N+1) is the same two-release rule as deprecations.
 
+`packages/db/src/migration-additivity.test.ts` enforces it mechanically. It reads every committed
+core migration and fails on a `DROP TABLE`, `DROP COLUMN`, `RENAME`, `ALTER COLUMN … TYPE`,
+`SET NOT NULL` on a column the migration did not itself add, or a `DROP CONSTRAINT`/`DROP INDEX`
+on an object an earlier migration created — outside comments and string literals. The escape is
+`packages/db/src/migration-additivity.allow.json`: one `{ file, reason, replacedIn }` per exempted
+migration, where `replacedIn` is the release that already shipped the replacement. An entry is a
+reviewer's decision that the two-release rule was followed, not a way around it, and the test
+fails an entry whose file no longer violates anything — a stale exemption has to be deleted.
+
 ## The template's pin
 
 The template pins `^0.1.1`. At 0.x that caret does not cross a minor, so a breaking `0.2.0` is
