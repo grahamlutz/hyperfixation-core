@@ -204,6 +204,7 @@ describe("restoreCheck", () => {
 
     expect(result.ok).toBe(true);
     expect(result.dump.path).toBe(dump);
+    expect(result.strict).toBe(false);
     expect(rowFor(result, "widget")).toEqual({ table: "widget", live: 2, restored: 2, verdict: "ok" });
     // The `hf_*` half of the rule, alongside the `normalized_name` half above.
     expect(result.rows.filter((row) => row.table.startsWith("hf_")).length).toBeGreaterThan(5);
@@ -240,6 +241,122 @@ describe("restoreCheck", () => {
     });
     expect(state.state.lastRestoreCheckAt).toBeUndefined();
     expect(await scratchExists(db.databaseName)).toBe(false);
+  }, 120_000);
+
+  it("reads an append-only table the live side has moved on from as drift, and still passes", async () => {
+    const db = await seededDatabase(1);
+    await pgDump(db.databaseName);
+    // What X1 hit: an app that kept working between the dump and the check. `hf_audit` is
+    // insert-only, so two extra live rows are the app running, not a dump that lost them.
+    await asRole(db.migratorUrl, async (migrator) => {
+      await migrator.query("INSERT INTO hf_audit (action) VALUES ('after-the-dump'), ('again')");
+    });
+    const state = await stateFor(db.appName);
+    const runner = hostRunner();
+
+    const result = await restoreCheck({
+      app: db.appName,
+      state,
+      source: hostSource(runner),
+      ...harness(runner),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.matched).toBe(true);
+    expect(rowFor(result, "hf_audit")).toEqual({
+      table: "hf_audit",
+      live: 2,
+      restored: 0,
+      drift: 2,
+      verdict: "drift",
+    });
+    expect(state.state.lastRestoreCheckAt).toBeDefined();
+  }, 120_000);
+
+  it("fails an append-only table the dump has more of than the live database", async () => {
+    const db = await seededDatabase(1);
+    await asRole(db.migratorUrl, async (migrator) => {
+      await migrator.query("INSERT INTO hf_audit (action) VALUES ('before-the-dump')");
+    });
+    await pgDump(db.databaseName);
+    // Rows an append-only table cannot lose, lost: the one thing the drift rule must not hide.
+    await asRole(db.migratorUrl, async (migrator) => {
+      await migrator.query("DELETE FROM hf_audit");
+    });
+    const state = await stateFor(db.appName);
+    const runner = hostRunner();
+
+    const result = await restoreCheck({
+      app: db.appName,
+      state,
+      source: hostSource(runner),
+      ...harness(runner),
+    });
+
+    expect(result.ok).toBe(false);
+    expect(rowFor(result, "hf_audit")).toEqual({
+      table: "hf_audit",
+      live: 0,
+      restored: 1,
+      verdict: "mismatch",
+    });
+    expect(state.state.lastRestoreCheckAt).toBeUndefined();
+  }, 120_000);
+
+  it("fails a table that is not on the append-only list however it differs", async () => {
+    const db = await seededDatabase(1);
+    await pgDump(db.databaseName);
+    // `hf_label` is insert-only today and deliberately not listed, so the same churn that is
+    // drift on `hf_audit` is still a mismatch here.
+    await asRole(db.migratorUrl, async (migrator) => {
+      await migrator.query(
+        "INSERT INTO hf_label (record_type, record_id, target, value) VALUES ('widget', '1', 'record', 'up')",
+      );
+    });
+
+    const runner = hostRunner();
+    const result = await restoreCheck({
+      app: db.appName,
+      state: await stateFor(db.appName),
+      source: hostSource(runner),
+      ...harness(runner),
+    });
+
+    expect(result.ok).toBe(false);
+    expect(rowFor(result, "hf_label")).toEqual({
+      table: "hf_label",
+      live: 1,
+      restored: 0,
+      verdict: "mismatch",
+    });
+  }, 120_000);
+
+  it("--strict holds an append-only table to the same exact count as everything else", async () => {
+    const db = await seededDatabase(1);
+    await pgDump(db.databaseName);
+    await asRole(db.migratorUrl, async (migrator) => {
+      await migrator.query("INSERT INTO hf_audit (action) VALUES ('after-the-dump')");
+    });
+    const state = await stateFor(db.appName);
+    const runner = hostRunner();
+
+    const result = await restoreCheck({
+      app: db.appName,
+      state,
+      source: hostSource(runner),
+      strict: true,
+      ...harness(runner),
+    });
+
+    expect(result.strict).toBe(true);
+    expect(result.ok).toBe(false);
+    expect(rowFor(result, "hf_audit")).toEqual({
+      table: "hf_audit",
+      live: 1,
+      restored: 0,
+      verdict: "mismatch",
+    });
+    expect(state.state.lastRestoreCheckAt).toBeUndefined();
   }, 120_000);
 
   it("gives a table only one side has its own verdict rather than a crash", async () => {
@@ -404,11 +521,13 @@ describe("formatRestoreCheck", () => {
     dump: { path: "/data/coolify/backups/hf_demo.dmp", takenAt: new Date(), from: "/data" },
     dumpAgeHours: 3.25,
     dumpStale: false,
+    strict: false,
     rows: [
       { table: "hf_app_state", live: 1, restored: 1, verdict: "ok" },
       { table: "widget", live: 3, restored: 2, verdict: "mismatch" },
       { table: "late_widget", live: 0, verdict: "live only" },
     ],
+    matched: false,
     ok: false,
   };
 
@@ -421,11 +540,32 @@ describe("formatRestoreCheck", () => {
     expect(lines.at(-1)).toBe("2 of 3 table(s) did not match");
   });
 
-  it("warns above 36 h, and says nothing about age below it", () => {
+  it("spells a drift row ok (drift +N) and counts it as matched", () => {
+    const lines = formatRestoreCheck({
+      ...base,
+      rows: [
+        { table: "hf_app_state", live: 1, restored: 1, verdict: "ok" },
+        { table: "hf_run", live: 30, restored: 3, drift: 27, verdict: "drift" },
+      ],
+      matched: true,
+      ok: true,
+    });
+
+    expect(lines).toContain("hf_run        30    3         ok (drift +27)");
+    expect(lines.at(-1)).toBe("2 table(s) matched, 1 with drift since the dump");
+  });
+
+  it("warns above 24 h, and says nothing about age below it", () => {
     expect(formatRestoreCheck({ ...base, dumpAgeHours: 51, dumpStale: true })[1]).toContain(
-      "WARNING: the dump is 51.0 h old — over 36 h",
+      "WARN: the dump is 51.0 h old — over 24 h",
     );
-    expect(formatRestoreCheck(base).join("\n")).not.toContain("WARNING");
+    expect(formatRestoreCheck(base).join("\n")).not.toContain("WARN");
+  });
+
+  it("says so in the header when the comparison was strict", () => {
+    expect(formatRestoreCheck({ ...base, strict: true })[0]).toBe(
+      "hf_demo: /data/coolify/backups/hf_demo.dmp, 3.3 h old, strict",
+    );
   });
 });
 
