@@ -1,5 +1,11 @@
 # @hyperfixation/ai
 
+## 0.1.4
+
+### Patch Changes
+
+- @hyperfixation/db@0.1.4
+
 ## 0.1.3
 
 ### Patch Changes

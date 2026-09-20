@@ -124,10 +124,11 @@ describe("operator config", () => {
     expect((refusal as Error).message).not.toContain(COOLIFY_TOKEN);
   });
 
-  it("carries the twenty-six keys Phase 3 settled on", () => {
-    expect(CONFIG_KEYS).toHaveLength(26);
-    expect(new Set(CONFIG_KEYS).size).toBe(26);
+  it("carries the twenty-seven keys Phase 3 settled on", () => {
+    expect(CONFIG_KEYS).toHaveLength(27);
+    expect(new Set(CONFIG_KEYS).size).toBe(27);
     expect(CONFIG_KEYS).toContain("HF_GITHUB_APP_SLUGS");
+    expect(CONFIG_KEYS).toContain("HF_COOLIFY_S3_STORAGE_UUID");
     expect(CONFIG_KEYS).toContain("HF_DB_HOST_INTERNAL");
     expect(CONFIG_KEYS).toContain("HF_ANTHROPIC_API_KEY");
     expect(CONFIG_KEYS).toContain("HF_OPENAI_API_KEY");

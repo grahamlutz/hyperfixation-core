@@ -31,14 +31,21 @@ A new upstream commit is a different job: bump the row above, re-trim, and say s
 > **`coolify.json` is the box's own Coolify version**, re-vendored on 2026-09-20 from `openapi.json`
 > at tag `v4.3.21` — the box serves no document of its own. Across the thirteen operations first kept, the
 > tag and the `main` commit vendored before it are identical field for field, so the trimmed file
-> did not change; only the row above did. `POST /projects/{uuid}/environments` was merged in later
-> from the same tag, verbatim.
+> did not change; only the row above did. `POST /projects/{uuid}/environments`,
+> `GET`/`POST`/`PATCH /applications/{uuid}/envs`,
+> `PATCH /databases/{uuid}/backups/{scheduled_backup_uuid}` and `GET /s3-storages` were merged in
+> later from the same tag, verbatim — the last two carry only the verb the CLI issues, and the
+> file's own key order is untouched because the merge is textual (a JSON round trip reorders the
+> integer-like response codes).
 >
 > A green test still proves less than it looks. Coolify enforces rules its document does not
 > express: a `dockercompose` application is refused `domains` outright (422, *"Use
 > docker_compose_domains instead"*) while the schema lists both fields side by side. That one is in
 > `src/test-support/openapi.ts` as an explicit rule, because putting it in the document here would
-> be inventing a field upstream does not have. The next one will be found the same way — by the box.
+> be inventing a field upstream does not have. The next one will be found the same way — by the box:
+> `POST /databases/{uuid}/backups` says `s3_storage_uuid` is "required if save_s3 is true" in a
+> description a validator cannot read, and Coolify accepts the request without it, then disables the
+> upload at run time and keeps the dump on the box.
 
 ## Operations kept
 
@@ -49,9 +56,12 @@ A new upstream commit is a different job: bump the row above, re-trim, and say s
 | coolify | `GET /applications` | E3 — the application, found by name on a rerun |
 | coolify | `POST /applications/private-github-app` | E3 — the application, from the private repo |
 | coolify | `PATCH /applications/{uuid}/envs/bulk` | E3 — `REQUIRED_ENV` in one call |
+| coolify | `GET`/`POST`/`PATCH /applications/{uuid}/envs` | E3 — `SOURCE_COMMIT`, written per deploy rather than with the operator's secrets |
 | coolify | `POST /deploy`, `GET /deployments/{uuid}` | E3 — deploy and poll |
 | coolify | `POST /databases/{uuid}/backups` | E3 — backup registration |
-| coolify | `GET /databases/{uuid}/backups` | E5 — the registered backups |
+| coolify | `GET /databases/{uuid}/backups` | E3 — the schedule an earlier run left; E5 — the registered backups |
+| coolify | `PATCH /databases/{uuid}/backups/{scheduled_backup_uuid}` | E3 — that schedule's S3 settings, rather than a second schedule |
+| coolify | `GET /s3-storages` | E3 — the storage the daily dump is uploaded to |
 | coolify | `GET`/`PATCH /databases/{uuid}` | E2 — the Postgres resource, and `is_public`/`public_port` |
 | cloudflare | `GET`/`POST /zones/{zone_id}/dns_records` | E3 — the `A` record |
 | github | `POST /user/repos`, `POST /orgs/{org}/repos` | E3 — the app's private repo |

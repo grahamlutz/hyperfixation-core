@@ -1,9 +1,18 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { createReadStream } from "node:fs";
 import { createServer, connect as connectTcp, type Socket } from "node:net";
 
 export interface ExecOptions {
   /** Written to the command's stdin and then closed. SQL goes here, never into argv. */
   input?: string;
+  /**
+   * A file **on the far side**, streamed into the command's stdin instead of `input`.
+   *
+   * How a dump on the box reaches a `pg_restore` that runs inside the Postgres container: the
+   * file is the host's and the process is the container's, so nothing but stdin spans the two.
+   * Takes precedence over `input`.
+   */
+  inputFile?: string;
 }
 
 export interface ExecResult {
@@ -71,11 +80,21 @@ const SSH_OPTIONS = [
 ] as const;
 
 /** The argv `exec` runs, `ssh` excluded — the array the test asserts against. */
-export function sshExecArgv(host: string, command: readonly string[]): string[] {
+export function sshExecArgv(
+  host: string,
+  command: readonly string[],
+  options: ExecOptions = {},
+): string[] {
   assertHost(host);
   // `ssh` hands the remote end one string and the login shell splits it, so the array has to be
-  // re-quoted for that shell; nothing else in this file ever builds a shell word.
-  return ["-T", ...SSH_OPTIONS, host, shellQuote(command)];
+  // re-quoted for that shell; nothing else in this file ever builds a shell word. `inputFile`
+  // becomes that shell's own `<` redirection, which is the only way a far-side file reaches the
+  // stdin of a far-side command without being pulled across the link first.
+  const remote =
+    options.inputFile === undefined
+      ? shellQuote(command)
+      : `${shellQuote(command)} < ${shellQuote([options.inputFile])}`;
+  return ["-T", ...SSH_OPTIONS, host, remote];
 }
 
 export function sshTunnelArgv(
@@ -122,7 +141,12 @@ export function createSshRunner(options: SshRunnerOptions): Runner {
 
   return {
     exec: async (command, execOptions) =>
-      await spawnCollecting(ssh, sshExecArgv(options.host, command), execOptions),
+      // The redirection is the remote shell's, so `inputFile` is spent building the remote word
+      // and must not also be opened on this machine.
+      await spawnCollecting(ssh, sshExecArgv(options.host, command, execOptions), {
+        ...execOptions,
+        inputFile: undefined,
+      }),
 
     tunnel: async (remotePort, remoteHost = TUNNEL_LOOPBACK) => {
       const localPort = await freeLocalPort();
@@ -225,18 +249,27 @@ async function spawnCollecting(
     stderr += chunk.toString("utf8");
   });
 
+  const file = options.inputFile === undefined ? undefined : createReadStream(options.inputFile);
+
   const closed = new Promise<number | null>((resolve, reject) => {
     // A child that exits before reading its stdin (`true`, a refused ssh) makes the write fail with
     // EPIPE; the exit code already says what happened. Any other stdin error is a real failure.
     child.stdin?.on("error", (error: NodeJS.ErrnoException) => {
+      file?.destroy();
       if (error.code === "EPIPE") return;
       child.kill();
       reject(error);
     });
+    file?.once("error", (cause) => {
+      child.kill();
+      reject(new RunnerError(`could not read ${String(options.inputFile)} into stdin`, { cause }));
+    });
     child.once("error", reject);
     child.once("close", (exitCode) => resolve(exitCode));
   });
-  child.stdin?.end(options.input ?? "");
+
+  if (file === undefined) child.stdin?.end(options.input ?? "");
+  else if (child.stdin !== null) file.pipe(child.stdin);
 
   const code = await closed;
   return { code, stdout, stderr };

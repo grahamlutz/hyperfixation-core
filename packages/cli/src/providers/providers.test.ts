@@ -85,6 +85,18 @@ const ROUTES: StubRoute[] = [
     json: { uuid: "b1" },
   },
   {
+    spec: "coolify",
+    method: "patch",
+    url: `${COOLIFY}/api/v1/databases/{uuid}/backups/{scheduled_backup_uuid}`,
+    json: { message: "updated" },
+  },
+  {
+    spec: "coolify",
+    method: "get",
+    url: `${COOLIFY}/api/v1/s3-storages`,
+    json: [{ uuid: "s1", name: "hetzner-backups", bucket: "hf", region: "fsn1", is_usable: true }],
+  },
+  {
     spec: "cloudflare",
     method: "get",
     url: `${CLOUDFLARE}/zones/{zone_id}/dns_records`,
@@ -296,6 +308,24 @@ describe("provider clients", () => {
       });
 
       expect(backup.uuid).toBe("b1");
+    });
+
+    it("updates an existing schedule's S3 settings, which is how a rerun reconciles one", async () => {
+      await coolify.updateDatabaseBackup("db1", "b1", {
+        save_s3: true,
+        s3_storage_uuid: "s1",
+      });
+
+      expect(harness.requests[0]!.pathname).toBe("/api/v1/databases/db1/backups/b1");
+      expect(harness.requests[0]!.body).toMatchObject({ save_s3: true, s3_storage_uuid: "s1" });
+    });
+
+    it("lists the S3 storages a backup can be uploaded to", async () => {
+      expect((await coolify.listS3Storages())[0]).toMatchObject({
+        uuid: "s1",
+        name: "hetzner-backups",
+        is_usable: true,
+      });
     });
   });
 

@@ -119,7 +119,7 @@ export class CommandFailed extends Error {
 }
 
 // @public (undocumented)
-export const COMMANDS: readonly ["new", "migrate", "bootstrap", "status-token", "check", "gen", "dev", "up", "deploy", "doctor", "restore-check"];
+export const COMMANDS: readonly ["new", "migrate", "bootstrap", "status-token", "check", "gen", "dev", "up", "doctor", "restore-check"];
 
 // @public
 export const COOLIFY_BACKUP_DIR = "/data/coolify/backups";
@@ -151,6 +151,7 @@ export interface Database {
     };
     // (undocumented)
     close(): Promise<void>;
+    readonly container?: string;
     // (undocumented)
     readonly kind: DatabaseTransport;
     // (undocumented)
@@ -214,6 +215,7 @@ export const EXCLUDED_ENTRIES: readonly string[];
 // @public (undocumented)
 export interface ExecOptions {
     input?: string;
+    inputFile?: string;
 }
 
 // @public (undocumented)
@@ -224,6 +226,12 @@ export interface ExecResult {
     // (undocumented)
     stdout: string;
 }
+
+// @public
+export function findPostgresContainer(runner: Runner, containers: readonly string[]): Promise<{
+    container: string;
+    address: string;
+}>;
 
 // @public
 export function findTemplateSource(cwd?: string): Promise<string | undefined>;
@@ -382,11 +390,20 @@ export function openDatabaseUrl(adminUrl: string): Database;
 // @public
 export function parseEnvFile(contents: string): Record<string, string>;
 
-// @public
+// @public @deprecated
 export function pgRestoreArgv(options: {
     url: string;
     role: string;
     file: string;
+    pgRestorePath?: string;
+}): string[];
+
+// @public
+export function pgRestoreInContainerArgv(options: {
+    container: string;
+    adminUser: string;
+    database: string;
+    role: string;
     pgRestorePath?: string;
 }): string[];
 
@@ -500,11 +517,14 @@ export class RestoreCheckError extends Error {
 
 // @public (undocumented)
 export interface RestoreCheckOptions {
+    adminUser?: string;
     app: string;
+    container: string;
     database: Database | string;
     // (undocumented)
     now?: Date;
     pgRestorePath?: string;
+    // @deprecated (undocumented)
     restoreAdminUrl?: string;
     runner: Runner;
     // (undocumented)
@@ -574,7 +594,7 @@ export const SCRATCH_SUFFIX = "_restore_check";
 export function shellQuote(command: readonly string[]): string;
 
 // @public
-export function sshExecArgv(host: string, command: readonly string[]): string[];
+export function sshExecArgv(host: string, command: readonly string[], options?: ExecOptions): string[];
 
 // @public (undocumented)
 export interface SshRunnerOptions {
@@ -641,7 +661,7 @@ export interface Tunnel {
 }
 
 // @public (undocumented)
-export const USAGE = "hf \u2014 the hyperfixation CLI\n\n  hf new <name>             provision the app in the cloud: fetch the template, push a private\n                            repo, register a backup, Sentry, Langfuse and DNS, create the\n                            database and its roles, create the Coolify application and its\n                            environment, deploy, and print what is left to do by hand.\n                            Resumable \u2014 a rerun repeats only what did not finish\n      --budget-usd <amount>   the app's monthly LLM budget (required; no default)\n      --email <address>       the bootstrap admin's address (required)\n      --from <specifier>      template to fetch (default: gh:grahamlutz/hyperfixation-template)\n      --into <dir>            where to create <name> (default: the working directory)\n\n  hf new <name> --local     copy the template into ./<name>, substitute its placeholders, and\n                            prompt for the bootstrap admin's email\n      --from <dir>            template checkout (default: the sibling hyperfixation-template)\n      --into <dir>            where to create <name> (default: the working directory)\n      --email <address>       the bootstrap admin's address; skips the prompt\n\n  hf up                     install, infra, migrate, bootstrap, status tokens, then hf dev \u2014\n                            the whole local loop after hf new, safe to rerun; seeds a $10\n                            budget unless HF_BOOTSTRAP_BUDGET_USD is set in .env\n\n  hf migrate                create the application role, then run the app's migrate.ts\n      --skip-roles            the cloud path, where the roles already exist\n\n  hf bootstrap              grant the app its one bootstrap admin, and seed hf_app_state\n      --email <address>       the address to promote; otherwise HF_BOOTSTRAP_EMAIL\n      --budget-usd <amount>    the app's starting budget; otherwise HF_BOOTSTRAP_BUDGET_USD\n\n  hf status-token           provision /api/status's read and write tokens\n      --read                   only the read token; refuses if it is already set\n      --write                  only the write token; refuses if it is already set\n      --rotate                 replace a token that is already set\n                               (no flags: fills in whichever of the two is unset)\n\n  hf check                  declared env, pending migrations, and E001-E006\n\n  hf deploy <name>          set SOURCE_COMMIT to a commit, deploy it, and wait until /api/status\n                            reports it. Coolify's push auto-deploy is off, so this is what\n                            publishes a merge to main\n      --sha <sha>             the commit to deploy (default: main's, via git ls-remote)\n\n  hf doctor [name]          every deployed app in the state cache, or one: /api/status under its\n                            read token, the deployed version against main, E006 as the app role,\n                            the last restore check, and open core-bump PRs. Exits 1 on any finding\n\n  hf gen [generator]        the app's turbo generators\n\n  hf dev                    docker compose up, then pnpm dev under HF_BUILD_SHA=dev-<timestamp>\n      --no-compose            leave the dev infrastructure alone\n      --compose-only          bring the infrastructure up and stop\n\n  hf restore-check <name>   restore the newest hf_<name> dump beside the live database and\n                            compare row counts; exits 1 on any mismatch\n      --backup-dir <dir>      where the dumps are (default: Coolify's on the box)\n      --from-s3               read the dump from object storage (not implemented)\n\nEvery command but `new`, `deploy`, `doctor` and `restore-check` runs against the app at or above the working directory, or --dir.\n";
+export const USAGE = "hf \u2014 the hyperfixation CLI\n\n  hf new <name>             provision the app in the cloud: fetch the template, push a private\n                            repo, register a backup, Sentry, Langfuse and DNS, create the\n                            database and its roles, create the Coolify application and its\n                            environment, deploy, and print what is left to do by hand.\n                            Resumable \u2014 a rerun repeats only what did not finish\n      --budget-usd <amount>   the app's monthly LLM budget (required; no default)\n      --email <address>       the bootstrap admin's address (required)\n      --from <specifier>      template to fetch (default: gh:grahamlutz/hyperfixation-template)\n      --into <dir>            where to create <name> (default: the working directory)\n\n  hf new <name> --local     copy the template into ./<name>, substitute its placeholders, and\n                            prompt for the bootstrap admin's email\n      --from <dir>            template checkout (default: the sibling hyperfixation-template)\n      --into <dir>            where to create <name> (default: the working directory)\n      --email <address>       the bootstrap admin's address; skips the prompt\n\n  hf up                     install, infra, migrate, bootstrap, status tokens, then hf dev \u2014\n                            the whole local loop after hf new, safe to rerun; seeds a $10\n                            budget unless HF_BOOTSTRAP_BUDGET_USD is set in .env\n\n  hf migrate                create the application role, then run the app's migrate.ts\n      --skip-roles            the cloud path, where the roles already exist\n\n  hf bootstrap              grant the app its one bootstrap admin, and seed hf_app_state\n      --email <address>       the address to promote; otherwise HF_BOOTSTRAP_EMAIL\n      --budget-usd <amount>    the app's starting budget; otherwise HF_BOOTSTRAP_BUDGET_USD\n\n  hf status-token           provision /api/status's read and write tokens\n      --read                   only the read token; refuses if it is already set\n      --write                  only the write token; refuses if it is already set\n      --rotate                 replace a token that is already set\n                               (no flags: fills in whichever of the two is unset)\n\n  hf check                  declared env, pending migrations, and E001-E006\n\n  hf doctor [name]          every deployed app in the state cache, or one: /api/status under its\n                            read token, the deployed version against main, E006 as the app role,\n                            the last restore check, and open core-bump PRs. Exits 1 on any finding\n\n  hf gen [generator]        the app's turbo generators\n\n  hf dev                    docker compose up, then pnpm dev under HF_BUILD_SHA=dev-<timestamp>\n      --no-compose            leave the dev infrastructure alone\n      --compose-only          bring the infrastructure up and stop\n\n  hf restore-check <name>   restore the newest hf_<name> dump beside the live database and\n                            compare row counts; exits 1 on any mismatch\n      --backup-dir <dir>      where the dumps are (default: Coolify's on the box)\n      --from-s3               read the dump from object storage (not implemented)\n\nEvery command but `new`, `doctor` and `restore-check` runs against the app at or above the working directory, or --dir.\n";
 
 // (No @packageDocumentation comment for this package)
 

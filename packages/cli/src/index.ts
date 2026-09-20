@@ -66,6 +66,7 @@ export {
   type Tunnel,
 } from "./runner.js";
 export {
+  findPostgresContainer,
   openDatabase,
   openDatabaseUrl,
   redactPasswords,
@@ -91,6 +92,7 @@ export {
 export {
   formatRestoreCheck,
   pgRestoreArgv,
+  pgRestoreInContainerArgv,
   restoreCheck,
   restoreCheckApp,
   RestoreCheckError,

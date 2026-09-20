@@ -13,6 +13,11 @@ export const CONFIG_KEYS = [
   "HF_COOLIFY_SERVER_UUID",
   "HF_COOLIFY_GITHUB_APP_UUID",
   "HF_COOLIFY_POSTGRES_UUID",
+  // Optional: the Coolify S3 storage the daily dump is uploaded to. Unset, the backup step asks
+  // `GET /s3-storages` and takes the one usable storage when there is exactly one; this is how a
+  // box with several — or with one the step should not pick — is told which, rather than guessed
+  // at. With neither the schedule is registered local-only and the step warns.
+  "HF_COOLIFY_S3_STORAGE_UUID",
   // The Postgres container's hostname on the docker network, as the app's containers see it.
   // Configurable because Coolify's API document reports no such field: its own compose generator
   // names the container after the database's uuid, so `HF_COOLIFY_POSTGRES_UUID` is the default a
