@@ -105,7 +105,7 @@ CI's `next build`; delete the core checkout/build steps in `ci.yml`; regenerate 
 
 ## Track D — the deploy shape (template)
 
-### D1 — The image builds and names its version — ⬜ Not started
+### D1 — The image builds and names its version — ✅ Done (template #30)
 
 Template CI job `image`: `docker build --build-arg SOURCE_COMMIT=$GITHUB_SHA`, then
 `docker run --rm <img> node -e 'process.exit(process.env.HF_BUILD_SHA===process.argv[1]?0:1)' $GITHUB_SHA`; a second
@@ -113,6 +113,17 @@ build **without** the arg proves the entrypoint fallback (`HF_BUILD_SHA` length 
 `--webpack`) prerenders.
 
 **Done:** both `docker run` assertions green in CI.
+
+> **Built (template #30).** The CI `image` job builds with `--build-arg SOURCE_COMMIT=$GITHUB_SHA` and asserts `HF_BUILD_SHA`
+> equals it, then builds again without the arg (fully cached, 4 s) and asserts the entrypoint fallback (`HF_BUILD_SHA`
+> present, at least 7 characters); 2m32s. The image had never been built, and the first build needed three fixes: the
+> `deps` stage now copies `pnpm-workspace.yaml` (otherwise the in-image install got neither `minimumReleaseAgeExclude` nor
+> `allowBuilds`); `pnpm build` gets `check`'s placeholder env inline on its `RUN` (prerendering `/auth/passkey` calls
+> `requireEnv()`); and `ARG SOURCE_COMMIT` moved to the end of the builder and runner stages so it no longer invalidates the
+> install and build layers on every commit. The no-arg fallback works because the builder's `git rev-parse HEAD` reads the
+> real `.git` that `actions/checkout` leaves in the context; it cannot work from a git worktree (`.git` is a pointer file
+> outside the context) — deliberately not papered over.
+
 
 ### D2 — Sentry in both processes — ✅ Done (template #29)
 
@@ -136,7 +147,7 @@ network; `next build` still prerenders with the DSN empty.
 > dev` while the build passed. Worker auto-instrumentation under ESM would need `--import @sentry/node/preload` in `pnpm
 > worker` and the image `CMD`; irrelevant at sampling 0. Sentry still sends request-driven session counts.
 
-### D3 — The prod stack comes up locally (after D1) — ⬜ Not started
+### D3 — The prod stack comes up locally (after D1) — 🚧 In progress
 
 `tests/e2e/prod-compose.e2e.ts`: dev compose's Postgres, `provisionRoles` + `CREATE DATABASE` via the test's admin URL,
 then `docker compose -f docker-compose.prod.yml up -d --build` with `SOURCE_COMMIT` set; assert `migrate` exited 0,
@@ -188,7 +199,7 @@ the wrong verb fails; a state file written at 0644 is refused and rewritten 0600
 > omit `uuid` though the API returns it; `SOURCE_COMMIT` under Coolify; where a registered backup lands. 96 files / 661
 > tests. A known CI flake: `ai/src/redeploy-case-1.test.ts` occasionally times out under load (once; a re-run passed).
 
-### E2 — SSH runner, database and roles (after E1) — ⬜ Not started
+### E2 — SSH runner, database and roles (after E1) — ✅ Done (core #54)
 
 `Runner` = `ssh` child process; `tunnel()` = `ssh -N -L <port>:127.0.0.1:5432` to the Coolify Postgres container's
 published-on-localhost port (Phase 0 left it unexposed publicly — verify it listens on the box's loopback; else
@@ -198,7 +209,18 @@ published-on-localhost port (Phase 0 left it unexposed publicly — verify it li
 **Done:** `roles.test.ts` extended against the test Postgres with a local `Runner`: three roles with limits
 `null/25/4`; re-run is a no-op; a cold run changes the application password and the old one no longer connects.
 
-### E3 — `hf new <name>` in the cloud (after E2) — ⬜ Not started
+> **Built (core #54).** `runner.ts` (`Runner`: `exec` and `tunnel`, an `ssh` child-process implementation — BatchMode, no
+> ControlMaster, argument arrays, quoting only where the remote shell needs it — and a local recording implementation for
+> tests), `database.ts` (two `Database` transports behind one `query(sql)`), `provision-database.ts` (`CREATE DATABASE`,
+> `vector` and `pg_trgm`, then `provisionRoles`; returns `rotated`). **The tunnel is the default transport**, because it
+> yields a libpq URL and `provisionRoles()` is a `pg` client; `docker exec` psql is the second, and `provisionDatabase`
+> refuses on it by name (with a test) rather than half-provisioning. The tunnel probe is a real `SELECT 1`, not a port
+> check, since `ssh -L` accepts locally whether or not anything listens on the far side. **Crash recovery: `ALTER ROLE` first,
+> state second** — state can lag the database but never lead it; a crash between the two leaves the step unrecorded and no
+> password to reuse, so the next run generates a fresh one and `ALTER`s again (one extra rotation). `packages/db` is untouched.
+
+
+### E3 — `hf new <name>` in the cloud (after E2) — 🚧 In progress (planned into four PRs; PR 1 open)
 
 The ten steps, resumable by state. Order: copy template (`giget gh:grahamlutz/hyperfixation-template` when `--from`
 is absent and `--local` is not passed) → `pnpm install`, initial commit → GitHub private repo + push (bot secrets
@@ -216,7 +238,31 @@ role; merge bump PRs only when green; the phone passkey step).
 order and writes every state key; (b) a second run issues zero `POST`s; (c) a failure injected at Cloudflare, then a
 rerun, resumes at Cloudflare with no earlier `POST`; (d) `--local` is byte-for-byte Phase 1's behaviour.
 
-### E4 — `hf doctor` (after E2; ∥ E5) — ⬜ Not started
+> **Planned 2026-09-19 (planner, then an adversary), four PRs:** (1) plumbing — `giget`, an `env` overlay so `migrate`,
+> `bootstrap` and `status-token` run through the tunnel with no `.env` (they need `hf_app_state`, which exists only after
+> migrations, so the coolify step first runs `migrate --skip-roles`), `betterAuthSecret` in the state, a `HF_GITHUB_APP_SLUGS`
+> config key, the missing list/get endpoints, and the step-runner skeleton (`new-cloud.ts`); (2) steps template…dns; (3) steps
+> coolify and deploy plus the CLI (`--budget-usd` required, `--email` required in cloud) ∥ 2; (4) built notes. Decided:
+> `HF_GITHUB_APP_SLUGS` names the two GitHub Apps to assert; `betterAuthSecret` lives in the state; the "Google redirect
+> URI" checklist line is dropped until the template has a Google provider; the backup step is a checklist line until a
+> backups list endpoint is confirmed (Risk 3). **The adversary's findings, all folded in:** a cold re-run must not lock the
+> live app out of its database — `database` now runs immediately **before** `coolify` in `STEPS` (so every fallible external
+> create precedes the rotation), and the state records a hash of the secrets the Coolify envs carry
+> (`coolify.envsSecretsHash`), so a mismatch marks `coolify` and `deploy` not-done and forces a re-PATCH and redeploy;
+> `BETTER_AUTH_SECRET` must be persisted (the state parser threw on unknown keys); Coolify, Langfuse and backups have no
+> list-by-name in the client, so those endpoints are vendored (only ones that exist upstream); the cloud flow never reads or
+> writes a dev `.env` (the overlay wins over a laptop's `hf up` `.env`, whose `DATABASE_URL` would otherwise provision
+> tokens in the wrong database) and the `migrate` child gets a minimal environment rather than every `HF_*` provider
+> token; `HF_DB_HOST_INTERNAL` replaces the guessed "Postgres container uuid is the hostname" (and `connect_to_docker_network`
+> exists only on the application request); the env-drift check covers every `${VAR}` the compose files interpolate
+> (`DOCKER_IMAGE`, `SOURCE_COMMIT`), not just the `environment:` keys; the template step copies into a temp directory and
+> renames so a crash mid-copy is resumable; the repo step adopts an existing repo only when its `main` sha equals the local
+> `HEAD` (an unrelated repo of the same name answers 200 too); DNS never creates a second A record. **Empty provider keys:**
+> a deployed app with no `ANTHROPIC_API_KEY`/`OPENAI_API_KEY` silently serves fixture drafts — `/api/status` now reports
+> `llm.mode` (core #57) and `hf doctor` warns on `fixtures`.
+
+
+### E4 — `hf doctor` (after E2; ∥ E5) — ✅ Done (core #55)
 
 Per app in state: `GET /api/status` (health, `applicationVersion`, `runs.running`, both periods), the repo's `main` sha
 from GitHub, E006 via the tunnel as `postgres` with `SET ROLE hf_<app>`, `lastRestoreCheckAt` older than 7 days, open
@@ -225,7 +271,17 @@ PRs on branch `core-bump/*` with their check status. Exit 1 on any warning.
 **Done:** `doctor.test.ts` — version mismatch, E006 false, stale restore check, degraded health each produce their
 line and exit 1; all clear exits 0.
 
-### E5 — `hf restore-check <name>` (after E2; ∥ E4) — ⬜ Not started
+> **Built (core #55).** `doctor.ts`: per app in the state cache, `/api/status` with the read token (health, version,
+> running runs, both periods), the repo's `main` sha, E006, restore-check age (warn over 7 days or absent) and open
+> `core-bump/*` PRs; one line per finding with an OK/WARN/FAIL marker, exit 1 on any warning or failure; a missing token or
+> unreachable app is a FAIL line, not a crash. **E006 asserts** `has_schema_privilege('dbos','USAGE')` and
+> `has_table_privilege('dbos.workflow_status','INSERT')` are both true (nested `CASE`, so a missing schema is `false`, not a raw
+> `3F000`); it connects as `postgres` through the E2 tunnel, `SET ROLE hf_<app>`, and calls `@hyperfixation/db`'s exported
+> `checkE006` — no second copy of the query. Nothing new is exported from `index.ts` (it would drag E1's internal config and
+> transport types into the public API), so `etc/cli.api.md` changed only in `COMMANDS` and `USAGE`.
+
+
+### E5 — `hf restore-check <name>` (after E2; ∥ E4) — ✅ Done (deviated — see note; core #56)
 
 Over SSH as `postgres`: newest `hf_<app>` dump (see risk 3 for where), `CREATE DATABASE hf_<app>_restore_check` +
 extensions, `pg_restore --no-owner --role=hf_<app>_migrator`, `count(*)` of every `hf_*` table and every table with
@@ -235,6 +291,13 @@ extensions, `pg_restore --no-owner --role=hf_<app>_migrator`, `count(*)` of ever
 **Done:** `restore-check.test.ts` — a `pg_dump -Fc` of a migrated test database with seeded rows restores with
 matching counts and exit 0; a dump taken before a seed reports the differing table and exits 1; the scratch database
 is gone afterwards.
+
+> **Built (core #56).** The local backup directory is implemented fully behind a `BackupSource` interface; **S3 is a
+> clearly-marked refusal** (Risk 3 is still open and no S3 key is in `CONFIG_KEYS`). Restores into
+> `hf_<app>_restore_check`, compares `count(*)` of every `hf_*` table and every table with a `normalized_name` column, always
+> drops the scratch database, and writes `lastRestoreCheckAt` only on a complete run. A table on one side only gets its own
+> verdict. `restoreCheckApp` takes the cluster admin password from `PGPASSWORD` until E3 records Coolify's.
+
 
 ## Exit — X1, the real box (manual; records into this doc) — ⬜ Not started
 
