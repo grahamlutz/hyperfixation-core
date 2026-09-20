@@ -1,6 +1,6 @@
 {
   "name": "@hyperfixation/auth",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "license": "MIT",
   "description": "better-auth factory, session-factor policy, requireSession, and the bootstrap user",
   "repository": {
