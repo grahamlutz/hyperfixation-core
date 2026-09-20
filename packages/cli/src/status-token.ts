@@ -44,6 +44,8 @@ export interface StatusTokenAppOptions {
    * up yet" would also require `--rotate`, and `--rotate` would take out the other, live token.
    */
   explicit?: boolean;
+  /** Connection URLs in place of a `.env`; see `ResolveAppOptions`. */
+  env?: Record<string, string>;
 }
 
 export interface StatusTokenAppResult {
@@ -69,7 +71,7 @@ export interface StatusTokenAppResult {
 export async function statusTokenApp(
   options: StatusTokenAppOptions = {},
 ): Promise<StatusTokenAppResult> {
-  const app = await resolveApp(options.dir);
+  const app = await resolveApp(options.dir, { env: options.env });
   const databaseUrl = requireEnv(app, "DATABASE_URL");
   const kinds = options.kinds ?? (["read", "write"] as const);
 

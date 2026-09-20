@@ -15,6 +15,31 @@ const LANGFUSE = "https://langfuse.test";
 
 const ROUTES: StubRoute[] = [
   { spec: "coolify", method: "post", url: `${COOLIFY}/api/v1/projects`, json: { uuid: "p1" } },
+  {
+    spec: "coolify",
+    method: "get",
+    url: `${COOLIFY}/api/v1/projects`,
+    json: [{ uuid: "p1", name: "demo-app" }],
+  },
+  {
+    spec: "coolify",
+    method: "get",
+    url: `${COOLIFY}/api/v1/applications`,
+    json: [{ uuid: "a1", name: "demo-app", fqdn: "https://demo-app.hyperfixation.ai" }],
+  },
+  {
+    spec: "coolify",
+    method: "get",
+    url: `${COOLIFY}/api/v1/databases/{uuid}`,
+    json: { uuid: "db1" },
+  },
+  { spec: "coolify", method: "patch", url: `${COOLIFY}/api/v1/databases/{uuid}`, json: {} },
+  {
+    spec: "coolify",
+    method: "get",
+    url: `${COOLIFY}/api/v1/databases/{uuid}/backups`,
+    json: [{ uuid: "b1", frequency: "daily" }],
+  },
   { spec: "coolify", method: "get", url: `${COOLIFY}/api/v1/projects/{uuid}`, json: { uuid: "p1" } },
   {
     spec: "coolify",
@@ -89,6 +114,36 @@ const ROUTES: StubRoute[] = [
   {
     spec: "github",
     method: "get",
+    url: `${GITHUB}/users/{username}`,
+    json: { login: "grahamlutz", type: "User" },
+  },
+  {
+    spec: "github",
+    method: "get",
+    url: `${GITHUB}/repos/{owner}/{repo}`,
+    json: { full_name: "grahamlutz/demo-app", private: true, default_branch: "main" },
+  },
+  {
+    spec: "github",
+    method: "get",
+    url: `${GITHUB}/user/installations`,
+    json: {
+      total_count: 2,
+      installations: [
+        { id: 1, app_id: 10, app_slug: "coolify" },
+        { id: 2, app_id: 11, app_slug: "hyperfixation-bump" },
+      ],
+    },
+  },
+  {
+    spec: "github",
+    method: "get",
+    url: `${GITHUB}/user/installations/{installation_id}/repositories`,
+    json: { total_count: 1, repositories: [{ full_name: "grahamlutz/demo-app" }] },
+  },
+  {
+    spec: "github",
+    method: "get",
     url: `${GITHUB}/repos/{owner}/{repo}/commits/{ref}/status`,
     json: { state: "success", total_count: 1 },
   },
@@ -110,6 +165,12 @@ const ROUTES: StubRoute[] = [
     method: "post",
     url: `${LANGFUSE}/api/public/projects`,
     json: { id: "lp1", name: "demo-app" },
+  },
+  {
+    spec: "langfuse",
+    method: "get",
+    url: `${LANGFUSE}/api/public/projects`,
+    json: { data: [{ id: "lp1", name: "demo-app" }] },
   },
   {
     spec: "langfuse",
@@ -189,6 +250,31 @@ describe("provider clients", () => {
       expect((await coolify.getDeployment("d1")).status).toBe("finished");
     });
 
+    it("lists projects and applications, which is how a rerun finds what it made by name", async () => {
+      expect((await coolify.listProjects())[0]!.name).toBe("demo-app");
+
+      const applications = await coolify.listApplications();
+      expect(applications[0]).toMatchObject({ uuid: "a1", name: "demo-app" });
+
+      expect(harness.requests.map((request) => request.operationPath)).toEqual([
+        "/projects",
+        "/applications",
+      ]);
+    });
+
+    it("reads and updates a database, the only reach the API has over how it is addressed", async () => {
+      await coolify.getDatabase("db1");
+      await coolify.updateDatabase("db1", { is_public: true, public_port: 15432 });
+
+      // `toMatchObject`, not `toEqual`: the validator fills the document's defaults (the health
+      // check fields) into the body it checked, and what was sent is the subset asserted here.
+      expect(harness.requests[1]!.body).toMatchObject({ is_public: true, public_port: 15432 });
+    });
+
+    it("lists a database's backups, whose shape upstream leaves undocumented", async () => {
+      expect(await coolify.listDatabaseBackups("db1")).toEqual([{ uuid: "b1", frequency: "daily" }]);
+    });
+
     it("registers a scheduled backup of the app's database alone", async () => {
       const backup = await coolify.createDatabaseBackup("db1", {
         frequency: "daily",
@@ -239,6 +325,25 @@ describe("provider clients", () => {
       ]);
     });
 
+    it("says whether the owner is an account or an organization, and reads a repository back", async () => {
+      expect((await github.getUser("grahamlutz")).type).toBe("User");
+      expect((await github.getRepository("grahamlutz", "demo-app")).private).toBe(true);
+    });
+
+    it("lists the installed GitHub Apps and what each one reaches", async () => {
+      const { installations } = await github.listInstallations({ per_page: 100 });
+      expect(installations.map((installation) => installation.app_slug)).toEqual([
+        "coolify",
+        "hyperfixation-bump",
+      ]);
+
+      const reached = await github.listInstallationRepositories(installations[0]!.id, {
+        per_page: 100,
+      });
+      expect(reached.repositories[0]!.full_name).toBe("grahamlutz/demo-app");
+      expect(harness.requests[1]!.pathname).toBe("/user/installations/1/repositories");
+    });
+
     it("reads main's sha, open pull requests and a ref's combined status", async () => {
       expect((await github.getReference("grahamlutz", "demo-app", "heads/main")).object.sha).toBe(
         "abc1234",
@@ -265,6 +370,12 @@ describe("provider clients", () => {
 
   describe("langfuse", () => {
     const langfuse = new LangfuseClient({ url: LANGFUSE, orgKey: "pk-lf-org:sk-lf-org" });
+
+    it("lists the org key's projects, so a rerun finds the app's own", async () => {
+      const { data } = await langfuse.listProjects();
+
+      expect(data[0]).toMatchObject({ id: "lp1", name: "demo-app" });
+    });
 
     it("creates the project and a key pair for it", async () => {
       const project = await langfuse.createProject({ name: "demo-app", retention: 0 });

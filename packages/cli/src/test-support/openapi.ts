@@ -172,8 +172,8 @@ function validate(
 
   const errors = validator.validateRequest({
     headers: { "content-type": "application/json" },
-    params: match.params,
-    query: coerceQuery(query, parameters),
+    params: coerceText(match.params, parameters, "path"),
+    query: coerceText(query, parameters, "query"),
     body,
   }) as { errors?: { path?: string; message: string }[] } | undefined;
 
@@ -187,18 +187,20 @@ function validate(
 }
 
 /**
- * A query string is text; a document that says `per_page` is an integer means the integer that
- * text spells. Coercion is narrowed to the query on purpose — a JSON body arrives typed, and a
- * client that sends `"7"` where the document says `7` is drift the harness should catch.
+ * A URL is text; a document that says `per_page` or `installation_id` is an integer means the
+ * integer that text spells. Coercion is narrowed to the path and the query on purpose — a JSON
+ * body arrives typed, and a client that sends `"7"` where the document says `7` is drift the
+ * harness should catch.
  */
-function coerceQuery(
-  query: Record<string, string>,
+function coerceText(
+  values: Record<string, string>,
   parameters: readonly unknown[],
+  where: "path" | "query",
 ): Record<string, unknown> {
-  const coerced: Record<string, unknown> = { ...query };
+  const coerced: Record<string, unknown> = { ...values };
   for (const parameter of parameters as { name: string; in: string; schema?: { type?: string } }[]) {
     const raw = coerced[parameter.name];
-    if (parameter.in !== "query" || typeof raw !== "string") continue;
+    if (parameter.in !== where || typeof raw !== "string") continue;
     if (parameter.schema?.type === "integer" || parameter.schema?.type === "number") {
       const value = Number(raw);
       if (!Number.isNaN(value)) coerced[parameter.name] = value;

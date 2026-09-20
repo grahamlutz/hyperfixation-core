@@ -15,6 +15,8 @@ export interface BootstrapAppOptions {
    * alternative for a local run.
    */
   budgetUsd?: string;
+  /** Connection URLs in place of a `.env`; see `ResolveAppOptions`. */
+  env?: Record<string, string>;
 }
 
 export interface BootstrapAppResult extends BootstrapResult {
@@ -39,7 +41,7 @@ const BOOTSTRAP_BUDGET_ENV = "HF_BOOTSTRAP_BUDGET_USD";
 export async function bootstrapApp(
   options: BootstrapAppOptions = {},
 ): Promise<BootstrapAppResult> {
-  const app = await resolveApp(options.dir);
+  const app = await resolveApp(options.dir, { env: options.env });
   const databaseUrl = requireEnv(app, "DATABASE_URL");
   const budgetUsd = options.budgetUsd ?? requireEnv(app, BOOTSTRAP_BUDGET_ENV);
   if (!Number.isFinite(Number(budgetUsd)) || Number(budgetUsd) <= 0) {

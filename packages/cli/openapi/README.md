@@ -23,6 +23,11 @@ Each was taken from `https://raw.githubusercontent.com/<repo>/main/<path>` on 20
 pinned to the commit above. Langfuse publishes YAML; it was parsed and re-emitted as JSON so the
 harness loads all five the same way — the document is otherwise unchanged.
 
+An operation added later is merged in from the **same** pinned commit, verbatim, alongside the
+components it newly reaches; nothing already vendored is rewritten. Re-trimming wholesale would
+reshuffle every key in the file for no change in meaning, which buries the addition in the diff.
+A new upstream commit is a different job: bump the row above, re-trim, and say so here.
+
 > **`coolify.json` must be re-vendored from the box's own Coolify version before X1.** This is
 > `coollabsio/coolify@main`, which is whatever Coolify Cloud runs, not what the Hetzner box runs.
 > Take the document the box itself serves (or `openapi.json` at the box's Coolify tag), re-trim,
@@ -33,17 +38,30 @@ harness loads all five the same way — the document is otherwise unchanged.
 
 | Spec | Operation | Used by |
 | --- | --- | --- |
-| coolify | `POST /projects`, `GET /projects/{uuid}` | E3 — the app's Coolify project |
+| coolify | `POST /projects`, `GET /projects`, `GET /projects/{uuid}` | E3 — the app's Coolify project, found by name on a rerun |
+| coolify | `GET /applications` | E3 — the application, found by name on a rerun |
 | coolify | `POST /applications/private-github-app` | E3 — the application, from the private repo |
 | coolify | `PATCH /applications/{uuid}/envs/bulk` | E3 — `REQUIRED_ENV` in one call |
 | coolify | `POST /deploy`, `GET /deployments/{uuid}` | E3 — deploy and poll |
 | coolify | `POST /databases/{uuid}/backups` | E3 — backup registration |
+| coolify | `GET /databases/{uuid}/backups` | E5 — the registered backups |
+| coolify | `GET`/`PATCH /databases/{uuid}` | E2 — the Postgres resource, and `is_public`/`public_port` |
 | cloudflare | `GET`/`POST /zones/{zone_id}/dns_records` | E3 — the `A` record |
 | github | `POST /user/repos`, `POST /orgs/{org}/repos` | E3 — the app's private repo |
+| github | `GET /users/{username}` | E3 — whether `HF_GITHUB_OWNER` is an account or an org |
+| github | `GET /repos/{owner}/{repo}` | E3 — whether the repository is already there |
+| github | `GET /user/installations`, `GET /user/installations/{installation_id}/repositories` | E3 — both GitHub Apps installed on it |
 | github | `GET /repos/{owner}/{repo}/git/ref/{ref}` | E4 — `main`'s sha |
 | github | `GET /repos/{owner}/{repo}/pulls` | E4 — open `core-bump/*` PRs |
 | github | `GET /repos/{owner}/{repo}/commits/{ref}/status` | E4 — those PRs' checks |
 | sentry | `POST /api/0/organizations/{org}/projects/` | E3 — the Sentry project |
 | sentry | `GET /api/0/projects/{org}/{project}/keys/` | E3 — the DSN |
-| langfuse | `POST /api/public/projects` | E3 — the Langfuse project |
+| langfuse | `POST /api/public/projects`, `GET /api/public/projects` | E3 — the Langfuse project, found by name on a rerun |
 | langfuse | `POST /api/public/projects/{projectId}/apiKeys` | E3 — its key pair |
+
+Two Coolify responses are documented as `"Content is very complex. Will be implemented later."` —
+`GET /databases/{uuid}` and `GET /databases/{uuid}/backups` — so the harness validates those
+*requests* and the client returns `unknown`. Nothing in the
+document attaches a database to a docker network either: `PATCH /databases/{uuid}` reaches
+`is_public` and `public_port` and no further, which is why the Postgres container's hostname on
+the network is `HF_DB_HOST_INTERNAL` in the operator's config rather than something read back.

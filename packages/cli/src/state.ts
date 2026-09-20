@@ -1,3 +1,4 @@
+import { createHash, randomBytes } from "node:crypto";
 import path from "node:path";
 import { configHome } from "./config.js";
 import { readSecretFile, writeSecretFile } from "./secret-file.js";
@@ -6,16 +7,22 @@ import { readSecretFile, writeSecretFile } from "./secret-file.js";
  * The ten steps of a cloud `hf new`, in the order it runs them. A step is recorded only once
  * everything it created is in the state file, so a rerun resumes at the first unrecorded step
  * rather than re-creating what the previous run already paid for.
+ *
+ * `database` sits immediately before `coolify` because it is the one step that *rotates*: a cold
+ * run gives the roles new passwords, and a deployed app keeps the old ones until the envs are
+ * PATCHed and the app redeployed. Every fallible external create — the repo, the backup, Sentry,
+ * Langfuse, the DNS record — therefore happens first, so a failure in one of them cannot leave a
+ * live app holding credentials nothing will replace.
  */
 export const STEPS = [
   "template",
   "install",
   "repo",
-  "database",
   "backup",
   "sentry",
   "langfuse",
   "dns",
+  "database",
   "coolify",
   "deploy",
 ] as const;
@@ -30,6 +37,14 @@ export interface StepRecord {
 export interface CoolifyState {
   projectUuid?: string;
   appUuid?: string;
+  /**
+   * `secretsHash` of the secrets the last bulk env PATCH carried.
+   *
+   * The `coolify` step is "done" only while this matches what the state holds now: a cold run
+   * that rotated the role passwords leaves the deployed app authenticating with the old ones, and
+   * a recorded `steps.coolify` would otherwise make a rerun skip the one PATCH that fixes it.
+   */
+  envsSecretsHash?: string;
 }
 
 /** The three role passwords a cold run generates. Nothing else on the laptop has a copy. */
@@ -65,8 +80,39 @@ export interface AppState {
   sentryDsn?: string;
   langfuse?: LangfuseState;
   statusTokens?: StatusTokenState;
+  /**
+   * `BETTER_AUTH_SECRET` — generated once, for this app, and kept only here: it is the one
+   * `REQUIRED_ENV` secret no provider hands back, so nothing else can be asked for it again.
+   * Never printed; it reaches the app through the Coolify env PATCH alone.
+   */
+  betterAuthSecret?: string;
   lastRestoreCheckAt?: string;
   lastDeployedSha?: string;
+}
+
+/** 32 random bytes, the length `better-auth` documents, in the form an env var can carry. */
+export function generateBetterAuthSecret(): string {
+  return randomBytes(32).toString("base64url");
+}
+
+/**
+ * A fingerprint of every secret the Coolify envs carry, so a rotation is detectable without
+ * keeping a second copy of the secrets themselves.
+ *
+ * Only the values matter, not the state around them: `coolify.envsSecretsHash` is compared
+ * against this, and a step that rotated a password must come out different.
+ */
+export function secretsHash(state: AppState): string {
+  const database = state.database ?? {};
+  const material = [
+    database.migratorPassword,
+    database.applicationPassword,
+    database.readonlyPassword,
+    state.betterAuthSecret,
+    state.statusTokens?.read,
+    state.statusTokens?.write,
+  ];
+  return createHash("sha256").update(JSON.stringify(material)).digest("hex");
 }
 
 /**
@@ -97,6 +143,13 @@ export interface AppStateStore {
   readonly state: AppState;
   isDone(step: StepName): boolean;
   markDone(step: StepName): Promise<void>;
+  /**
+   * Forgets a step, so the next run repeats it.
+   *
+   * What a rotation needs: the secrets the `coolify` step PATCHed and the `deploy` that published
+   * them are no longer true of the app, and `patch` merges rather than removes.
+   */
+  clearDone(step: StepName): Promise<void>;
   /**
    * Merges `changes` in and writes the file. Object-valued keys (`coolify`, `database`,
    * `langfuse`, `statusTokens`) merge field by field, so a step can record the one uuid it
@@ -153,6 +206,12 @@ export async function openAppState(
         steps: { ...state.steps, [step]: { doneAt: new Date().toISOString() } },
       });
     },
+    clearDone: async (step) => {
+      if (state.steps[step] === undefined) return;
+      const steps = { ...state.steps };
+      delete steps[step];
+      await write({ ...state, steps });
+    },
     patch: async (changes) => {
       await write(merge(state, changes));
     },
@@ -203,12 +262,17 @@ function parseAppState(contents: string, file: string): AppState {
         break;
       case "repo":
       case "sentryDsn":
+      case "betterAuthSecret":
       case "lastRestoreCheckAt":
       case "lastDeployedSha":
         state[key] = asString(value, file, key);
         break;
       case "coolify":
-        state.coolify = parseFields(value, file, key, ["projectUuid", "appUuid"]);
+        state.coolify = parseFields(value, file, key, [
+          "projectUuid",
+          "appUuid",
+          "envsSecretsHash",
+        ]);
         break;
       case "database":
         state.database = parseFields(value, file, key, [

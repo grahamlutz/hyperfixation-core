@@ -45,6 +45,25 @@ describe("resolveApp", () => {
     }
   });
 
+  it("lets an env overlay win over both the file and the shell, for the cloud path's tunnel", async () => {
+    const dir = await fakeApp({
+      appName: "demo_app",
+      env: { DATABASE_URL: "postgres://localhost/dev" },
+    });
+    created.push(dir);
+
+    process.env.DATABASE_URL = "postgres://localhost/some-other-dev-app";
+    try {
+      const app = await resolveApp(dir, { env: { DATABASE_URL: "postgres://127.0.0.1:15432/hf" } });
+
+      expect(app.env.DATABASE_URL).toBe("postgres://127.0.0.1:15432/hf");
+      expect(app.envFile.DATABASE_URL).toBe("postgres://localhost/dev");
+      expect(app.envOverlay).toEqual({ DATABASE_URL: "postgres://127.0.0.1:15432/hf" });
+    } finally {
+      delete process.env.DATABASE_URL;
+    }
+  });
+
   it("refuses a directory with no registry rather than guessing at one", async () => {
     await expect(resolveApp(path.parse(process.cwd()).root)).rejects.toThrow(NotAnApp);
   });

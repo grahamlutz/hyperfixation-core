@@ -27,6 +27,31 @@ export interface GithubCombinedStatus {
   total_count: number;
 }
 
+/** `GET /users/{username}`, for the one question `hf new` asks of it: account or organization. */
+export interface GithubUser {
+  login: string;
+  /** `User` | `Organization`; which of the two repository-creation endpoints applies. */
+  type: string;
+}
+
+export interface GithubInstallation {
+  id: number;
+  app_id: number;
+  /** The slug `HF_GITHUB_APP_SLUGS` names — Coolify's app, and the bump bot's. */
+  app_slug: string;
+}
+
+export interface GithubInstallations {
+  total_count: number;
+  installations: GithubInstallation[];
+}
+
+export interface GithubInstallationRepositories {
+  total_count: number;
+  repository_selection?: string;
+  repositories: GithubRepository[];
+}
+
 export interface GithubRepositoryRequest {
   name: string;
   description?: string;
@@ -54,6 +79,30 @@ export class GithubClient {
         "x-github-api-version": "2022-11-28",
       },
       fetch: options.fetch,
+    });
+  }
+
+  /**
+   * Who `HF_GITHUB_OWNER` is: `type` decides between `/user/repos` and `/orgs/{org}/repos`.
+   *
+   * Unauthenticated-shaped data on purpose — this endpoint answers for any account, so it is the
+   * cheapest way to settle the question without assuming the token owns the name.
+   */
+  async getUser(username: string): Promise<GithubUser> {
+    return await this.request({ method: "GET", path: `/users/${segment(username)}` });
+  }
+
+  /**
+   * The repository, when there may already be one.
+   *
+   * A 404 from here is "no such repository **for this token**": the same status covers absent and
+   * invisible, so a caller that means to create one must treat it as "create and let the create
+   * fail" rather than as proof the name is free.
+   */
+  async getRepository(owner: string, repo: string): Promise<GithubRepository> {
+    return await this.request({
+      method: "GET",
+      path: `/repos/${segment(owner)}/${segment(repo)}`,
     });
   }
 
@@ -93,6 +142,35 @@ export class GithubClient {
       method: "GET",
       path: `/repos/${segment(owner)}/${segment(repo)}/pulls`,
       query: { state: options.state, per_page: options.per_page },
+    });
+  }
+
+  /**
+   * The GitHub Apps installed for the token's user, with their slugs.
+   *
+   * `hf new` asserts both `HF_GITHUB_APP_SLUGS` entries are installed on the new repository —
+   * Coolify cannot deploy from a repository its app cannot see, and that failure otherwise
+   * surfaces as a deploy that clones nothing.
+   */
+  async listInstallations(
+    options: { per_page?: number; page?: number } = {},
+  ): Promise<GithubInstallations> {
+    return await this.request({
+      method: "GET",
+      path: "/user/installations",
+      query: { per_page: options.per_page, page: options.page },
+    });
+  }
+
+  /** Which repositories one installation actually reaches; the other half of that assertion. */
+  async listInstallationRepositories(
+    installationId: number,
+    options: { per_page?: number; page?: number } = {},
+  ): Promise<GithubInstallationRepositories> {
+    return await this.request({
+      method: "GET",
+      path: `/user/installations/${segment(String(installationId))}/repositories`,
+      query: { per_page: options.per_page, page: options.page },
     });
   }
 

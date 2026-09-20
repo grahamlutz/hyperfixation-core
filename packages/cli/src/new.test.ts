@@ -1,10 +1,15 @@
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { InvalidAppName } from "./names.js";
 import { newApp, TEMPLATE_MARKER, TemplateError } from "./new.js";
-import { findTemplateSource } from "./template-source.js";
+import {
+  fetchTemplate,
+  findTemplateSource,
+  TEMPLATE_REPOSITORY,
+  type TemplateDownload,
+} from "./template-source.js";
 
 let workspace: string;
 let source: string;
@@ -170,6 +175,49 @@ describe("hf new --local", () => {
     await expect(
       newApp({ name: "demo-app", from: source, into: workspace, local: false }),
     ).rejects.toThrow("--local");
+  });
+});
+
+describe("fetchTemplate", () => {
+  /** giget's `downloadTemplate`, replaced by a copy of the fixture: no test reaches the network. */
+  const download = (calls: { source: string; dir: string }[]): TemplateDownload => {
+    return async (specifier, options) => {
+      calls.push({ source: specifier, dir: options.dir });
+      await cp(source, options.dir, { recursive: true });
+      return { dir: options.dir };
+    };
+  };
+
+  it("fetches the template repository into the directory it is given", async () => {
+    const calls: { source: string; dir: string }[] = [];
+    const into = path.join(workspace, "fetched");
+
+    const dir = await fetchTemplate(undefined, into, { download: download(calls) });
+
+    expect(calls).toEqual([{ source: TEMPLATE_REPOSITORY, dir: into }]);
+    expect(dir).toBe(into);
+    expect(await readdir(dir)).toContain(TEMPLATE_MARKER);
+  });
+
+  it("passes --from through as the specifier, so a branch or a fork needs no flag of its own", async () => {
+    const calls: { source: string; dir: string }[] = [];
+
+    await fetchTemplate("gh:grahamlutz/hyperfixation-template#next", path.join(workspace, "f2"), {
+      download: download(calls),
+    });
+
+    expect(calls[0]!.source).toBe("gh:grahamlutz/hyperfixation-template#next");
+  });
+
+  it("refuses what it fetched when the marker is not there", async () => {
+    const empty: TemplateDownload = async (_source, options) => {
+      await mkdir(options.dir, { recursive: true });
+      return { dir: options.dir };
+    };
+
+    await expect(
+      fetchTemplate(undefined, path.join(workspace, "f3"), { download: empty }),
+    ).rejects.toThrow(TemplateError);
   });
 });
 
