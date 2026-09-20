@@ -39,6 +39,30 @@ export interface AppRegistry {
     recordTables: readonly RecordTable[];
 }
 
+// @public (undocumented)
+export interface BackupDump {
+    from: string;
+    path: string;
+    takenAt: Date;
+}
+
+// @public
+export interface BackupSource {
+    // (undocumented)
+    readonly kind: BackupSourceKind;
+    newest(databaseName: string): Promise<BackupDump | undefined>;
+}
+
+// @public (undocumented)
+export class BackupSourceError extends Error {
+    constructor(kind: BackupSourceKind, message: string);
+    // (undocumented)
+    readonly kind: BackupSourceKind;
+}
+
+// @public (undocumented)
+export type BackupSourceKind = "local-directory" | "hetzner-s3";
+
 // @public
 export function bootstrapApp(options?: BootstrapAppOptions): Promise<BootstrapAppResult>;
 
@@ -94,10 +118,19 @@ export class CommandFailed extends Error {
 }
 
 // @public (undocumented)
-export const COMMANDS: readonly ["new", "migrate", "bootstrap", "status-token", "check", "gen", "dev", "up"];
+export const COMMANDS: readonly ["new", "migrate", "bootstrap", "status-token", "check", "gen", "dev", "up", "restore-check"];
+
+// @public
+export const COOLIFY_BACKUP_DIR = "/data/coolify/backups";
+
+// @public
+export function createLocalDirectoryBackupSource(options: LocalDirectoryBackupSourceOptions): BackupSource;
 
 // @public
 export function createLocalRunner(options?: LocalRunnerOptions): LocalRunner;
+
+// @public
+export function createS3BackupSource(): BackupSource;
 
 // @public
 export function createSshRunner(options: SshRunnerOptions): Runner;
@@ -191,6 +224,9 @@ export interface ExecResult {
 export function findTemplateSource(cwd?: string): Promise<string | undefined>;
 
 // @public
+export function formatRestoreCheck(result: RestoreCheckResult): string[];
+
+// @public
 export function generate(options?: GenerateOptions): Promise<ResolvedApp>;
 
 // @public (undocumented)
@@ -220,6 +256,13 @@ export interface Io {
     err(line: string): void;
     // (undocumented)
     out(line: string): void;
+}
+
+// @public (undocumented)
+export interface LocalDirectoryBackupSourceOptions {
+    directory?: string;
+    maxDepth?: number;
+    runner: Runner;
 }
 
 // @public (undocumented)
@@ -331,6 +374,14 @@ export function openDatabaseUrl(adminUrl: string): Database;
 export function parseEnvFile(contents: string): Record<string, string>;
 
 // @public
+export function pgRestoreArgv(options: {
+    url: string;
+    role: string;
+    file: string;
+    pgRestorePath?: string;
+}): string[];
+
+// @public
 export function placeholders(names: AppNames): Record<string, string>;
 
 // @public
@@ -412,6 +463,69 @@ export interface ResolvedApp {
 }
 
 // @public
+export function restoreCheck(options: RestoreCheckOptions): Promise<RestoreCheckResult>;
+
+// @public
+export function restoreCheckApp(options: RestoreCheckAppOptions): Promise<RestoreCheckResult>;
+
+// @public (undocumented)
+export interface RestoreCheckAppOptions {
+    // (undocumented)
+    app: string;
+    backupDir?: string;
+    // (undocumented)
+    env?: NodeJS.ProcessEnv;
+    fromS3?: boolean;
+}
+
+// @public (undocumented)
+export class RestoreCheckError extends Error {
+    constructor(message: string);
+}
+
+// @public (undocumented)
+export interface RestoreCheckOptions {
+    app: string;
+    database: Database | string;
+    // (undocumented)
+    now?: Date;
+    pgRestorePath?: string;
+    restoreAdminUrl?: string;
+    runner: Runner;
+    // (undocumented)
+    source: BackupSource;
+    // (undocumented)
+    state: AppStateStore;
+}
+
+// @public (undocumented)
+export interface RestoreCheckResult {
+    // (undocumented)
+    databaseName: string;
+    // (undocumented)
+    dump: BackupDump;
+    // (undocumented)
+    dumpAgeHours: number;
+    dumpStale: boolean;
+    ok: boolean;
+    rows: readonly RestoreCheckRow[];
+    scratchDatabase: string;
+}
+
+// @public (undocumented)
+export interface RestoreCheckRow {
+    live?: number;
+    restored?: number;
+    // (undocumented)
+    table: string;
+    // (undocumented)
+    verdict: RestoreVerdict;
+}
+
+// @public (undocumented)
+export type RestoreVerdict = "ok" | "mismatch" | "live only" | "restored only";
+
+// @public
 export function run(command: string, args: readonly string[], options: RunOptions): Promise<void>;
 
 // @public
@@ -439,6 +553,9 @@ export interface RunOptions {
 }
 
 // @public
+export const SCRATCH_SUFFIX = "_restore_check";
+
+// @public
 export function shellQuote(command: readonly string[]): string;
 
 // @public
@@ -453,6 +570,9 @@ export interface SshRunnerOptions {
 
 // @public (undocumented)
 export function sshTunnelArgv(host: string, localPort: number, remotePort: number): string[];
+
+// @public
+export const STALE_DUMP_HOURS = 36;
 
 // @public
 export class StatusTokenAlreadySet extends Error {
@@ -505,7 +625,7 @@ export interface Tunnel {
 }
 
 // @public (undocumented)
-export const USAGE = "hf \u2014 the hyperfixation CLI\n\n  hf new <name> --local     copy the template into ./<name>, substitute its placeholders, and\n                            prompt for the bootstrap admin's email\n      --from <dir>            template checkout (default: the sibling hyperfixation-template)\n      --into <dir>            where to create <name> (default: the working directory)\n      --email <address>       the bootstrap admin's address; skips the prompt\n\n  hf up                     install, infra, migrate, bootstrap, status tokens, then hf dev \u2014\n                            the whole local loop after hf new, safe to rerun; seeds a $10\n                            budget unless HF_BOOTSTRAP_BUDGET_USD is set in .env\n\n  hf migrate                create the application role, then run the app's migrate.ts\n      --skip-roles            the cloud path, where the roles already exist\n\n  hf bootstrap              grant the app its one bootstrap admin, and seed hf_app_state\n      --email <address>       the address to promote; otherwise HF_BOOTSTRAP_EMAIL\n      --budget-usd <amount>    the app's starting budget; otherwise HF_BOOTSTRAP_BUDGET_USD\n\n  hf status-token           provision /api/status's read and write tokens\n      --read                   only the read token; refuses if it is already set\n      --write                  only the write token; refuses if it is already set\n      --rotate                 replace a token that is already set\n                               (no flags: fills in whichever of the two is unset)\n\n  hf check                  declared env, pending migrations, and E001-E006\n\n  hf gen [generator]        the app's turbo generators\n\n  hf dev                    docker compose up, then pnpm dev under HF_BUILD_SHA=dev-<timestamp>\n      --no-compose            leave the dev infrastructure alone\n      --compose-only          bring the infrastructure up and stop\n\nEvery command but `new` runs against the app at or above the working directory, or --dir.\n";
+export const USAGE = "hf \u2014 the hyperfixation CLI\n\n  hf new <name> --local     copy the template into ./<name>, substitute its placeholders, and\n                            prompt for the bootstrap admin's email\n      --from <dir>            template checkout (default: the sibling hyperfixation-template)\n      --into <dir>            where to create <name> (default: the working directory)\n      --email <address>       the bootstrap admin's address; skips the prompt\n\n  hf up                     install, infra, migrate, bootstrap, status tokens, then hf dev \u2014\n                            the whole local loop after hf new, safe to rerun; seeds a $10\n                            budget unless HF_BOOTSTRAP_BUDGET_USD is set in .env\n\n  hf migrate                create the application role, then run the app's migrate.ts\n      --skip-roles            the cloud path, where the roles already exist\n\n  hf bootstrap              grant the app its one bootstrap admin, and seed hf_app_state\n      --email <address>       the address to promote; otherwise HF_BOOTSTRAP_EMAIL\n      --budget-usd <amount>    the app's starting budget; otherwise HF_BOOTSTRAP_BUDGET_USD\n\n  hf status-token           provision /api/status's read and write tokens\n      --read                   only the read token; refuses if it is already set\n      --write                  only the write token; refuses if it is already set\n      --rotate                 replace a token that is already set\n                               (no flags: fills in whichever of the two is unset)\n\n  hf check                  declared env, pending migrations, and E001-E006\n\n  hf gen [generator]        the app's turbo generators\n\n  hf dev                    docker compose up, then pnpm dev under HF_BUILD_SHA=dev-<timestamp>\n      --no-compose            leave the dev infrastructure alone\n      --compose-only          bring the infrastructure up and stop\n\n  hf restore-check <name>   restore the newest hf_<name> dump beside the live database and\n                            compare row counts; exits 1 on any mismatch\n      --backup-dir <dir>      where the dumps are (default: Coolify's on the box)\n      --from-s3               read the dump from object storage (not implemented)\n\nEvery command but `new` and `restore-check` runs against the app at or above the working directory, or --dir.\n";
 
 // (No @packageDocumentation comment for this package)
 
