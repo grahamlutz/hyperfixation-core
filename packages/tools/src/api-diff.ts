@@ -51,6 +51,12 @@ export interface Change {
   readonly symbol: string;
   readonly member: string;
   readonly kind: "removed" | "retyped";
+  /**
+   * A value that left a const's literal set — `"deploy"` out of `COMMANDS`. A tuple member cannot
+   * carry an `@deprecated` tag of its own, so a `deprecations.json` entry naming `COMMANDS.deploy`
+   * is the whole announcement and the baseline-tag gate does not apply.
+   */
+  readonly literalMember?: string;
 }
 
 export interface Finding extends Change {
@@ -256,18 +262,28 @@ export function apiChanges(pair: ReportPair): Change[] {
           member: key,
           kind: "removed",
         });
-      } else if (
-        replacement.signature !== member.signature &&
-        !onlyAddsOptionalParameters(member.signature, replacement.signature) &&
-        !onlyChangesAConstLiteral(member.signature, replacement.signature)
-      ) {
-        changes.push({
-          package: pair.package,
-          file: pair.file,
-          symbol: name,
-          member: key,
-          kind: "retyped",
-        });
+      } else if (replacement.signature !== member.signature) {
+        const lost = constLiteralRemovals(member.signature, replacement.signature);
+        if (lost !== undefined) {
+          for (const value of lost) {
+            changes.push({
+              package: pair.package,
+              file: pair.file,
+              symbol: name,
+              member: key,
+              kind: "removed",
+              literalMember: value,
+            });
+          }
+        } else if (!onlyAddsOptionalParameters(member.signature, replacement.signature)) {
+          changes.push({
+            package: pair.package,
+            file: pair.file,
+            symbol: name,
+            member: key,
+            kind: "retyped",
+          });
+        }
       }
     }
   }
@@ -278,24 +294,72 @@ export function apiChanges(pair: ReportPair): Change[] {
 const CONST_DECLARATION = /^export const ([A-Za-z0-9_$]+)\s*(?::|=)\s*(.+);$/;
 
 /**
- * True when both signatures declare the same `const` and differ only inside its literal type.
+ * What a `const`'s printed literal lost, for a pair of signatures that declare the same const and
+ * differ only inside that literal: `undefined` when the pair is not that (so the caller reports it
+ * as a retype), otherwise the values the literal no longer carries — empty when it only grew or
+ * reordered.
  *
- * A const's literal is a value the report happens to print rather than a contract: `hf`'s
- * `COMMANDS` tuple and its `USAGE` text are retyped by every command added, and the gates a
- * retype otherwise has to clear — an announced `deprecations.json` entry and an `@deprecated` tag
- * a release earlier — say nothing about that. The const disappearing from the report is still a
- * removal, and still reported.
+ * A const's literal is mostly a value the report happens to print rather than a contract: `hf`'s
+ * `USAGE` text is reprinted by every command added, and the gates a retype otherwise has to clear
+ * say nothing about prose. A *set* of string literals is different — `COMMANDS` is the list of
+ * commands `hf` accepts, so a value leaving it breaks callers exactly like a removed export, and
+ * only a superset is excused. The const disappearing from the report is still a removal.
  */
-export function onlyChangesAConstLiteral(before: string, after: string): boolean {
+export function constLiteralRemovals(before: string, after: string): string[] | undefined {
   const one = CONST_DECLARATION.exec(before);
   const two = CONST_DECLARATION.exec(after);
-  if (one === null || two === null || one[1] !== two[1]) return false;
-  return isLiteralType(one[2]!) && isLiteralType(two[2]!);
+  if (one === null || two === null || one[1] !== two[1]) return undefined;
+  const from = literalShape(one[2]!);
+  const to = literalShape(two[2]!);
+  if (from === undefined || to === undefined) return undefined;
+  // Two plain strings: `USAGE`'s prose, which the gate leaves to `COMMANDS` beside it.
+  if (from.kind === "text" && to.kind === "text") return [];
+  return [...from.values].filter((value) => !to.values.has(value));
 }
 
-/** The two shapes the reports carry: a string literal, and a `readonly [...]` tuple of them. */
-function isLiteralType(type: string): boolean {
-  return type.startsWith('"') || type.startsWith("readonly [");
+/** A quoted string exactly as the report prints one, escapes and all. */
+const STRING_LITERAL = /^"(?:[^"\\]|\\.)*"$/;
+
+/** A number as the report prints one — a threshold like `STALE_DUMP_HOURS`. */
+const NUMBER_LITERAL = /^-?\d+(?:\.\d+)?$/;
+
+/**
+ * How the gate reads a const's literal type: `text` for a single string or number, `set` for a
+ * readonly tuple or union whose every arm is a string literal, and `undefined` for anything else —
+ * which is reported rather than excused, the safe direction for a shape this does not understand.
+ * A set that shrank to one arm is `text` on the new side, and its values still compare.
+ */
+function literalShape(type: string): { kind: "text" | "set"; values: Set<string> } | undefined {
+  const trimmed = type.trim();
+  if (STRING_LITERAL.test(trimmed)) {
+    return { kind: "text", values: new Set([trimmed.slice(1, -1)]) };
+  }
+  if (NUMBER_LITERAL.test(trimmed)) return { kind: "text", values: new Set([trimmed]) };
+  const arms = tupleArms(trimmed) ?? unionArms(trimmed);
+  if (arms === undefined || !arms.every((arm) => STRING_LITERAL.test(arm))) return undefined;
+  return { kind: "set", values: new Set(arms.map((arm) => arm.slice(1, -1))) };
+}
+
+function tupleArms(type: string): string[] | undefined {
+  const inner = /^readonly\s*\[([\s\S]*)\]$/.exec(type)?.[1];
+  if (inner === undefined) return undefined;
+  return split(inner, ",");
+}
+
+function unionArms(type: string): string[] | undefined {
+  return topLevel(type, "|").length === 0 ? undefined : split(type, "|");
+}
+
+/** `text` cut at every top-level `separator`, trimmed, with the empty pieces dropped. */
+function split(text: string, separator: string): string[] {
+  const arms: string[] = [];
+  let from = 0;
+  for (const at of topLevel(text, separator)) {
+    arms.push(text.slice(from, at));
+    from = at + 1;
+  }
+  arms.push(text.slice(from));
+  return arms.map((arm) => arm.trim()).filter((arm) => arm !== "");
 }
 
 /**
@@ -435,12 +499,13 @@ export function checkApiDiff(options: CheckOptions): Finding[] {
     const baseline = parseApiReport(pair.baseline);
     for (const change of apiChanges(pair)) {
       const problems: string[] = [];
+      const announced = deprecationSymbol(change);
       const entry = options.deprecations.find(
-        (row) => row.package === pair.package && row.symbol === change.symbol,
+        (row) => row.package === pair.package && row.symbol === announced,
       );
       if (entry === undefined) {
         problems.push(
-          `no deprecations.json entry for ${pair.package} ${change.symbol}; a removal that was never announced is a bug in the release, not a fast path`,
+          `no deprecations.json entry for ${pair.package} ${announced}; a removal that was never announced is a bug in the release, not a fast path`,
         );
       } else {
         if (compareVersions(entry.since, pair.version) > 0) {
@@ -455,12 +520,14 @@ export function checkApiDiff(options: CheckOptions): Finding[] {
         }
       }
 
-      const declaration = baseline.get(change.symbol);
-      const deprecated =
-        declaration?.deprecated === true ||
-        declaration?.members.get(change.member)?.deprecated === true;
-      if (!deprecated) {
-        problems.push(`${change.symbol} carries no @deprecated tag in the baseline report`);
+      if (change.literalMember === undefined) {
+        const declaration = baseline.get(change.symbol);
+        const deprecated =
+          declaration?.deprecated === true ||
+          declaration?.members.get(change.member)?.deprecated === true;
+        if (!deprecated) {
+          problems.push(`${change.symbol} carries no @deprecated tag in the baseline report`);
+        }
       }
 
       if (BUMP_ORDER.indexOf(options.bump) < BUMP_ORDER.indexOf("minor")) {
@@ -475,10 +542,22 @@ export function checkApiDiff(options: CheckOptions): Finding[] {
   return findings;
 }
 
+/** What a `deprecations.json` row has to name for this change — `COMMANDS.deploy`, or the symbol. */
+function deprecationSymbol(change: Change): string {
+  return change.literalMember === undefined
+    ? change.symbol
+    : `${change.symbol}.${change.literalMember}`;
+}
+
 export function formatFindings(findings: readonly Finding[]): string {
   return findings
     .map((finding) => {
-      const where = finding.member === "" ? finding.symbol : `${finding.symbol}.${finding.member}`;
+      const where =
+        finding.literalMember !== undefined
+          ? deprecationSymbol(finding)
+          : finding.member === ""
+            ? finding.symbol
+            : `${finding.symbol}.${finding.member}`;
       const head = `${finding.file}: ${where} ${finding.kind}`;
       return [head, ...finding.problems.map((problem) => `    - ${problem}`)].join("\n");
     })

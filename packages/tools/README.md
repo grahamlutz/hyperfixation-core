@@ -62,6 +62,32 @@ A `404` on a version document is retried with backoff for three minutes before i
 missing: after a publish npmjs answers `npm view` at once but 404s the per-version document for
 about a minute.
 
+## The removal gate
+
+```sh
+pnpm api:diff
+```
+
+Reads every committed `etc/*.api.md` at the merge base and at HEAD and fails a member that left or
+changed shape without the two releases
+[the versioning policy](../../planning/hyperfixation-versioning-policy.md) requires: a
+`deprecations.json` entry whose window covers this release, an `@deprecated` tag in the *baseline*
+report, and a minor changeset. Additions and reorderings are noise, and pass.
+
+A const whose printed type is a set of string literals — `COMMANDS: readonly ["new", …]` in
+`packages/cli/etc/cli.api.md` — is compared as a set: the new one must be a superset, so a command
+can be added but not dropped. A dropped one is reported as `COMMANDS.deploy removed`, and that
+dotted name is what a `deprecations.json` row has to carry:
+
+```json
+{ "package": "@hyperfixation/cli", "symbol": "COMMANDS.deploy", "since": "0.1.4", "removeIn": "0.2.0" }
+```
+
+A tuple member cannot carry an `@deprecated` tag of its own, so the entry is the whole
+announcement and only the minor changeset is still required. The `USAGE` const beside it is a
+single long string that every added command reprints; its contents are exempt, and `COMMANDS` is
+what catches a command that actually left.
+
 ## Running a probe under CPU load
 
 ```sh
