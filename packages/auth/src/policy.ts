@@ -1,4 +1,4 @@
-import type { AuthSession, SessionFactor } from "./session.js";
+import type { AuthSession, SessionFactor, SessionUser } from "./session.js";
 import { hasRole } from "./session.js";
 
 /** Where a code-factor session is allowed to be, and where an unauthenticated one is sent. */
@@ -36,6 +36,22 @@ export interface AccessRequest extends AccessPaths {
   /** Raise the bar above what the route alone demands. Never lowers `/admin/*`. */
   factor?: SessionFactor;
   role?: string;
+  /** The clock the ban expiry is read against. Injectable so a test can sit on an instant. */
+  now?: () => number;
+}
+
+/**
+ * The same rule the notifier's SQL applies — `banned IS TRUE AND (ban_expires IS NULL OR
+ * ban_expires > now())`. A ban with a lapsed expiry is over even though the column still says
+ * `true`: nothing sweeps the row, so the expiry is what decides. An unreadable `ban_expires`
+ * keeps the ban, because the alternative is letting a bad value un-ban someone.
+ */
+function banIsActive(user: SessionUser, now: number): boolean {
+  if (user.banned !== true) return false;
+  const expires = user.banExpires;
+  if (expires === null || expires === undefined) return true;
+  const at = expires instanceof Date ? expires.getTime() : Date.parse(expires);
+  return Number.isNaN(at) || at > now;
 }
 
 /**
@@ -88,7 +104,7 @@ export function evaluateAccess(request: AccessRequest): AccessDecision {
   if (!session) return refuse("no-session", signIn);
   // A ban lands on the user row while their sessions are still live; it has to be read here or
   // a banned admin keeps the tab they already had open.
-  if (session.user.banned === true) return refuse("banned", signIn);
+  if (banIsActive(session.user, (request.now ?? Date.now)())) return refuse("banned", signIn);
 
   if (requiredRole !== undefined && !hasRole(session.user, requiredRole)) {
     return { outcome: "not-found", refusal: "missing-role" };

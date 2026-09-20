@@ -167,6 +167,69 @@ describe("the auth negatives", () => {
   });
 });
 
+describe("a ban that carries an expiry", () => {
+  const NOW = Date.parse("2026-09-20T12:00:00.000Z");
+  const now = () => NOW;
+  const banned = (banExpires?: Date | string | null): AuthSession => ({
+    factor: "passkey",
+    user: { id: "u9", role: "admin", banned: true, banExpires },
+  });
+  const refusal = (session: AuthSession): AccessDecision =>
+    evaluateAccess({ session, pathname: "/runs", now });
+
+  it("refuses while the ban has no expiry or one still ahead", () => {
+    const stillBanned = {
+      outcome: "redirect",
+      to: DEFAULT_SIGN_IN_PATH,
+      refusal: "banned",
+    };
+    expect(refusal(banned())).toEqual(stillBanned);
+    expect(refusal(banned(null))).toEqual(stillBanned);
+    expect(refusal(banned(new Date(NOW + 1000)))).toEqual(stillBanned);
+    expect(refusal(banned(new Date(NOW + 1000).toISOString()))).toEqual(stillBanned);
+  });
+
+  it("lets the user back in once the expiry has passed", () => {
+    for (const expiry of [new Date(NOW - 1000), new Date(NOW - 1000).toISOString()]) {
+      expect(refusal(banned(expiry))).toEqual({ outcome: "allow", session: banned(expiry) });
+    }
+  });
+
+  // `> now()` in the notifier's SQL, so the instant the expiry names is already outside the ban.
+  it("treats an expiry of exactly now as lapsed", () => {
+    const session = banned(new Date(NOW));
+    expect(refusal(session)).toEqual({ outcome: "allow", session });
+    expect(evaluateAccess({ session, pathname: "/admin", now })).toEqual({
+      outcome: "allow",
+      session,
+    });
+  });
+
+  it("keeps the ban when the expiry cannot be read", () => {
+    expect(refusal(banned("not a date"))).toEqual({
+      outcome: "redirect",
+      to: DEFAULT_SIGN_IN_PATH,
+      refusal: "banned",
+    });
+  });
+
+  it("allows a user who is not banned, whatever the expiry column says", () => {
+    const session: AuthSession = {
+      factor: "passkey",
+      user: { id: "u9", role: "admin", banned: false, banExpires: new Date(NOW + 1000) },
+    };
+    expect(refusal(session)).toEqual({ outcome: "allow", session });
+  });
+
+  it("reads the wall clock when no clock is injected", () => {
+    const lapsed = banned(new Date(Date.now() - 1000));
+    expect(evaluateAccess({ session: lapsed, pathname: "/runs" })).toEqual({
+      outcome: "allow",
+      session: lapsed,
+    });
+  });
+});
+
 describe("requireSession", () => {
   const guard = (
     current: AuthSession | null,

@@ -81,6 +81,7 @@ export class AccessRefused extends Error {
 // @public (undocumented)
 export interface AccessRequest extends AccessPaths {
     factor?: SessionFactor;
+    now?: () => number;
     pathname?: string;
     // (undocumented)
     role?: string;
@@ -3588,6 +3589,7 @@ export interface SessionGuardOptions extends AccessPaths {
 
 // @public
 export interface SessionUser {
+    banExpires?: Date | string | null;
     // (undocumented)
     banned?: boolean | null;
     // (undocumented)
