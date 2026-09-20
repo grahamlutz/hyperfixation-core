@@ -1,6 +1,5 @@
 import { access, readdir } from "node:fs/promises";
 import path from "node:path";
-import type { StatusReport } from "@hyperfixation/core";
 import { checkE006, quoteIdent } from "@hyperfixation/db";
 import { Client } from "pg";
 import {
@@ -213,7 +212,7 @@ async function doctorApp(context: Context, name: string): Promise<DoctorFinding[
 
   const report = await statusFindings(context, name, state, add);
   versionFinding(report?.applicationVersion, mainSha, mainShaProblem, add);
-  if (report !== undefined) {
+  if (report?.budget !== undefined) {
     budgetFinding(report.budget.current, "current", add);
     budgetFinding(report.budget.previous, "previous", add);
   }
@@ -232,7 +231,7 @@ async function statusFindings(
   name: string,
   state: AppState,
   add: Add,
-): Promise<StatusReport | undefined> {
+): Promise<StatusView | undefined> {
   const url = `https://${name}.${context.baseDomain}/api/status`;
   const token = state.statusTokens?.read;
   if (token === undefined) {
@@ -240,28 +239,110 @@ async function statusFindings(
     return undefined;
   }
 
-  let report: StatusReport;
+  let report: StatusView;
   try {
-    report = await getStatus(context.fetch, url, token);
+    report = readStatus(await getStatus(context.fetch, url, token));
   } catch (error) {
     add("status", "fail", `GET ${url}: ${flatten((error as Error).message)}`);
     return undefined;
   }
 
+  const anomalies = report.anomalies === undefined ? UNKNOWN : String(report.anomalies);
   add(
     "status",
-    report.health === "ok" ? "ok" : "warn",
-    `health ${report.health}, ${String(report.anomalies)} anomaly/anomalies, core ` +
-      report.coreVersion,
+    // Only a health the app actually reported can be a warning: a field it did not answer with
+    // says nothing about the deployment, and a WARN the operator cannot act on is noise.
+    report.health === undefined || report.health === "ok" ? "ok" : "warn",
+    `health ${report.health ?? UNKNOWN}, ${anomalies} anomaly/anomalies, core ` +
+      (report.coreVersion ?? UNKNOWN),
   );
-  add("runs", "ok", `${String(report.runs.running)} run(s) running`);
-  // Only `fixtures` gets a line. `live` is the expected deploy, and `unknown` is an app whose
-  // worker has not reported yet — neither is a finding, but a canned draft an operator takes
-  // for a real one is.
-  if (report.llm.mode === "fixtures") {
+  if (report.runsRunning !== undefined) {
+    add("runs", "ok", `${String(report.runsRunning)} run(s) running`);
+  }
+  // Only `fixtures` gets a line. `live` is the expected deploy, and `unknown` — as is a core too
+  // old to have the field at all — is an app that has not said; neither is a finding, but a
+  // canned draft an operator takes for a real one is.
+  if (report.llmMode === "fixtures") {
     add("llm", "warn", "app is serving fixture drafts — no provider key set");
   }
   return report;
+}
+
+const UNKNOWN = "unknown";
+
+/**
+ * The fields `hf doctor` reads, each as the deployed app may or may not have answered it.
+ *
+ * `/api/status` is shaped by the core the app runs, not by this CLI: `llm` arrived in core 0.1.1,
+ * and any later field is absent from every app deployed before it. Reading one straight off the
+ * response is what made a 0.1.0 app crash the whole command — including the E006, restore-check
+ * and core-bump checks, which have nothing to do with the status endpoint.
+ */
+interface StatusView {
+  health: string | undefined;
+  anomalies: number | undefined;
+  coreVersion: string | undefined;
+  applicationVersion: string | null | undefined;
+  runsRunning: number | undefined;
+  llmMode: string | undefined;
+  budget: { current: PeriodView | null; previous: PeriodView | null } | undefined;
+}
+
+interface PeriodView {
+  period: string | undefined;
+  budgetUsd: string | undefined;
+  spentUsd: string | undefined;
+  driftUsd: string | undefined;
+}
+
+function readStatus(payload: unknown): StatusView {
+  const report = record(payload);
+  const budget = record(report.budget);
+  return {
+    health: text(report.health),
+    anomalies: numeric(report.anomalies),
+    coreVersion: text(report.coreVersion),
+    applicationVersion: report.applicationVersion === null ? null : text(report.applicationVersion),
+    runsRunning: numeric(record(report.runs).running),
+    llmMode: text(record(report.llm).mode),
+    budget: isRecord(report.budget)
+      ? { current: readPeriod(budget.current), previous: readPeriod(budget.previous) }
+      : undefined,
+  };
+}
+
+/** `null` for a period the app has no row for, which is also how a malformed one reads. */
+function readPeriod(value: unknown): PeriodView | null {
+  if (!isRecord(value)) return null;
+  return {
+    period: text(value.period),
+    budgetUsd: text(value.budgetUsd),
+    spentUsd: text(value.spentUsd),
+    driftUsd: text(value.driftUsd),
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function record(value: unknown): Record<string, unknown> {
+  return isRecord(value) ? value : {};
+}
+
+function text(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function numeric(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+/** A money column as a number, or `undefined` when the app did not report a usable one. */
+function amount(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function versionFinding(
@@ -288,18 +369,19 @@ function versionFinding(
   );
 }
 
-function budgetFinding(
-  period: StatusReport["budget"]["current"],
-  which: string,
-  add: Add,
-): void {
+function budgetFinding(period: PeriodView | null, which: string, add: Add): void {
   if (period === null) {
     add("budget", "ok", `no ${which} period row yet`);
     return;
   }
-  const over = Number(period.spentUsd) > Number(period.budgetUsd);
-  const drifting = Number(period.driftUsd) !== 0;
-  const spend = `${period.period} spent $${period.spentUsd} of $${period.budgetUsd}`;
+  const spent = amount(period.spentUsd);
+  const budget = amount(period.budgetUsd);
+  const drift = amount(period.driftUsd);
+  const over = spent !== undefined && budget !== undefined && spent > budget;
+  const drifting = drift !== undefined && drift !== 0;
+  const spend =
+    `${period.period ?? UNKNOWN} spent $${period.spentUsd ?? UNKNOWN} ` +
+    `of $${period.budgetUsd ?? UNKNOWN}`;
   if (over || drifting) {
     add(
       "budget",
@@ -398,16 +480,12 @@ async function bumpFindings(
  * with a body of its own, and everything it would say about the token belongs nowhere near a
  * terminal.
  */
-async function getStatus(
-  fetchImpl: FetchLike,
-  url: string,
-  token: string,
-): Promise<StatusReport> {
+async function getStatus(fetchImpl: FetchLike, url: string, token: string): Promise<unknown> {
   const response = await fetchImpl(url, {
     headers: { authorization: `Bearer ${token}`, accept: "application/json" },
   });
   if (!response.ok) throw new Error(`HTTP ${String(response.status)}`);
-  return (await response.json()) as StatusReport;
+  return await response.json();
 }
 
 async function stateNames(dir: string): Promise<string[]> {

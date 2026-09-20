@@ -37,8 +37,9 @@ export function checklistLines(input: ChecklistInput): string[] {
   if (input.providerKeysSent.length === 0) {
     add(
       "The app is serving FIXTURE drafts: no ANTHROPIC_API_KEY or OPENAI_API_KEY was configured,",
-      "so llm.run returns canned text and /api/status reports llm.mode=fixtures. Paste a key",
-      "into Coolify's environment for this application and redeploy.",
+      "so llm.run returns canned text. /api/status reports llm.mode=fixtures once the app's",
+      "worker has reported the mode — until then, and on a core older than 0.1.1, it says",
+      "unknown. Paste a key into Coolify's environment for this application and redeploy.",
     );
   }
 

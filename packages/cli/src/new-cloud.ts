@@ -10,6 +10,7 @@ import {
   type CloudStepContext,
 } from "./cloud-steps/index.js";
 import {
+  CONFIG_KEYS,
   loadOperatorConfig,
   requireOperatorConfig,
   type ConfigKey,
@@ -171,25 +172,28 @@ export async function runSteps<Context extends CloudContext>(
 }
 
 /**
+ * The keys a cloud `hf new` runs without: `HF_DB_HOST_INTERNAL` has a default, and the two
+ * provider keys are what the checklist warns about when they are unset.
+ */
+export const OPTIONAL_CLOUD_CONFIG: readonly ConfigKey[] = [
+  "HF_DB_HOST_INTERNAL",
+  "HF_ANTHROPIC_API_KEY",
+  "HF_OPENAI_API_KEY",
+];
+
+/**
  * Every operator config key a cloud `hf new` needs, checked before the first step.
  *
  * All at once, and before anything is created: `requireOperatorConfig` names every missing key,
  * and an operator who learns about them one failed step at a time pays for a half-provisioned app
- * each time. The optional keys are deliberately absent — `HF_DB_HOST_INTERNAL` has a default, and
- * the two provider keys are what the checklist warns about when they are unset.
+ * each time. Derived from `CONFIG_KEYS` rather than listed, because a hand-kept list is exactly
+ * what left `HF_GITHUB_TOKEN`, the Cloudflare pair and five others to fail at their own step: the
+ * ten steps between them read every key there is, so the required set is the complement of the
+ * optional one, and a key added for a step is required the moment it is named.
  */
-export const REQUIRED_CLOUD_CONFIG: readonly ConfigKey[] = [
-  "HF_COOLIFY_URL",
-  "HF_COOLIFY_TOKEN",
-  "HF_COOLIFY_SERVER_UUID",
-  "HF_COOLIFY_GITHUB_APP_UUID",
-  "HF_COOLIFY_POSTGRES_UUID",
-  "HF_SSH_HOST",
-  "HF_BASE_DOMAIN",
-  "HF_SMTP_URL",
-  "HF_EMAIL_FROM",
-  "HF_LANGFUSE_URL",
-];
+export const REQUIRED_CLOUD_CONFIG: readonly ConfigKey[] = CONFIG_KEYS.filter(
+  (key) => !OPTIONAL_CLOUD_CONFIG.includes(key),
+);
 
 /** The cluster role `hf new` provisions the app's database and roles as. */
 const CLUSTER_ADMIN_USER = "postgres";

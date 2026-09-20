@@ -112,8 +112,9 @@ function statusReport(overrides: Partial<StatusReport> = {}): StatusReport {
   };
 }
 
+/** A record, not a `StatusReport`: the shape an older core answers with is the point of some. */
 function statusHandler(
-  json: StatusReport | { error: string },
+  json: StatusReport | Record<string, unknown>,
   status = 200,
 ): ReturnType<typeof http.get> {
   return http.get(STATUS_URL, () => HttpResponse.json(json, { status }));
@@ -216,6 +217,43 @@ describe("hf doctor", () => {
       expect(doctorLines(result).some((line) => line.includes(" llm:")), mode).toBe(false);
       harness.server.resetHandlers();
     }
+  });
+
+  it("reads a 0.1.0 app's status, which has no llm key at all", async () => {
+    const dir = await stateDirWith();
+    const old: Record<string, unknown> = { ...statusReport() };
+    delete old.llm;
+    harness.server.use(statusHandler(old));
+
+    const result = await doctor(options(dir, { name: APP }));
+    const lines = doctorLines(result);
+
+    expect(result.ok).toBe(true);
+    expect(findingOf(lines, "status")).toBe(
+      "  OK   status: health ok, 0 anomaly/anomalies, core 0.1.0",
+    );
+    expect(lines.some((line) => line.includes(" llm:"))).toBe(false);
+    expect(findingOf(lines, "budget")).toContain("2026-09 spent $3.250000 of $50.000000");
+  });
+
+  it("says unknown rather than throwing when a status field is newer than the core", async () => {
+    const dir = await stateDirWith();
+    // Everything `hf doctor` reads, absent at once: an app on a core old enough to answer with
+    // none of it still has its E006, restore-check and core-bump lines.
+    harness.server.use(statusHandler({ app: "demo_app", at: NOW.toISOString() }));
+
+    const result = await doctor(options(dir, { name: APP }));
+    const lines = doctorLines(result);
+
+    expect(findingOf(lines, "status")).toBe(
+      "  OK   status: health unknown, unknown anomaly/anomalies, core unknown",
+    );
+    expect(lines.some((line) => line.includes(" runs:"))).toBe(false);
+    expect(lines.some((line) => line.includes(" budget:"))).toBe(false);
+    expect(lines.some((line) => line.includes(" llm:"))).toBe(false);
+    expect(findingOf(lines, "E006")).toContain("OK");
+    expect(findingOf(lines, "core-bump")).toContain("no open core-bump pull request");
+    expect(result.ok).toBe(true);
   });
 
   it("fails E006 on one line when a privilege is false", async () => {
