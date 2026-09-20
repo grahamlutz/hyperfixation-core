@@ -68,7 +68,7 @@ jobs:
         uses: changesets/action@v2
         with:
           github-token: ${{ steps.app-token.outputs.token }}
-          version-script: pnpm changeset version && pnpm install --lockfile-only --ignore-scripts
+          version-script: pnpm release:version
           publish-script: pnpm release:ci
           # `release:ci` tags and reports for itself; the action cannot see what a custom
           # publish script published, so leaving these on would mean no tags at all.
