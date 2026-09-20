@@ -76,6 +76,14 @@ describe("the local Runner", () => {
     expect(result.code).toBe(3);
   });
 
+  it("reports the exit code of a shell that never reads a small input", async () => {
+    const runner = createLocalRunner();
+
+    const result = await runner.exec(["sh", "-c", "exit 3"], { input: "SELECT 1" });
+
+    expect(result.code).toBe(3);
+  });
+
   it("names the port it was configured with instead of forwarding one", async () => {
     const runner = createLocalRunner({ tunnelPort: 5434 });
 
