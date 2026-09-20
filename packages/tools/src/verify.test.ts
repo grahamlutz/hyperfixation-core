@@ -133,6 +133,8 @@ function fake(options: {
   /** Per package; a name mapped to `undefined` has no attestation. Default: all attested. */
   attestations?: Map<string, AttestationsResponse | undefined>;
   auditProblems?: string[];
+  /** Exit status of the `git fetch` that refreshes origin/main and the tags. Default: 0. */
+  fetchStatus?: number;
 }): Harness {
   const calls: Call[] = [];
   const slept: number[] = [];
@@ -144,6 +146,9 @@ function fake(options: {
   const exec: Exec = (command, args, execOptions) => {
     calls.push({ command, args, cwd: execOptions.cwd });
     const joined = args.join(" ");
+    if (command === "git" && args[0] === "fetch") {
+      return { status: options.fetchStatus ?? 0, stdout: "" };
+    }
     if (command === "git" && args[0] === "rev-parse") {
       const ok = options.tagged !== false && joined.includes(`refs/tags/v${VERSION}`);
       return { status: ok ? 0 : 1, stdout: ok ? `${RELEASE_SHA}\n` : "" };
@@ -375,7 +380,8 @@ describe("verify against a provenance attestation", () => {
     const { problems, warnings } = await verify(options(), harness.deps);
 
     expect(problems).toHaveLength(1);
-    expect(problems[0]).toMatch(/has no provenance attestation, so the rebuild is the only check$/u);
+    expect(problems[0]).toMatch(/has no provenance attestation, so the rebuild is the only check/u);
+    expect(problems[0]).toMatch(new RegExp(`\\(rebuilt from ${RELEASE_SHA}, refs/tags/v1\\.0\\.0\\)$`, "u"));
     expect(warnings).toEqual([]);
     // Nothing was attested, so there is no Sigstore bundle to verify.
     expect(harness.audited).toEqual([]);
@@ -387,6 +393,52 @@ describe("verify against a provenance attestation", () => {
     const { problems } = await verify(options(), harness.deps);
 
     expect(problems).toEqual(["@hyperfixation/core@1.0.0 failed npm audit signatures"]);
+  });
+});
+
+describe("fetching before the release commit is resolved", () => {
+  it("refreshes origin/main and the tags before reading a ref", async () => {
+    const harness = fake({});
+
+    await verify(options(), harness.deps);
+
+    const fetched = harness.calls.findIndex((call) => call.args[0] === "fetch");
+    const read = harness.calls.findIndex((call) => call.args[0] === "rev-parse");
+    expect(harness.calls[fetched]).toEqual({
+      command: "git",
+      args: ["fetch", "origin", "main", "--tags", "--quiet"],
+      cwd: root,
+    });
+    expect(fetched).toBeLessThan(read);
+  });
+
+  it("stops with the stale-ref explanation when the fetch fails", async () => {
+    const harness = fake({ fetchStatus: 1 });
+
+    await expect(verify(options(), harness.deps)).rejects.toThrow(
+      /git fetch origin main --tags failed in .*a stale ref reports the wrong commit's tarballs as mismatched/su,
+    );
+    expect(harness.calls.some((call) => call.args[0] === "rev-parse")).toBe(false);
+  });
+
+  it("verifies against the checkout's own refs under --no-fetch", async () => {
+    const harness = fake({ fetchStatus: 1 });
+
+    expect(await verify({ ...options(), fetch: false }, harness.deps)).toEqual({
+      problems: [],
+      warnings: [],
+    });
+    expect(harness.calls.some((call) => call.args[0] === "fetch")).toBe(false);
+  });
+
+  it("names the commit it rebuilt when a tarball does not match", async () => {
+    const harness = fake(otherBuild("@hyperfixation/db"));
+
+    const { warnings } = await verify(options(), harness.deps);
+
+    expect(warnings[0]).toMatch(
+      new RegExp(`\\(rebuilt from ${RELEASE_SHA}, refs/tags/v1\\.0\\.0\\)$`, "u"),
+    );
   });
 });
 

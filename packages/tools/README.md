@@ -27,7 +27,11 @@ the template checkout (`HF_TEMPLATE_DIR`) and typechecks both. It refuses to pub
 that is not loopback, and removes its temp directories even on failure.
 
 `release:verify` asks whether the tarballs the registry serves for `<version>` were built from the
-release commit — its tag, else the commit that bumped the manifests on `origin/main`. For a version
+release commit — its tag, else the commit that bumped the manifests on `origin/main`. Both are
+local refs, so it runs `git fetch origin main --tags` first and refuses to continue if that fails:
+a checkout that had not fetched since the publish resolved a pre-release commit on 2026-09-20 and
+reported all nine packages of 0.1.2 as mismatched. `--no-fetch` accepts the refs already in the
+checkout, and every difference it reports names the commit it rebuilt. For a version
 published by `release.yml` the answer is the **provenance attestation**, and that is the gate:
 
 - the SLSA statement at `/-/npm/v1/attestations/<pkg>@<version>` is decoded, and its subject
