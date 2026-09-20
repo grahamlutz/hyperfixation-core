@@ -145,6 +145,10 @@ export function credentialsOf(connectionString: string): {
 // @public
 export interface Database {
     adminUrl(databaseName?: string): string | undefined;
+    readonly boxAddress?: {
+        host: string;
+        port: number;
+    };
     // (undocumented)
     close(): Promise<void>;
     // (undocumented)
@@ -365,7 +369,8 @@ export function openDatabase(runner: Runner, options: OpenDatabaseOptions): Prom
 export interface OpenDatabaseOptions {
     // (undocumented)
     admin: AdminCredentials;
-    container?: string;
+    containers?: readonly string[];
+    dockerExec?: boolean;
     remotePort?: number;
 }
 
@@ -540,7 +545,7 @@ export function run(command: string, args: readonly string[], options: RunOption
 export interface Runner {
     // (undocumented)
     exec(command: readonly string[], options?: ExecOptions): Promise<ExecResult>;
-    tunnel(remotePort: number): Promise<Tunnel>;
+    tunnel(remotePort: number, remoteHost?: string): Promise<Tunnel>;
 }
 
 // @public (undocumented)
@@ -577,7 +582,7 @@ export interface SshRunnerOptions {
 }
 
 // @public (undocumented)
-export function sshTunnelArgv(host: string, localPort: number, remotePort: number): string[];
+export function sshTunnelArgv(host: string, localPort: number, remotePort: number, remoteHost?: string): string[];
 
 // @public
 export const STALE_DUMP_HOURS = 36;
