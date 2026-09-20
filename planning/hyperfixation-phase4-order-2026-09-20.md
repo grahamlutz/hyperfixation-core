@@ -267,11 +267,35 @@ small enough to ride along with the chunk it touches. Markers as above.
   5434, "the `hf dev` compose port"; this repo has no compose file and CI overrides it to 5432. Default to
   5432, or ship a `docker-compose.test.yml`. Also document how to get `hf` on PATH from a clone (the
   published `@hyperfixation/cli` may make this moot — check before writing it down).
-- ⬜ **Docs drift.** The chunk headings above (R1, A1, B1, B2, X2), "Where Phase 4 starts from" (written
-  against `720ad4e`), the Phase 3 X1 header, and the master plan's status table all predate the merged
-  work. `pnpm plan:sync --write` regenerates the Status block; the rest is hand prose.
+- ✅ **Docs drift.** Chunk headings, the Phase 3 X1 header and the status tables were brought up to date
+  by core #107 and #108 (2026-09-20). "Where Phase 4 starts from" is still the `720ad4e` snapshot, by design.
 - ⬜ **shadcn registry is empty** (`registry/registry.json`, `items: []`). Fenced above; listed so it
   isn't forgotten.
+
+### Follow-ups from X1 (first real deployment, 2026-09-20)
+
+None block Phase 4; the first two are the most likely to bite.
+
+- ⬜ **`hf restore-check` should tolerate live drift.** Against a dump a few hours old it reports every
+  table the app has written to as a mismatch (9 of 24 at 1.3 h). It only passes when run right after a
+  backup. Compare append-only tables as `restored <= live`, flag only tables where `restored > live`
+  unexpectedly, and print the dump's age next to the verdict.
+- ⬜ **The api-diff gate no longer catches a removed CLI command.** #98 excused a changed `COMMANDS` /
+  `USAGE` literal so a command could be added; a removed command passes too. Tighten it to accept
+  additions only (new tuple is a superset of the old).
+- ⬜ **An end-to-end guard against a second `DuplicateFlow`.** A template prod e2e that hits an
+  authenticated page plus a server action twice and asserts the web log has no `DuplicateFlow` (core #103
+  fixed `defineFlow`; nothing yet exercises the real Next layers).
+- ⬜ **Two registries the #103 audit left alone.** `registerLangfuse` has no duplicate guard (a second
+  tracer provider leaks; only called once per runtime today), and `defineApp`'s `attach()` and
+  `run-context.ts`'s ALS are per-instance under two module layers.
+- ⬜ **`downstream.txt` lists only the template.** Add `grahamlutz/demo-app` to give it core-bump PRs;
+  until then it is updated by hand (`pnpm update '@hyperfixation/*'`, commit, `hf deploy demo-app`).
+- ⬜ **SIGTERM mid-run was not shown on the box.** The drain was timed on an idle worker (fixtures finish
+  instantly). Interrupting a run mid-step is covered by core's redeploy test cases only.
+- ⬜ **Phone passkey proof and the first-of-month period row** (2026-10-01) — the two X1 manual items left.
+- ⬜ **`hf` should offer `--version`,** and `hf new` should be safe to run from a directory that already
+  holds an app (the adopt rule was tightened in core #97; add a message that names the existing path).
 
 ## Risks
 
