@@ -25,6 +25,13 @@ that one is taken), then installs the published packages into a scratch project 
 the template checkout (`HF_TEMPLATE_DIR`) and typechecks both. It refuses to publish to anything
 that is not loopback, and removes its temp directories even on failure.
 
+`release:verify` compares the registry's `dist.integrity` against tarballs packed from the release
+commit — its tag, else the commit that bumped the manifests on `origin/main` — in a throwaway
+`git worktree`, never from whatever this checkout has out. The 0.1.1 verification reported a false
+integrity mismatch for the CLI because it packed a feature branch. A `404` on a version document is
+retried with backoff for three minutes before it counts as missing: after a publish npmjs answers
+`npm view` at once but 404s the per-version document for about a minute.
+
 ## FUTURE: the OIDC bridge (Phase 4)
 
 Not built yet — no `release.yml` exists. When the trusted-publisher route replaces the manual

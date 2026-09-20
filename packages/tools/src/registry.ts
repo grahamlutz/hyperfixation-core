@@ -61,6 +61,47 @@ export function httpRegistryClient(url: string = NPMJS_REGISTRY): RegistryClient
   };
 }
 
+/**
+ * How long a freshly published version document may keep 404ing. Observed on the 0.1.1 publish:
+ * `npm view` answered immediately while the per-version document 404ed for about a minute.
+ */
+export const PROPAGATION_WINDOW_MS = 180_000;
+
+const FIRST_RETRY_MS = 2_000;
+const MAX_RETRY_MS = 30_000;
+
+export type PropagationWait = {
+  readonly sleep?: (ms: number) => Promise<void>;
+  readonly windowMs?: number;
+};
+
+const realSleep = (ms: number): Promise<void> =>
+  new Promise((done) => {
+    setTimeout(done, ms);
+  });
+
+/** The document, retrying a 404 with backoff until the propagation window is spent. */
+export async function awaitVersionDocument(
+  registry: RegistryClient,
+  name: string,
+  version: string,
+  wait: PropagationWait = {},
+): Promise<{ readonly document: VersionDocument; readonly waitedMs: number }> {
+  const sleep = wait.sleep ?? realSleep;
+  const windowMs = wait.windowMs ?? PROPAGATION_WINDOW_MS;
+  let document = await registry.versionDocument(name, version);
+  let waitedMs = 0;
+  let delay = FIRST_RETRY_MS;
+  while (document.status === 404 && waitedMs < windowMs) {
+    const next = Math.min(delay, windowMs - waitedMs);
+    await sleep(next);
+    waitedMs += next;
+    delay = Math.min(delay * 2, MAX_RETRY_MS);
+    document = await registry.versionDocument(name, version);
+  }
+  return { document, waitedMs };
+}
+
 function host(url: string): string {
   try {
     return new URL(url).hostname;
@@ -234,12 +275,16 @@ export async function registryProblems(
   version: string,
   tarballs: ReadonlyMap<string, string>,
   integrityOf: (tarball: string) => Promise<string> = tarballIntegrity,
+  wait: PropagationWait = {},
 ): Promise<string[]> {
   const problems: string[] = [];
   for (const [name, tarball] of tarballs) {
-    const document = await registry.versionDocument(name, version);
+    const { document, waitedMs } = await awaitVersionDocument(registry, name, version, wait);
     if (document.status !== 200) {
-      problems.push(`${name}@${version} is not on ${registry.url} (HTTP ${document.status})`);
+      const waited = waitedMs > 0 ? ` after ${Math.round(waitedMs / 1000)}s` : "";
+      problems.push(
+        `${name}@${version} is not on ${registry.url} (HTTP ${document.status}${waited})`,
+      );
       continue;
     }
     const local = await integrityOf(tarball);
