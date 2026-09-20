@@ -58,6 +58,8 @@ export interface StubRoute {
   url: string;
   status?: number;
   json?: unknown;
+  /** Answers one request and then steps aside — a lookup that 404s before a create, say. */
+  once?: boolean;
 }
 
 export interface RecordedRequest {
@@ -96,16 +98,20 @@ export function createOpenApiHarness(routes: readonly StubRoute[]): OpenApiHarne
   const violations: string[] = [];
 
   const handler = (route: StubRoute): RequestHandler =>
-    http[route.method](toMswPath(route.url), async ({ request }) => {
-      const url = new URL(request.url);
-      const body = await readJsonBody(request);
-      const problem = validate(route.spec, request.method, url, body, requests);
-      if (problem !== undefined) {
-        violations.push(problem);
-        return HttpResponse.json({ openApiViolation: problem }, { status: 500 });
-      }
-      return HttpResponse.json(route.json ?? {}, { status: route.status ?? 200 });
-    });
+    http[route.method](
+      toMswPath(route.url),
+      async ({ request }) => {
+        const url = new URL(request.url);
+        const body = await readJsonBody(request);
+        const problem = validate(route.spec, request.method, url, body, requests);
+        if (problem !== undefined) {
+          violations.push(problem);
+          return HttpResponse.json({ openApiViolation: problem }, { status: 500 });
+        }
+        return HttpResponse.json(route.json ?? {}, { status: route.status ?? 200 });
+      },
+      { once: route.once ?? false },
+    );
 
   const server = setupServer(...routes.map(handler));
 
