@@ -79,6 +79,30 @@ export {
   type QueryResult,
 } from "./database.js";
 export {
+  createLocalDirectoryBackupSource,
+  createS3BackupSource,
+  BackupSourceError,
+  COOLIFY_BACKUP_DIR,
+  type BackupDump,
+  type BackupSource,
+  type BackupSourceKind,
+  type LocalDirectoryBackupSourceOptions,
+} from "./backup-source.js";
+export {
+  formatRestoreCheck,
+  pgRestoreArgv,
+  restoreCheck,
+  restoreCheckApp,
+  RestoreCheckError,
+  SCRATCH_SUFFIX,
+  STALE_DUMP_HOURS,
+  type RestoreCheckAppOptions,
+  type RestoreCheckOptions,
+  type RestoreCheckResult,
+  type RestoreCheckRow,
+  type RestoreVerdict,
+} from "./restore-check.js";
+export {
   provisionDatabase,
   ProvisionDatabaseError,
   REQUIRED_EXTENSIONS,
