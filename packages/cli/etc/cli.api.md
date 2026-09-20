@@ -369,6 +369,8 @@ export function openDatabase(runner: Runner, options: OpenDatabaseOptions): Prom
 export interface OpenDatabaseOptions {
     // (undocumented)
     admin: AdminCredentials;
+    // @deprecated
+    container?: string;
     containers?: readonly string[];
     dockerExec?: boolean;
     remotePort?: number;
