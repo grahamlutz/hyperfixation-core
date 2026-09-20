@@ -238,10 +238,6 @@ async function main(): Promise<number> {
       env = {
         ...process.env,
         PATH: `${bin}:${process.env.PATH ?? ""}`,
-        // `hf up` runs a plain `pnpm install`, and pnpm freezes the lockfile whenever CI is
-        // set. The overrides written below are exactly what the app's copied lockfile does
-        // not have yet, so this install has to be allowed to re-resolve.
-        npm_config_frozen_lockfile: "false",
         // The app's tests provision a database each off an admin connection; the app's own
         // compose postgres is the one running by then.
         HF_TEST_DATABASE_URL:
@@ -282,6 +278,14 @@ async function main(): Promise<number> {
       await writeFile(settings, withTarballOverrides(before, tarballs));
       return true;
     });
+
+    // This install is the check's, not `hf up`'s. Rewriting the overrides is exactly what the
+    // app's copied lockfile does not have, and on a runner pnpm freezes the lockfile — the
+    // same `--no-frozen-lockfile` `template:check` needs, for the same reason. `hf up` then
+    // finds `node_modules` and skips an install of its own.
+    await step("install the app against the tarballs", () =>
+      run("pnpm", ["install", "--no-frozen-lockfile"], { cwd: appDir, env }),
+    );
 
     const status = `http://127.0.0.1:${values.port}/api/status`;
     await step(`hf up until ${status} answers 401`, async () => {
