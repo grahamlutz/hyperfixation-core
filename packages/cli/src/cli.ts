@@ -12,6 +12,7 @@ import { formatRestoreCheck, restoreCheckApp } from "./restore-check.js";
 import { statusTokenApp, type StatusTokenKind } from "./status-token.js";
 import { requireTemplateSource } from "./template-source.js";
 import { DEV_BUDGET_USD, upApp } from "./up.js";
+import { cliVersion } from "./version.js";
 
 export const COMMANDS = [
   "new",
@@ -25,6 +26,7 @@ export const COMMANDS = [
   "deploy",
   "doctor",
   "restore-check",
+  "version",
 ] as const;
 
 export type Command = (typeof COMMANDS)[number];
@@ -86,6 +88,8 @@ export const USAGE = `hf — the hyperfixation CLI
       --backup-dir <dir>      where the dumps are (default: Coolify's on the box)
       --from-s3               read the dump from object storage (not implemented)
 
+  hf version                the @hyperfixation/cli version behind this hf, also as --version, -v
+
 Every command but \`new\`, \`deploy\`, \`doctor\` and \`restore-check\` runs against the app at or above the working directory, or --dir.
 `;
 
@@ -112,6 +116,10 @@ export async function main(argv: readonly string[], io: Io = consoleIo): Promise
   if (command === undefined || command === "--help" || command === "-h") {
     io.out(USAGE);
     return command === undefined ? 1 : 0;
+  }
+  if (command === "--version" || command === "-v") {
+    io.out(await cliVersion());
+    return 0;
   }
   if (!(COMMANDS as readonly string[]).includes(command)) {
     io.err(`unknown command ${JSON.stringify(command)}`);
@@ -151,6 +159,9 @@ async function dispatch(command: Command, argv: readonly string[], io: Io): Prom
       return await commandDoctor(argv, io);
     case "restore-check":
       return await commandRestoreCheck(argv, io);
+    case "version":
+      io.out(await cliVersion());
+      return 0;
   }
 }
 

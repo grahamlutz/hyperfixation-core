@@ -51,6 +51,38 @@ export class TemplateError extends Error {
   }
 }
 
+/**
+ * Where a cloud `hf new` fetches the template before it becomes the app.
+ *
+ * Beside the target rather than under `os.tmpdir()`, so the rename is a rename and not a second
+ * copy across filesystems, and dot-prefixed so a half-fetched tree does not look like an app.
+ */
+export function templateTempDir(dir: string): string {
+  return path.join(path.dirname(dir), `.${path.basename(dir)}.hf-new`);
+}
+
+/**
+ * The two refusals a directory in the way earns, worded once because both halves of `hf new`
+ * raise them.
+ *
+ * Each names the absolute path and the single move that clears it: "already exists" alone leaves
+ * the operator to work out which of the app directory and the dot-prefixed scratch beside it is
+ * meant, and they are one keystroke apart.
+ */
+export function targetInTheWay(dir: string): TemplateError {
+  return new TemplateError(
+    `${dir} already exists; hf new will not write into it. Move it away (or delete it) and rerun — ` +
+      "the template is fetched into a directory of its own.",
+  );
+}
+
+export function scratchInTheWay(scratch: string): TemplateError {
+  return new TemplateError(
+    `${scratch} is a leftover hf new scratch directory and hf has no record of creating it. ` +
+      "Remove it and rerun; the template is fetched into it fresh.",
+  );
+}
+
 export interface NewAppOptions {
   /** The name as typed; becomes the directory and, underscored, both placeholders. */
   name: string;
@@ -103,7 +135,13 @@ export async function newApp(options: NewAppOptions): Promise<NewAppResult> {
 
   const dir = path.resolve(options.into ?? process.cwd(), names.given);
   if (await exists(dir)) {
-    throw new TemplateError(`${dir} already exists; hf new will not write into it`);
+    throw targetInTheWay(dir);
+  }
+  // A scratch directory here is an interrupted cloud run for this same name: copying an app over
+  // the top of it would leave that run's rerun to judge a directory neither flow made.
+  const scratch = templateTempDir(dir);
+  if (await exists(scratch)) {
+    throw scratchInTheWay(scratch);
   }
 
   await cp(source, dir, {
