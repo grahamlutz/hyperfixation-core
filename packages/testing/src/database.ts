@@ -78,6 +78,7 @@ export async function createTestDatabase(
     migration,
     async drop() {
       await asRole(adminUrl, async (admin) => {
+        await waitForDrain(admin, databaseName);
         await admin.query(`DROP DATABASE IF EXISTS ${quoteIdent(databaseName)} WITH (FORCE)`);
         for (const role of [roles.migrator, roles.application, roles.readonly]) {
           await admin.query(`DROP ROLE IF EXISTS ${quoteIdent(role)}`);
@@ -85,6 +86,37 @@ export async function createTestDatabase(
       });
     },
   };
+}
+
+/** How long `drop()` gives the database's own backends to go away before forcing them out. */
+const DRAIN_TIMEOUT_MS = 5_000;
+const DRAIN_POLL_MS = 10;
+
+/**
+ * Waits until nothing is connected to `databaseName`, so the drop that follows finds no backend
+ * to terminate.
+ *
+ * Awaiting every `pool.end()` in an `afterAll` is not that guarantee: `pg`'s `pool.end()` resolves
+ * as soon as it has *called* `client.end()` on each pooled connection, not when their sockets have
+ * closed — `pg-pool`'s `_remove` drops the client from its bookkeeping and fires the end callback
+ * without waiting. `WITH (FORCE)` then terminates whatever is still winding down, and a `pg`
+ * client killed mid-`end()` still carries the pool's `idleListener`, which re-emits the `57P01` on
+ * a pool nothing is listening to — an uncaught exception that fails the task after every test in
+ * it has passed.
+ *
+ * Bounded rather than unbounded: a connection that is genuinely leaked rather than closing should
+ * still be forced out and the suite torn down, not hang here.
+ */
+async function waitForDrain(admin: Client, databaseName: string): Promise<void> {
+  const deadline = Date.now() + DRAIN_TIMEOUT_MS;
+  for (;;) {
+    const { rows } = await admin.query<{ n: number }>(
+      "SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = $1",
+      [databaseName],
+    );
+    if (rows[0]!.n === 0 || Date.now() >= deadline) return;
+    await new Promise((resolve) => setTimeout(resolve, DRAIN_POLL_MS));
+  }
 }
 
 /** Runs `fn` on a connection of its own as whatever role `connectionString` names. */

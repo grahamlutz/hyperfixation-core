@@ -51,6 +51,7 @@ export async function createTestDatabase(): Promise<TestDatabase> {
     readonlyUrl: url(roles.readonly, roles.readonlyPassword ?? ""),
     async drop() {
       await withAdmin(async (admin) => {
+        await waitForDrain(admin, databaseName);
         await admin.query(`DROP DATABASE IF EXISTS ${quoteIdent(databaseName)} WITH (FORCE)`);
         for (const role of [roles.migrator, roles.application, roles.readonly]) {
           await admin.query(`DROP ROLE IF EXISTS ${quoteIdent(role)}`);
@@ -58,6 +59,28 @@ export async function createTestDatabase(): Promise<TestDatabase> {
       });
     },
   };
+}
+
+const DRAIN_TIMEOUT_MS = 5_000;
+const DRAIN_POLL_MS = 10;
+
+/**
+ * Waits until nothing is connected to `databaseName`, so the drop that follows finds no backend to
+ * terminate. `@hyperfixation/testing`'s copy carries the full reasoning; the short of it is that
+ * `pool.end()` resolves before its sockets have closed, and a client killed mid-`end()` re-emits
+ * the `57P01` on a pool nothing is listening to. Bounded, so a leaked connection is forced out
+ * rather than hanging the teardown.
+ */
+async function waitForDrain(admin: Client, databaseName: string): Promise<void> {
+  const deadline = Date.now() + DRAIN_TIMEOUT_MS;
+  for (;;) {
+    const { rows } = await admin.query<{ n: number }>(
+      "SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = $1",
+      [databaseName],
+    );
+    if (rows[0]!.n === 0 || Date.now() >= deadline) return;
+    await new Promise((resolve) => setTimeout(resolve, DRAIN_POLL_MS));
+  }
 }
 
 /** Runs `fn` on a connection as the role the test database was created by. */
