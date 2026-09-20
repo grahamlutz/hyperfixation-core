@@ -49,6 +49,7 @@ export class CloudflareClient {
       provider: "cloudflare",
       baseUrl: options.url ?? CLOUDFLARE_API_URL,
       headers: { authorization: `Bearer ${options.token}` },
+      secrets: [options.token],
       fetch: options.fetch,
     });
   }

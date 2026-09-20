@@ -13,6 +13,17 @@ export const COOLIFY_ENVIRONMENT = "production";
 /** Where the build pack looks for the compose file, relative to the repository root. */
 export const COMPOSE_LOCATION = "/docker-compose.prod.yml";
 
+/**
+ * The compose service the app's domain is attached to — the one the template publishes 3000 from.
+ *
+ * A `dockercompose` application cannot take `domains` at all (Coolify 4.3.21: 422 `The domains
+ * field cannot be used for dockercompose applications`), and `docker_compose_domains` names a
+ * service, so one of them has to be named here. A template that renamed `web` would deploy an app
+ * Coolify's proxy routes nothing to, which is why this is a constant with a test behind it rather
+ * than a literal in the payload.
+ */
+export const COMPOSE_DOMAIN_SERVICE = "web";
+
 /** The compose file the drift assertion reads, under the app's directory. */
 export const PROD_COMPOSE_FILE = "docker-compose.prod.yml";
 
@@ -328,7 +339,7 @@ async function findOrCreateApplication(
     docker_compose_location: COMPOSE_LOCATION,
     connect_to_docker_network: true,
     name,
-    domains: `https://${fqdn}`,
+    docker_compose_domains: [{ name: COMPOSE_DOMAIN_SERVICE, domain: `https://${fqdn}` }],
     // The `deploy` step is what deploys, once the environment is set and the database migrated.
     instant_deploy: false,
   });

@@ -3,7 +3,7 @@ import { createOpenApiHarness, type StubRoute } from "../test-support/openapi.js
 import { CloudflareClient } from "./cloudflare.js";
 import { CoolifyClient } from "./coolify.js";
 import { GithubClient } from "./github.js";
-import { createTransport, ProviderError } from "./http.js";
+import { createTransport, EXPLANATION_LIMIT, ProviderError } from "./http.js";
 import { LangfuseClient } from "./langfuse.js";
 import { SentryClient } from "./sentry.js";
 
@@ -219,7 +219,9 @@ describe("provider clients", () => {
         git_branch: "main",
         build_pack: "dockercompose",
         name: "demo-app",
-        domains: "https://demo-app.hyperfixation.ai",
+        docker_compose_domains: [
+          { name: "web", domain: "https://demo-app.hyperfixation.ai" },
+        ],
         connect_to_docker_network: true,
         instant_deploy: false,
       });
@@ -444,6 +446,28 @@ describe("provider clients", () => {
       expect(harness.takeViolations()).toHaveLength(1);
     });
 
+    it("fails the payload the box rejected: domains on a dockercompose application", async () => {
+      const coolify = new CoolifyClient({ url: COOLIFY, token: "t" });
+
+      await coolify
+        .createPrivateGithubAppApplication({
+          project_uuid: "p1",
+          server_uuid: "s1",
+          environment_name: "production",
+          environment_uuid: "e1",
+          github_app_uuid: "g1",
+          git_repository: "grahamlutz/demo-app",
+          git_branch: "main",
+          build_pack: "dockercompose",
+          domains: "https://demo-app.hyperfixation.ai",
+        })
+        .catch(() => undefined);
+
+      expect(harness.takeViolations()).toEqual([
+        expect.stringContaining("use docker_compose_domains"),
+      ]);
+    });
+
     it("fails a query parameter the document does not declare", async () => {
       const listing = createTransport({ provider: "github", baseUrl: GITHUB, headers: {} });
 
@@ -460,27 +484,116 @@ describe("provider clients", () => {
   });
 
   describe("errors", () => {
-    it("never puts a provider's response body, or the query string, in the message", async () => {
+    it("says why the provider refused, out of the response's message and errors", async () => {
+      // Verbatim from Coolify 4.3.21, which is what the first X1 run got and could not read.
+      harness.server.use(
+        harness.handler({
+          spec: "coolify",
+          method: "post",
+          url: `${COOLIFY}/api/v1/applications/private-github-app`,
+          status: 422,
+          json: {
+            message: "Validation failed.",
+            errors: {
+              domains:
+                "The domains field cannot be used for dockercompose applications. Use " +
+                "docker_compose_domains instead to set domains for individual services.",
+            },
+          },
+        }),
+      );
+      const coolify = new CoolifyClient({ url: COOLIFY, token: "t" });
+
+      const error = (await coolify
+        .createPrivateGithubAppApplication({
+          project_uuid: "p1",
+          server_uuid: "s1",
+          environment_name: "production",
+          environment_uuid: "e1",
+          github_app_uuid: "g1",
+          git_repository: "grahamlutz/demo-app",
+          git_branch: "main",
+          build_pack: "dockercompose",
+          docker_compose_domains: [{ name: "web", domain: "https://demo-app.hyperfixation.ai" }],
+        })
+        .catch((cause: unknown) => cause)) as ProviderError;
+
+      expect(error).toBeInstanceOf(ProviderError);
+      expect(error.message).toBe(
+        "coolify POST /applications/private-github-app failed: HTTP 422: " +
+          '{"message":"Validation failed.","errors":{"domains":"The domains field cannot be used ' +
+          'for dockercompose applications. Use docker_compose_domains instead to set domains for ' +
+          'individual services."}}',
+      );
+    });
+
+    it("never puts a credential, an environment value or the query string in the message", async () => {
       harness.server.use(
         harness.handler({
           spec: "coolify",
           method: "patch",
           url: `${COOLIFY}/api/v1/applications/{uuid}/envs/bulk`,
           status: 422,
-          json: { message: "rejected DATABASE_URL=postgres://app:hunter2@box/db" },
+          json: {
+            message: "rejected postgres://app:hunter2@box/db and token sekrit-token",
+            errors: { "data.1.value": "BETTER_AUTH_SECRET is not b64url: opensesame" },
+          },
         }),
       );
       const coolify = new CoolifyClient({ url: COOLIFY, token: "sekrit-token" });
 
       const error = (await coolify
-        .updateEnvsBulk("a1", [{ key: "DATABASE_URL", value: "postgres://app:hunter2@box/db" }])
+        .updateEnvsBulk("a1", [
+          { key: "DATABASE_URL", value: "postgres://app:hunter2@box/db" },
+          { key: "BETTER_AUTH_SECRET", value: "opensesame" },
+        ])
         .catch((cause: unknown) => cause)) as ProviderError;
 
       expect(error).toBeInstanceOf(ProviderError);
       expect(error.status).toBe(422);
       expect(error.message).not.toContain("hunter2");
       expect(error.message).not.toContain("sekrit-token");
+      expect(error.message).not.toContain("opensesame");
+      // The variable's name survives the redaction, which is the half that says what went wrong.
+      expect(error.message).toContain("BETTER_AUTH_SECRET");
       expect(error.body).toContain("hunter2");
+    });
+
+    it("cuts a long explanation rather than filling a terminal with it", async () => {
+      harness.server.use(
+        harness.handler({
+          spec: "coolify",
+          method: "get",
+          url: `${COOLIFY}/api/v1/projects`,
+          status: 500,
+          json: { message: "x".repeat(EXPLANATION_LIMIT * 2) },
+        }),
+      );
+      const coolify = new CoolifyClient({ url: COOLIFY, token: "t" });
+
+      const error = (await coolify.listProjects().catch((cause: unknown) => cause)) as ProviderError;
+
+      expect(error.message).toHaveLength(
+        "coolify GET /projects failed: HTTP 500: ".length + EXPLANATION_LIMIT + 1,
+      );
+      expect(error.message.endsWith("…")).toBe(true);
+    });
+
+    it("leaves the status to speak when the body explains nothing", async () => {
+      harness.server.use(
+        harness.handler({
+          spec: "coolify",
+          method: "get",
+          url: `${COOLIFY}/api/v1/projects`,
+          status: 502,
+          json: { nothing: "useful" },
+        }),
+      );
+      const coolify = new CoolifyClient({ url: COOLIFY, token: "t" });
+
+      const error = (await coolify.listProjects().catch((cause: unknown) => cause)) as ProviderError;
+
+      expect(error.message).toBe("coolify GET /projects failed: HTTP 502");
     });
   });
 });

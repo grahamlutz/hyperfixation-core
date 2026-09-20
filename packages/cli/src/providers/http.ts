@@ -1,3 +1,5 @@
+import { redactPasswords } from "../database.js";
+
 /** The one function every client talks to the network through; tests inject their own. */
 export type FetchLike = typeof globalThis.fetch;
 
@@ -9,16 +11,25 @@ export interface ProviderRequest {
   path: string;
   query?: Record<string, string | number | boolean | undefined>;
   body?: unknown;
+  /**
+   * Values this request carries that a provider may echo back at it — the app's environment, in
+   * the one call that sends it. Blanked out of the error message; see `explain`.
+   */
+  secrets?: readonly string[];
 }
+
+/** How much of a rejected request's explanation reaches the message before it is cut. */
+export const EXPLANATION_LIMIT = 500;
 
 /**
  * A provider answered with a status outside 2xx.
  *
- * The response body is on `body` and deliberately **not** in `message`: a Coolify 422 echoes
- * the fields it rejected, and those fields are the app's whole environment — its database URL,
- * its status tokens, its Langfuse secret key. `hf` prints `error.message`, so a body that
- * quotes a secret would land in a terminal and a scrollback. Nor is the query string included,
- * for the same reason.
+ * `message` carries the response's own `message` and `errors` and nothing else of it: those two are
+ * where every provider here puts the reason, and the rest of a body is free to quote what was sent.
+ * What reaches the message is redacted first — every credential the client was built with, every
+ * value the request declared, and anything shaped like a password — because `hf` prints
+ * `error.message` and a terminal keeps a scrollback. The raw body is on `body` for a caller that
+ * wants it; the request's own headers and query string are in neither.
  */
 export class ProviderError extends Error {
   readonly provider: string;
@@ -27,8 +38,17 @@ export class ProviderError extends Error {
   readonly path: string;
   readonly body: string;
 
-  constructor(provider: string, request: ProviderRequest, status: number, body: string) {
-    super(`${provider} ${request.method} ${request.path} failed: HTTP ${status}`);
+  constructor(
+    provider: string,
+    request: ProviderRequest,
+    status: number,
+    body: string,
+    explanation?: string,
+  ) {
+    super(
+      `${provider} ${request.method} ${request.path} failed: HTTP ${status}` +
+        (explanation === undefined ? "" : `: ${explanation}`),
+    );
     this.name = "ProviderError";
     this.provider = provider;
     this.status = status;
@@ -45,7 +65,40 @@ export interface TransportOptions {
   baseUrl: string;
   /** Sent on every request — the authorization header, and whatever else the API insists on. */
   headers: Record<string, string>;
+  /** The credentials this client was built with; blanked out of every error message. */
+  secrets?: readonly string[];
   fetch?: FetchLike;
+}
+
+/**
+ * Why the provider refused, out of its `message` and `errors` and redacted.
+ *
+ * `undefined` when the body is not JSON or carries neither key: a provider that explained nothing
+ * leaves the status to speak, rather than a page of HTML in a terminal.
+ */
+export function explain(body: string, secrets: readonly string[]): string | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return undefined;
+  }
+  if (parsed === null || typeof parsed !== "object") return undefined;
+
+  const { message, errors } = parsed as { message?: unknown; errors?: unknown };
+  if (message === undefined && errors === undefined) return undefined;
+
+  let text = JSON.stringify({
+    ...(message === undefined ? {} : { message }),
+    ...(errors === undefined ? {} : { errors }),
+  });
+  for (const secret of secrets) {
+    // Short values are skipped: a two-character secret would blank half the explanation with it.
+    if (secret.length < 4) continue;
+    text = text.split(JSON.stringify(secret).slice(1, -1)).join("***");
+  }
+  text = redactPasswords(text);
+  return text.length > EXPLANATION_LIMIT ? `${text.slice(0, EXPLANATION_LIMIT)}…` : text;
 }
 
 export type Transport = <Result>(request: ProviderRequest) => Promise<Result>;
@@ -74,7 +127,14 @@ export function createTransport(options: TransportOptions): Transport {
 
     const text = await response.text();
     if (!response.ok) {
-      throw new ProviderError(options.provider, request, response.status, text);
+      const secrets = [...(options.secrets ?? []), ...(request.secrets ?? [])];
+      throw new ProviderError(
+        options.provider,
+        request,
+        response.status,
+        text,
+        explain(text, secrets),
+      );
     }
     return (text === "" ? undefined : JSON.parse(text)) as Result;
   };

@@ -428,6 +428,18 @@ its evidence line pasted here.
 > name, the Postgres hostname and loopback port, `SOURCE_COMMIT` under Coolify, and where backups live. Re-vendor
 > Coolify's OpenAPI from the box's own version before running.
 
+> **Finding (step 9, 2026-09-20): a `dockercompose` application cannot be given `domains`.** The first real `hf new
+> demo-app` got through steps 1–8 and died at the `coolify` step on `POST /applications/private-github-app` with
+> `HTTP 422` and nothing else. Coolify 4.3.21's own answer is
+> `{"message":"Validation failed.","errors":{"domains":"The domains field cannot be used for dockercompose applications.
+> Use docker_compose_domains instead to set domains for individual services."}}` — the app's FQDN goes to
+> `docker_compose_domains: [{ name: "web", domain: "https://<app>.<HF_BASE_DOMAIN>" }]`, naming the compose service that
+> publishes 3000. Two things hid it. Coolify's OpenAPI lists both fields side by side with no rule between them, so
+> re-vendoring at the box's tag would not have caught it either (the harness now carries the rule beside the document).
+> And the transport dropped the response body on a non-2xx by design, so the operator saw only `HTTP 422`: a provider's
+> `message` and `errors` now reach the error, truncated, with every credential and every value the request sent blanked
+> out of them.
+
 > **Finding (pre-flight, 2026-09-20): Coolify publishes no port for its Postgres**, so the box's `127.0.0.1:5432` was
 > never a listener and every tunnel command failed at the first query. The container is reachable from the box host at
 > its address on the `coolify` docker network, and publishing the port would bind all interfaces, so the tunnel now asks

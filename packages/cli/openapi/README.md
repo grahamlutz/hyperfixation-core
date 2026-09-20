@@ -13,14 +13,14 @@ the harness enforces.
 
 | File | Source | Commit | Fetched | `info.version` |
 | --- | --- | --- | --- | --- |
-| `coolify.json` | `coollabsio/coolify` `openapi.json` | `383a5a742f36130a10e6f26db50d8764cf7978b1` | 2026-09-19 | 0.1 |
+| `coolify.json` | `coollabsio/coolify` `openapi.json` at tag `v4.3.21` | `113a2f229d7fa2391119d9acf149e9b0b70382f5` | 2026-09-20 | 0.1 |
 | `cloudflare.json` | `cloudflare/api-schemas` `openapi.json` | `efeb8ebf9cf8c844a208cdd0620ac9fd3d97c3ac` | 2026-09-19 | 4.0.0 |
 | `github.json` | `github/rest-api-description` `descriptions/api.github.com/api.github.com.json` | `814de7ac96e215adeeec999308f41f98f94a15db` | 2026-09-19 | 1.1.4 |
 | `sentry.json` | `getsentry/sentry-api-schema` `openapi-derefed.json` | `ea6ffa7ea4ed5ab5351ad3860e3e21ab4d67bfda` | 2026-09-19 | v0 |
 | `langfuse.json` | `langfuse/langfuse` `web/public/generated/api/openapi.yml` | `be747a7d25079858dfe950a9cfe22ea05f9946bb` | 2026-09-19 | (unset) |
 
-Each was taken from `https://raw.githubusercontent.com/<repo>/main/<path>` on 2026-09-19 and
-pinned to the commit above. Langfuse publishes YAML; it was parsed and re-emitted as JSON so the
+Each was taken from `https://raw.githubusercontent.com/<repo>/<ref>/<path>` and pinned to the
+commit above — `main` on 2026-09-19 for four of them, and the `v4.3.21` tag for `coolify.json`. Langfuse publishes YAML; it was parsed and re-emitted as JSON so the
 harness loads all five the same way — the document is otherwise unchanged.
 
 An operation added later is merged in from the **same** pinned commit, verbatim, alongside the
@@ -28,11 +28,16 @@ components it newly reaches; nothing already vendored is rewritten. Re-trimming 
 reshuffle every key in the file for no change in meaning, which buries the addition in the diff.
 A new upstream commit is a different job: bump the row above, re-trim, and say so here.
 
-> **`coolify.json` must be re-vendored from the box's own Coolify version before X1.** This is
-> `coollabsio/coolify@main`, which is whatever Coolify Cloud runs, not what the Hetzner box runs.
-> Take the document the box itself serves (or `openapi.json` at the box's Coolify tag), re-trim,
-> and re-run the provider tests. Until then a green test proves the client agrees with upstream
-> Coolify, not with the deployment it will actually call.
+> **`coolify.json` is the box's own Coolify version**, re-vendored on 2026-09-20 from `openapi.json`
+> at tag `v4.3.21` — the box serves no document of its own. Across the thirteen operations kept, the
+> tag and the `main` commit vendored before it are identical field for field, so the trimmed file
+> did not change; only the row above did.
+>
+> A green test still proves less than it looks. Coolify enforces rules its document does not
+> express: a `dockercompose` application is refused `domains` outright (422, *"Use
+> docker_compose_domains instead"*) while the schema lists both fields side by side. That one is in
+> `src/test-support/openapi.ts` as an explicit rule, because putting it in the document here would
+> be inventing a field upstream does not have. The next one will be found the same way — by the box.
 
 ## Operations kept
 

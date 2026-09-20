@@ -161,6 +161,10 @@ function validate(
     body,
   });
 
+  // Before `validateRequest`, which fills the document's defaults into `body`.
+  const rule = undocumentedRule(spec, method, match.operationPath, body);
+  if (rule !== undefined) return `${spec}: ${method} ${match.operationPath} ${rule}`;
+
   const parameters = dereference(document, [
     ...(document.paths[match.operationPath]!.parameters ?? []),
     ...(match.operation.parameters ?? []),
@@ -188,6 +192,30 @@ function validate(
       .map((error) => `${error.path ?? "?"} ${error.message}`)
       .join("; ");
     return `${spec}: ${method} ${match.operationPath} does not validate: ${detail}`;
+  }
+  return undefined;
+}
+
+/**
+ * A rule the provider enforces that its document does not express.
+ *
+ * Coolify's schema lists `domains` and `docker_compose_domains` side by side and says nothing about
+ * the first being refused for a compose application; the box answers 422 `The domains field cannot
+ * be used for dockercompose applications. Use docker_compose_domains instead…`, which is how the
+ * first X1 run failed at step 9. Re-vendoring the document cannot catch that, so the rule lives
+ * beside it — hand-editing the vendored document to carry it would be inventing a field upstream
+ * does not have.
+ */
+function undocumentedRule(
+  spec: SpecName,
+  method: string,
+  operationPath: string,
+  body: unknown,
+): string | undefined {
+  if (spec !== "coolify" || operationPath !== "/applications/private-github-app") return undefined;
+  const sent = (body ?? {}) as { build_pack?: unknown; domains?: unknown };
+  if (sent.build_pack === "dockercompose" && sent.domains !== undefined) {
+    return "sends domains for a dockercompose build pack, which Coolify rejects: use docker_compose_domains";
   }
   return undefined;
 }

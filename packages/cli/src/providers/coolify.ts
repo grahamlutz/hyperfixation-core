@@ -32,13 +32,28 @@ export interface CoolifyApplicationRequest {
   build_pack: "nixpacks" | "railpack" | "static" | "dockerfile" | "dockercompose";
   name?: string;
   description?: string;
-  /** Comma-separated; the app's `https://<name>.<HF_BASE_DOMAIN>`. */
+  /**
+   * Comma-separated. Rejected outright for a `dockercompose` build pack — Coolify 4.3.21 answers
+   * 422 `The domains field cannot be used for dockercompose applications` — so
+   * `docker_compose_domains` is what `hf new` sends and this is for the other four packs.
+   */
   domains?: string;
+  /** One entry per compose service that gets a domain; `hf new` sends exactly one. */
+  docker_compose_domains?: readonly CoolifyComposeDomain[];
   ports_exposes?: string;
   docker_compose_location?: string;
   connect_to_docker_network?: boolean;
   instant_deploy?: boolean;
   is_auto_deploy_enabled?: boolean;
+}
+
+/** A domain on one service of a compose application, which is how a `dockercompose` app gets one. */
+export interface CoolifyComposeDomain {
+  /** The service name as `docker-compose.prod.yml` spells it. */
+  name: string;
+  /** Comma-separated, same as `domains`. */
+  domain: string;
+  redirect?: "www" | "non-www" | "both";
 }
 
 export interface CoolifyApplication {
@@ -122,6 +137,7 @@ export class CoolifyClient {
       provider: "coolify",
       baseUrl: `${options.url.replace(/\/+$/, "")}/api/v1`,
       headers: { authorization: `Bearer ${options.token}` },
+      secrets: [options.token],
       fetch: options.fetch,
     });
   }
@@ -170,6 +186,9 @@ export class CoolifyClient {
       method: "PATCH",
       path: `/applications/${segment(appUuid)}/envs/bulk`,
       body: { data },
+      // The app's whole environment goes out in this one call, and a 422 names the variables it
+      // rejected by quoting them.
+      secrets: data.map((variable) => variable.value),
     });
   }
 

@@ -14,7 +14,8 @@ import { fetchTemplate } from "../template-source.js";
  * A step refused to act, or a command it ran failed.
  *
  * Carries no provider body and no environment: the only thing a step is allowed to say about a
- * secret is that it has one. `ProviderError` keeps the same rule for the HTTP half.
+ * secret is that it has one. `ProviderError` keeps the same rule for the HTTP half — it quotes the
+ * provider's own explanation, with every credential and every value it was sent blanked out.
  */
 export class StepFailed extends Error {
   constructor(message: string) {
