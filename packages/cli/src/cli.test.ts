@@ -60,6 +60,7 @@ describe("the hf binary's argument handling", () => {
       "gen",
       "dev",
       "up",
+      "doctor",
     ]);
     for (const command of COMMANDS) expect(USAGE).toContain(`hf ${command}`);
   });
