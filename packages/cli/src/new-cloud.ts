@@ -174,8 +174,10 @@ export async function runSteps<Context extends CloudContext>(
 }
 
 /**
- * The keys a cloud `hf new` runs without: three have a default derived from another key, and the
- * two provider keys are what the checklist warns about when they are unset.
+ * The keys a cloud `hf new` runs without: three have a default derived from another key, the two
+ * provider keys are what the checklist warns about when they are unset, and the three Langfuse
+ * keys are three ways of configuring one step — an org key, a project key pair, or neither, which
+ * the step degrades to a warning and a checklist line.
  */
 export const OPTIONAL_CLOUD_CONFIG: readonly ConfigKey[] = [
   "HF_DB_HOST_INTERNAL",
@@ -183,6 +185,9 @@ export const OPTIONAL_CLOUD_CONFIG: readonly ConfigKey[] = [
   "HF_PG_ADMIN_USER",
   "HF_ANTHROPIC_API_KEY",
   "HF_OPENAI_API_KEY",
+  "HF_LANGFUSE_ORG_KEY",
+  "HF_LANGFUSE_PUBLIC_KEY",
+  "HF_LANGFUSE_SECRET_KEY",
 ];
 
 /**

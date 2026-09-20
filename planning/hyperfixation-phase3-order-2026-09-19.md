@@ -414,7 +414,17 @@ its evidence line pasted here.
 > `https://github.com/apps/<slug>/installations/new`, and repeats it in the closing checklist. A personal account has no
 > second API to ask (organizations have `GET /orgs/{org}/installations`), so the installations are verified by hand.
 >
-> Still unknown until the box answers (risks 1–3 and 5): Langfuse's org-key lookup, Coolify's `production` environment
+> **Finding (pre-flight 7, 2026-09-20):** Langfuse organization-scoped API keys are a paid-plan feature. The operator's
+> Langfuse Cloud org (US region, `https://us.cloud.langfuse.com`) is on Hobby and its Organization Settings has no API
+> Keys page at all, so `HF_LANGFUSE_ORG_KEY` cannot be obtained and the `langfuse` step — which creates a project and a
+> key pair with it — could never have run on this account. The step now degrades: `HF_LANGFUSE_ORG_KEY` is optional, a
+> configured `HF_LANGFUSE_PUBLIC_KEY`/`HF_LANGFUSE_SECRET_KEY` pair is recorded as the app's keys without one HTTP call
+> (every app sharing them traces into that one project), and with neither the step warns, adds a checklist line and
+> `hf new` omits all three `LANGFUSE_*` variables from the Coolify environment rather than sending them empty. The
+> template tolerates the absence: `instrumentation.ts` and `startWorker()` register the span processor only when none of
+> the three is empty, and no entrypoint calls `requireEnv` on them.
+>
+> Still unknown until the box answers (risks 1–3 and 5): Coolify's `production` environment
 > name, the Postgres hostname and loopback port, `SOURCE_COMMIT` under Coolify, and where backups live. Re-vendor
 > Coolify's OpenAPI from the box's own version before running.
 
