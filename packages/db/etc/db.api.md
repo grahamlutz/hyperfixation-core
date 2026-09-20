@@ -1288,6 +1288,23 @@ baseColumn: never;
 identity: undefined;
 generated: undefined;
 }, {}, {}>;
+llmMode: PgColumn<    {
+name: "llm_mode";
+tableName: "hf_app_state";
+dataType: "string";
+columnType: "PgText";
+data: string;
+driverParam: string;
+notNull: false;
+hasDefault: false;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: [string, ...string[]];
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
 };
 dialect: "pg";
 }>;
@@ -4405,6 +4422,9 @@ export const sessionFactors: readonly ["code", "passkey"];
 
 // @public
 export const SET_APP_PAUSED_STATEMENT = "UPDATE hf_app_state SET paused = $1, paused_by = $2 WHERE id = 1";
+
+// @public
+export const SET_LLM_MODE_STATEMENT = "UPDATE hf_app_state SET llm_mode = $1 WHERE id = 1";
 
 // @public (undocumented)
 export type SourceRecordStatus = (typeof sourceRecordStatuses)[number];

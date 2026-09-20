@@ -681,6 +681,9 @@ export function listOutcomes(pool: Pool, options: OutcomeListOptions): Promise<O
 // @public (undocumented)
 export function listTasks(pool: Pool, options?: TaskListOptions): Promise<TaskRow[]>;
 
+// @public
+export type LlmMode = "live" | "fixtures" | "unknown";
+
 // @public (undocumented)
 export class NoApplicationVersion extends Error {
     constructor(operation: string);
@@ -1058,6 +1061,9 @@ export interface StatusReport {
     // (undocumented)
     coreVersion: string;
     health: "ok" | "degraded";
+    llm: {
+        mode: LlmMode;
+    };
     // (undocumented)
     llmCalls: Record<string, number>;
     // (undocumented)
