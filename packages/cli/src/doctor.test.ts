@@ -90,6 +90,7 @@ function statusReport(overrides: Partial<StatusReport> = {}): StatusReport {
     coreVersion: "0.1.0",
     paused: false,
     pausedBy: null,
+    llm: { mode: "live" },
     runs: { running: 1, waiting: 0, paused: 0, done: 12, failed: 0 },
     queues: [],
     approvals: {},
