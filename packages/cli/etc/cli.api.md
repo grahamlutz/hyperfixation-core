@@ -151,6 +151,7 @@ export interface Database {
     };
     // (undocumented)
     close(): Promise<void>;
+    readonly container?: string;
     // (undocumented)
     readonly kind: DatabaseTransport;
     // (undocumented)
@@ -214,6 +215,7 @@ export const EXCLUDED_ENTRIES: readonly string[];
 // @public (undocumented)
 export interface ExecOptions {
     input?: string;
+    inputFile?: string;
 }
 
 // @public (undocumented)
@@ -224,6 +226,12 @@ export interface ExecResult {
     // (undocumented)
     stdout: string;
 }
+
+// @public
+export function findPostgresContainer(runner: Runner, containers: readonly string[]): Promise<{
+    container: string;
+    address: string;
+}>;
 
 // @public
 export function findTemplateSource(cwd?: string): Promise<string | undefined>;
@@ -382,11 +390,20 @@ export function openDatabaseUrl(adminUrl: string): Database;
 // @public
 export function parseEnvFile(contents: string): Record<string, string>;
 
-// @public
+// @public @deprecated
 export function pgRestoreArgv(options: {
     url: string;
     role: string;
     file: string;
+    pgRestorePath?: string;
+}): string[];
+
+// @public
+export function pgRestoreInContainerArgv(options: {
+    container: string;
+    adminUser: string;
+    database: string;
+    role: string;
     pgRestorePath?: string;
 }): string[];
 
@@ -500,11 +517,14 @@ export class RestoreCheckError extends Error {
 
 // @public (undocumented)
 export interface RestoreCheckOptions {
+    adminUser?: string;
     app: string;
+    container: string;
     database: Database | string;
     // (undocumented)
     now?: Date;
     pgRestorePath?: string;
+    // @deprecated (undocumented)
     restoreAdminUrl?: string;
     runner: Runner;
     // (undocumented)
@@ -574,7 +594,7 @@ export const SCRATCH_SUFFIX = "_restore_check";
 export function shellQuote(command: readonly string[]): string;
 
 // @public
-export function sshExecArgv(host: string, command: readonly string[]): string[];
+export function sshExecArgv(host: string, command: readonly string[], options?: ExecOptions): string[];
 
 // @public (undocumented)
 export interface SshRunnerOptions {

@@ -4,5 +4,17 @@
     "symbol": "OpenDatabaseOptions",
     "since": "0.1.1",
     "removeIn": "0.2.0"
+  },
+  {
+    "package": "@hyperfixation/cli",
+    "symbol": "pgRestoreArgv",
+    "since": "0.1.4",
+    "removeIn": "0.2.0"
+  },
+  {
+    "package": "@hyperfixation/cli",
+    "symbol": "RestoreCheckOptions",
+    "since": "0.1.4",
+    "removeIn": "0.2.0"
   }
 ]

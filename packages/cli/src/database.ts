@@ -32,6 +32,14 @@ export interface Database {
    * `pg_restore`, in E7. `undefined` when the transport has no address at all.
    */
   readonly boxAddress?: { host: string; port: number };
+  /**
+   * The Postgres container this cluster runs in, when opening it had to discover one.
+   *
+   * What `hf restore-check` runs `pg_restore` inside: the box host has no Postgres client tools,
+   * only the container does. `undefined` when the box's own loopback answered and no container
+   * was ever looked for.
+   */
+  readonly container?: string;
   /** A libpq URL onto `databaseName`, or `undefined` when the transport has no address. */
   adminUrl(databaseName?: string): string | undefined;
   query(sql: string, options?: QueryOptions): Promise<QueryResult>;
@@ -144,8 +152,8 @@ export async function openDatabase(
     );
   }
 
-  const found = await containerAddress(runner, candidates);
-  const direct = await tryTunnel(runner, options.admin, remotePort, found.address);
+  const found = await findPostgresContainer(runner, candidates);
+  const direct = await tryTunnel(runner, options.admin, remotePort, found.address, found.container);
   if ("database" in direct) return direct.database;
 
   if (options.dockerExec !== true) {
@@ -162,7 +170,7 @@ export async function openDatabase(
 
 /** The cluster at a URL this process can already dial — a test's Postgres, or a live tunnel. */
 export function openDatabaseUrl(adminUrl: string): Database {
-  return tunnelDatabase(adminUrl, undefined, undefined);
+  return tunnelDatabase(adminUrl, undefined, undefined, undefined);
 }
 
 type TunnelAttempt = { database: Database } | { failure: unknown };
@@ -172,14 +180,17 @@ async function tryTunnel(
   admin: AdminCredentials,
   remotePort: number,
   remoteHost: string,
+  container?: string,
 ): Promise<TunnelAttempt> {
   let tunnel: Tunnel | undefined;
   try {
     tunnel = await runner.tunnel(remotePort, remoteHost);
-    const database = tunnelDatabase(adminUrlOf(admin, tunnel.localPort), tunnel, {
-      host: remoteHost,
-      port: remotePort,
-    });
+    const database = tunnelDatabase(
+      adminUrlOf(admin, tunnel.localPort),
+      tunnel,
+      { host: remoteHost, port: remotePort },
+      container,
+    );
     await database.query("SELECT 1");
     return { database };
   } catch (failure) {
@@ -196,7 +207,7 @@ async function tryTunnel(
  * network something else. Every candidate that failed is reported, because which name a database
  * got is a fact about how it was created and the operator is the one who knows it.
  */
-async function containerAddress(
+export async function findPostgresContainer(
   runner: Runner,
   containers: readonly string[],
 ): Promise<{ container: string; address: string }> {
@@ -250,6 +261,7 @@ function tunnelDatabase(
   adminUrl: string,
   tunnel: Tunnel | undefined,
   boxAddress: { host: string; port: number } | undefined,
+  container: string | undefined,
 ): Database {
   const clients = new Map<string, Client>();
 
@@ -266,6 +278,7 @@ function tunnelDatabase(
   return {
     kind: "tunnel",
     boxAddress,
+    container,
     adminUrl: (databaseName) => withDatabase(adminUrl, databaseName),
     query: async (sql, queryOptions) => {
       const client = await clientFor(queryOptions?.database);
@@ -294,6 +307,7 @@ function dockerExecDatabase(
 ): Database {
   return {
     kind: "docker-exec",
+    container,
     adminUrl: () => undefined,
     query: async (sql, queryOptions) => {
       // `-f -`: the statement goes down stdin, so it never appears in the box's process list

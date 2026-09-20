@@ -440,23 +440,33 @@ its evidence line pasted here.
 > `message` and `errors` now reach the error, truncated, with every credential and every value the request sent blanked
 > out of them.
 
-> **Finding (step 4, 2026-09-20): the daily backup never left the box.** The `backup` step registered
-> the schedule for `hf_<app>` with `save_s3: true` and no `s3_storage_uuid`. Coolify 4.3.21 accepts
-> that, runs the backup, logs `Warning: S3 upload failed: S3 storage configuration is missing or has
-> been deleted (S3 storage ID: null). S3 backup has been disabled` and keeps the only copy on the
-> same disk as the database — which is not a backup, and which is what E5's `--from-s3` would have
-> found nothing in. The POST schema does say `s3_storage_uuid` is "required if save_s3 is true", in a
-> description no validator reads, so the msw harness was green throughout. The step now resolves a
-> storage first: `HF_COOLIFY_S3_STORAGE_UUID`, else the one `is_usable` entry `GET /s3-storages`
-> lists. With none or several it does not guess — it registers `save_s3: false` and prints a
-> `WARNING:` plus a closing-checklist line saying the backups are local-only, naming the candidates
-> when there are several. `PATCH /databases/{uuid}/backups/{backup_uuid}` with `save_s3` and the uuid
-> is what fixed the live schedule by hand, and it is also what closes **X1 q6**: the step lists the
-> database's schedules, and PATCHes the one whose `databases_to_backup` is this app's database rather
-> than registering a second. Coolify documents that list as "Content is very complex", so the
-> response is narrowed by hand and anything unreadable falls back to the old behaviour — register,
-> and say in the checklist that a duplicate is possible.
->
+> **Finding (verify 3, 2026-09-20): `hf restore-check` ran `pg_restore` on the box host, which has no Postgres client
+> tools.** The first real run died with `pg_restore exited 127 … bash: line 1: pg_restore: command not found`. Postgres
+> lives only in Coolify's container (bare uuid, `pgvector/pgvector:pg17`) while the dump is a `pg_dump -Fc` file on the
+> host at `/data/coolify/backups/databases/<team>/<name>-<uuid>/pg-dump-<db>-<epoch>.dmp`, not mounted into the
+> container. The restore now runs as `docker exec -i <container> pg_restore … -U <admin> -d <scratch>` with the dump
+> streamed on stdin, through the container discovery the tunnel already does, and exit 127 says what to check.
+
+> **Finding (verify 3, 2026-09-20): the backups are local-only — the box holds the database and its only copy.**
+> Coolify's execution for the hf-registered schedule reported `S3 storage ID: null` and `S3 upload failed: S3 storage
+> configuration is missing … S3 backup has been disabled`. The cause is hf's backup step, which sends `save_s3: true`
+> with no `s3_storage_uuid`, so Coolify has no storage to upload to and disables S3. Nothing needs creating: the
+> `hetzner-backups` S3 storage (bucket `hyperfixation-backups`, uuid `2s4urot0onb5txvniaq8bwwy`, `is_usable: true`)
+> already exists in this Coolify. The live schedule was PATCHed by hand and the next dump landed in the bucket; a
+> separate PR fixes the backup step's payload for new apps.
+
+> **Finding (step 4, 2026-09-20): what the backup step does about the finding above.** It resolves a
+> storage before it registers anything: `HF_COOLIFY_S3_STORAGE_UUID`, else the one `is_usable` entry
+> `GET /s3-storages` lists. With none or several it does not guess — it registers `save_s3: false`
+> and prints a `WARNING:` plus a closing-checklist line saying the backups are local-only, naming the
+> candidates when there are several. Coolify's own POST schema does say `s3_storage_uuid` is "required
+> if save_s3 is true", in a description no validator reads, which is why the msw harness was green
+> throughout. `PATCH /databases/{uuid}/backups/{backup_uuid}` — the call that fixed the live schedule
+> by hand — also closes **X1 q6**: the step lists the database's schedules and PATCHes the one whose
+> `databases_to_backup` is this app's database rather than registering a second. Coolify documents
+> that list as "Content is very complex", so the response is narrowed by hand and anything unreadable
+> falls back to the old behaviour: register, and say in the checklist that a duplicate is possible.
+
 > **Finding (pre-flight, 2026-09-20): Coolify publishes no port for its Postgres**, so the box's `127.0.0.1:5432` was
 > never a listener and every tunnel command failed at the first query. The container is reachable from the box host at
 > its address on the `coolify` docker network, and publishing the port would bind all interfaces, so the tunnel now asks
