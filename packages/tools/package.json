@@ -9,11 +9,16 @@
     "lint": "eslint src",
     "test": "vitest run --passWithNoTests",
     "template-check": "tsx src/template-check.ts",
-    "plan-sync": "tsx src/plan-sync.ts"
+    "plan-sync": "tsx src/plan-sync.ts",
+    "dev-doctor": "tsx src/dev-doctor.ts",
+    "dev-clean": "tsx src/dev-clean.ts",
+    "worktrees-clean": "tsx src/worktrees-clean.ts"
   },
   "devDependencies": {
     "@hyperfixation/eslint-config": "workspace:*",
+    "@types/pg": "^8.23.1",
     "eslint": "^10.10.0",
+    "pg": "^8.23.0",
     "tsx": "4.23.13",
     "yaml": "2.9.1"
   }
