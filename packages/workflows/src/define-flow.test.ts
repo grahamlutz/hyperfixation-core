@@ -14,6 +14,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
  * `vi.resetModules()` reproduces exactly that shape: a fresh copy of this package's own modules
  * against the same externalised DBOS. It is also why the refusals are matched on their message
  * and not with `toThrow(DuplicateFlow)` — a reset module's classes are new identities.
+ *
+ * The mirror of it is the `flows` registry's own guard. The app's modules are the duplicated
+ * ones and this package is the external singular one, so the second layer's identical
+ * `defineFlow` call lands in a registry that already holds the name — observed on the first real
+ * deployment as `DuplicateFlow: a flow named "collectDemoSource" is already defined` the moment a
+ * passkey enrolment ran a server action and then re-rendered its page. Calling a factory twice
+ * reproduces that half: one registry, two function objects of identical source.
  */
 describe("defineFlow", () => {
   const originalProcess = process.env.HF_PROCESS;
@@ -24,13 +31,56 @@ describe("defineFlow", () => {
     else process.env.HF_PROCESS = originalProcess;
   });
 
-  it("refuses two flows of one name inside a single evaluation", async () => {
+  it("refuses two different flows of one name inside a single evaluation", async () => {
     const { defineFlow } = await import("./define-flow.js");
-    defineFlow("duplicate-within-one-graph", async () => undefined, { queue: "resolve" });
+    defineFlow("duplicate-within-one-graph", async () => "first", { queue: "resolve" });
 
     expect(() =>
-      defineFlow("duplicate-within-one-graph", async () => undefined, { queue: "resolve" }),
+      defineFlow("duplicate-within-one-graph", async () => "second", { queue: "resolve" }),
     ).toThrow(/^DuplicateFlow:/);
+  });
+
+  it("refuses one name defined twice with different options", async () => {
+    const { defineFlow } = await import("./define-flow.js");
+    const body = async () => undefined;
+    defineFlow("duplicate-different-queue", body, { queue: "resolve" });
+
+    expect(() => defineFlow("duplicate-different-queue", body, { queue: "llm" })).toThrow(
+      /^DuplicateFlow:/,
+    );
+  });
+
+  it("returns the first flow when one app module is evaluated twice against one registry", async () => {
+    const { defineFlow, definedFlows } = await import("./define-flow.js");
+
+    // What two module layers of one app do: the same file's `defineFlow` call runs twice, so the
+    // body is a fresh function object each time with identical source. The registry is not fresh
+    // — this package is external to the bundle and therefore singular, which is the whole shape
+    // of the production failure.
+    const evaluateAppModule = () =>
+      defineFlow(
+        "collectDemoSource",
+        async (input: string) => input.toUpperCase(),
+        { queue: "resolve" },
+      );
+
+    const first = evaluateAppModule();
+    const second = evaluateAppModule();
+
+    expect(second).toBe(first);
+    expect(definedFlows().get("collectDemoSource")).toBe(first);
+  });
+
+  it("does not register an identical re-definition with DBOS a second time", async () => {
+    process.env.HF_PROCESS = "worker";
+    const { defineFlow } = await import("./define-flow.js");
+    const evaluateAppModule = () =>
+      defineFlow("worker-re-evaluated", async () => undefined, { queue: "resolve" });
+
+    evaluateAppModule();
+
+    // DBOS refuses a second registration of one name; reaching it at all would throw.
+    expect(evaluateAppModule).not.toThrow();
   });
 
   it("refuses a queue no worker registers", async () => {
