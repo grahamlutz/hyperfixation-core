@@ -1,8 +1,15 @@
+import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+  integrityOfDigest,
+  RELEASE_WORKFLOW,
+  SOURCE_REPOSITORY,
+  type AttestationsResponse,
+} from "./attestation.js";
 import {
   NPMJS_REGISTRY,
   PROPAGATION_WINDOW_MS,
@@ -31,7 +38,70 @@ function writeCheckout(root: string, versions: Record<string, string>): void {
 const sameVersion = (version: string): Record<string, string> =>
   Object.fromEntries(GROUP.map((name) => [name, version]));
 
-const integrityOf = (name: string): string => `sha512-${name}`;
+/** A real 128-hex digest, so the attestation subject and `dist.integrity` can be the same fact. */
+const digestOf = (name: string): string => createHash("sha512").update(name).digest("hex");
+const integrityOf = (name: string): string => integrityOfDigest(digestOf(name));
+
+const encode = (statement: unknown): string =>
+  Buffer.from(JSON.stringify(statement), "utf8").toString("base64");
+
+type ProvenanceEdits = {
+  repository?: string;
+  workflow?: string;
+  gitCommit?: string;
+  digest?: string;
+};
+
+/** The two bundles npmjs serves for a `--provenance` publish, with one claim optionally bent. */
+function attestationsFor(name: string, edits: ProvenanceEdits = {}): AttestationsResponse {
+  const subject = [
+    {
+      name: `pkg:npm/${name.replace("@", "%40")}@${VERSION}`,
+      digest: { sha512: edits.digest ?? digestOf(name) },
+    },
+  ];
+  return {
+    attestations: [
+      {
+        predicateType: "https://github.com/npm/attestation/tree/main/specs/publish/v0.1",
+        bundle: {
+          dsseEnvelope: {
+            payload: encode({
+              subject,
+              predicateType: "https://github.com/npm/attestation/tree/main/specs/publish/v0.1",
+              predicate: { name, version: VERSION, registry: NPMJS_REGISTRY },
+            }),
+          },
+        },
+      },
+      {
+        predicateType: "https://slsa.dev/provenance/v1",
+        bundle: {
+          dsseEnvelope: {
+            payload: encode({
+              subject,
+              predicateType: "https://slsa.dev/provenance/v1",
+              predicate: {
+                buildDefinition: {
+                  externalParameters: {
+                    workflow: {
+                      repository: edits.repository ?? SOURCE_REPOSITORY,
+                      path: edits.workflow ?? RELEASE_WORKFLOW,
+                    },
+                  },
+                  resolvedDependencies: [
+                    { digest: { gitCommit: edits.gitCommit ?? RELEASE_SHA } },
+                  ],
+                },
+                runDetails: { metadata: { invocationId: `${SOURCE_REPOSITORY}/actions/runs/1` } },
+              },
+            }),
+          },
+        },
+      },
+    ],
+  };
+}
 
 type Harness = {
   readonly calls: Call[];
@@ -39,6 +109,8 @@ type Harness = {
   readonly slept: number[];
   /** Version documents answered per package, in order; the last one repeats. */
   readonly documents: Map<string, VersionDocument[]>;
+  /** The names handed to the signature audit, or empty when it was skipped. */
+  readonly audited: string[][];
 };
 
 let root: string;
@@ -58,9 +130,13 @@ function fake(options: {
   worktreeVersions?: Record<string, string>;
   documents?: Map<string, VersionDocument[]>;
   tagged?: boolean;
+  /** Per package; a name mapped to `undefined` has no attestation. Default: all attested. */
+  attestations?: Map<string, AttestationsResponse | undefined>;
+  auditProblems?: string[];
 }): Harness {
   const calls: Call[] = [];
   const slept: number[] = [];
+  const audited: string[][] = [];
   const documents =
     options.documents ??
     new Map(GROUP.map((name) => [name, [{ status: 200, integrity: integrityOf(name) }]]));
@@ -106,15 +182,24 @@ function fake(options: {
     },
   };
 
+  const attestations =
+    options.attestations ?? new Map(GROUP.map((name) => [name, attestationsFor(name)]));
+
   return {
     calls,
     slept,
     documents,
+    audited,
     deps: {
       exec,
       registry,
       integrity: async (tarball) =>
         integrityOf(`@hyperfixation/${/hyperfixation-(?<name>[a-z-]+)-/u.exec(basename(tarball))?.groups?.name ?? "?"}`),
+      attestations: async (name) => attestations.get(name),
+      audit: async (names) => {
+        audited.push([...names]);
+        return options.auditProblems ?? [];
+      },
       log: () => {},
       wait: {
         sleep: async (ms) => {
@@ -135,7 +220,7 @@ describe("verify", () => {
   it("packs a throwaway worktree of the release commit, not the checked-out branch", async () => {
     const harness = fake({});
 
-    expect(await verify(options(), harness.deps)).toEqual([]);
+    expect(await verify(options(), harness.deps)).toEqual({ problems: [], warnings: [] });
 
     const added = harness.calls.find((call) => call.args.slice(0, 2).join(" ") === "worktree add");
     expect(added?.args).toContain(RELEASE_SHA);
@@ -152,7 +237,7 @@ describe("verify", () => {
   it("reports the release commit's versions, not the checkout's, when they are wrong", async () => {
     const harness = fake({ worktreeVersions: { ...sameVersion(VERSION), "@hyperfixation/cli": "0.9.9" } });
 
-    const problems = await verify(options(), harness.deps);
+    const { problems } = await verify(options(), harness.deps);
 
     expect(problems[0]).toMatch(/cli is at 0\.9\.9, not 1\.0\.0 at c0ffee1/u);
     expect(problems).toHaveLength(2);
@@ -170,7 +255,7 @@ describe("verify", () => {
     ]);
     const harness = fake({ documents });
 
-    expect(await verify(options(), harness.deps)).toEqual([]);
+    expect(await verify(options(), harness.deps)).toEqual({ problems: [], warnings: [] });
     expect(harness.slept).toEqual([2_000, 4_000]);
   });
 
@@ -181,12 +266,127 @@ describe("verify", () => {
     documents.set("@hyperfixation/db", [{ status: 404 }]);
     const harness = fake({ documents });
 
-    const problems = await verify(options(), harness.deps);
+    const { problems } = await verify(options(), harness.deps);
 
     expect(problems).toEqual([
       `@hyperfixation/db@${VERSION} is not on ${NPMJS_REGISTRY} (HTTP 404 after 180s)`,
     ]);
     expect(harness.slept.reduce((total, ms) => total + ms, 0)).toBe(PROPAGATION_WINDOW_MS);
+  });
+});
+
+/**
+ * A cross-machine build difference: the registry and its attestation agree on the tarball that
+ * was published, and only the rebuild on this machine produced other bytes.
+ */
+function otherBuild(name: string): {
+  documents: Map<string, VersionDocument[]>;
+  attestations: Map<string, AttestationsResponse | undefined>;
+} {
+  const digest = digestOf(`${name}-other-build`);
+  const documents = new Map<string, VersionDocument[]>(
+    GROUP.map((each) => [each, [{ status: 200, integrity: integrityOf(each) }]]),
+  );
+  documents.set(name, [{ status: 200, integrity: integrityOfDigest(digest) }]);
+  const attestations = new Map<string, AttestationsResponse | undefined>(
+    GROUP.map((each) => [each, attestationsFor(each)]),
+  );
+  attestations.set(name, attestationsFor(name, { digest }));
+  return { documents, attestations };
+}
+
+describe("verify against a provenance attestation", () => {
+  it("passes an attested release and audits every attested package's signature", async () => {
+    const harness = fake({});
+
+    expect(await verify(options(), harness.deps)).toEqual({ problems: [], warnings: [] });
+    expect(harness.audited).toEqual([GROUP]);
+  });
+
+  it("fails an attestation built from another commit", async () => {
+    const other = "dead10ccdead10ccdead10ccdead10ccdead10cc";
+    const harness = fake({
+      attestations: new Map([
+        ...GROUP.map((name) => [name, attestationsFor(name)] as const),
+        ["@hyperfixation/core", attestationsFor("@hyperfixation/core", { gitCommit: other })],
+      ]),
+    });
+
+    const { problems } = await verify(options(), harness.deps);
+
+    expect(problems).toEqual([
+      `@hyperfixation/core@${VERSION} was attested at ${other}, not the release commit ${RELEASE_SHA}`,
+    ]);
+  });
+
+  it("fails an attestation built by another workflow", async () => {
+    const harness = fake({
+      attestations: new Map([
+        ...GROUP.map((name) => [name, attestationsFor(name)] as const),
+        [
+          "@hyperfixation/db",
+          attestationsFor("@hyperfixation/db", { workflow: ".github/workflows/rogue.yml" }),
+        ],
+      ]),
+    });
+
+    const { problems } = await verify(options(), harness.deps);
+
+    expect(problems).toEqual([
+      `@hyperfixation/db@${VERSION} was attested to workflow .github/workflows/rogue.yml, not ${RELEASE_WORKFLOW}`,
+    ]);
+  });
+
+  it("fails an attestation whose subject digest is not the tarball the registry serves", async () => {
+    const harness = fake({
+      attestations: new Map([
+        ...GROUP.map((name) => [name, attestationsFor(name)] as const),
+        [
+          "@hyperfixation/cli",
+          attestationsFor("@hyperfixation/cli", { digest: digestOf("something else") }),
+        ],
+      ]),
+    });
+
+    const { problems } = await verify(options(), harness.deps);
+
+    expect(problems).toEqual([
+      `@hyperfixation/cli@${VERSION} attests ${integrityOf("something else")}, but the registry serves ${integrityOf("@hyperfixation/cli")}`,
+    ]);
+  });
+
+  it("reports a byte difference as a warning when the attestation verifies", async () => {
+    const harness = fake(otherBuild("@hyperfixation/db"));
+
+    const { problems, warnings } = await verify(options(), harness.deps);
+
+    expect(problems).toEqual([]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/^@hyperfixation\/db@1\.0\.0 integrity is/u);
+    expect(warnings[0]).toMatch(/informational: the provenance attestation covers/u);
+  });
+
+  it("falls back to the rebuild comparison, and fails on it, with no attestation", async () => {
+    const harness = fake({
+      documents: otherBuild("@hyperfixation/db").documents,
+      attestations: new Map(GROUP.map((name) => [name, undefined])),
+    });
+
+    const { problems, warnings } = await verify(options(), harness.deps);
+
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toMatch(/has no provenance attestation, so the rebuild is the only check$/u);
+    expect(warnings).toEqual([]);
+    // Nothing was attested, so there is no Sigstore bundle to verify.
+    expect(harness.audited).toEqual([]);
+  });
+
+  it("reports what npm audit signatures rejects", async () => {
+    const harness = fake({ auditProblems: ["@hyperfixation/core@1.0.0 failed npm audit signatures"] });
+
+    const { problems } = await verify(options(), harness.deps);
+
+    expect(problems).toEqual(["@hyperfixation/core@1.0.0 failed npm audit signatures"]);
   });
 });
 

@@ -26,12 +26,37 @@ that one is taken), then installs the published packages into a scratch project 
 the template checkout (`HF_TEMPLATE_DIR`) and typechecks both. It refuses to publish to anything
 that is not loopback, and removes its temp directories even on failure.
 
-`release:verify` compares the registry's `dist.integrity` against tarballs packed from the release
-commit — its tag, else the commit that bumped the manifests on `origin/main` — in a throwaway
-`git worktree`, never from whatever this checkout has out. The 0.1.1 verification reported a false
-integrity mismatch for the CLI because it packed a feature branch. A `404` on a version document is
-retried with backoff for three minutes before it counts as missing: after a publish npmjs answers
-`npm view` at once but 404s the per-version document for about a minute.
+`release:verify` asks whether the tarballs the registry serves for `<version>` were built from the
+release commit — its tag, else the commit that bumped the manifests on `origin/main`. For a version
+published by `release.yml` the answer is the **provenance attestation**, and that is the gate:
+
+- the SLSA statement at `/-/npm/v1/attestations/<pkg>@<version>` is decoded, and its subject
+  digest, converted from hex to `sha512-<base64>`, must equal the registry's `dist.integrity`;
+- its `buildDefinition.externalParameters.workflow` must name `grahamlutz/hyperfixation-core` and
+  `.github/workflows/release.yml`, and its `resolvedDependencies` must carry the release commit's
+  `gitCommit`. A tarball built by any other workflow, repo or commit fails here;
+- `npm audit signatures`, run over a throwaway project with the attested packages installed, is
+  what verifies the Sigstore bundle and npm's registry signature *cryptographically* — decoding a
+  DSSE payload proves nothing about its signature. It needs an install tree rather than a flag,
+  which is why it gets its own temp project. Anything it puts in `invalid`, or any
+  `@hyperfixation/*` in `missing`, is a failure.
+
+Together those prove the published bytes are the ones GitHub Actions built from this repo at that
+commit — which is a stronger claim than a rebuild on the maintainer's laptop ever made, and the
+only one that holds when publisher and verifier are different machines.
+
+A rebuild of the release commit in a throwaway `git worktree` is still installed, built and packed
+— it is what the `workspace:` leftover check reads, and it is the only evidence for a version with
+no attestation (`0.1.0`, `0.1.1`), where a byte difference still fails. For an **attested** version
+a byte difference is reported as a `warnings:` line and does not fail the run: the attestation
+already pins the tarball, so a difference there is a difference between two builds, not a bad
+publish. The 0.1.1 verification reported a false integrity mismatch for the CLI because it packed a
+feature branch; demoting the comparison is what stops that class of report from reading as a
+compromised release.
+
+A `404` on a version document is retried with backoff for three minutes before it counts as
+missing: after a publish npmjs answers `npm view` at once but 404s the per-version document for
+about a minute.
 
 ## Running a probe under CPU load
 
@@ -63,8 +88,9 @@ pending, it runs `pnpm release:ci`, which:
    any already at `200`. No `NPM_TOKEN`: the credential is the OIDC token npm mints per run against
    the trusted publisher each package names for this workflow file, so there is nothing to leak.
    npm ≥ 11.5.1 is the documented OIDC client, hence the `npm install -g npm@11` step;
-5. `release:verify`'s registry check — every version document present, its `dist.integrity` equal
-   to the tarball packed from this commit, with the same three-minute 404 backoff;
+5. every version document present, its `dist.integrity` equal to the tarball packed in step 3,
+   with the same three-minute 404 backoff. Here the byte comparison is still a gate rather than a
+   warning, because the tarball it compares is the one this run just uploaded;
 6. pushes tag `v<version>`, unless it is already there;
 7. for every line of `downstream.txt`, clones with the App token, `pnpm update --latest` on that
    repo's `@hyperfixation/*` set, and opens `core-bump/<version>`. An existing branch or an

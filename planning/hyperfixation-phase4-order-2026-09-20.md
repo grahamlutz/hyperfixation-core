@@ -88,6 +88,27 @@ Merge the `Version Packages` PR the action opens (its CI must run — that is co
 URL, `npm view @hyperfixation/core@0.1.2 dist.attestations` non-empty, `release:verify 0.1.2` clean, tag `v0.1.2`,
 one dispatch per `downstream.txt` line. Then delete `publish.ts`/`rehearse.ts` and their scripts.
 
+> **Finding — the first OIDC release went through, and the rebuild comparison was never the problem.**
+> [run 35513816078](https://github.com/grahamlutz/hyperfixation-core/actions/runs/35513816078) published all nine
+> packages from commit `813af20` and pushed tag `v0.1.2`. All nine carry a `slsa.dev/provenance/v1` attestation whose
+> `resolvedDependencies` names `813af20` and whose workflow is `.github/workflows/release.yml`; `npm audit signatures`
+> over a tree with all nine installed reports nothing invalid and nothing missing.
+>
+> The reported "integrity mismatch for all nine" does **not** reproduce, and there is no build non-determinism to fix.
+> `npm pack`ing `@hyperfixation/eslint-config`, `db` and `core` out of a clean worktree of `813af20` on the maintainer's
+> Mac produced tarballs that are **byte-identical** to the ones the ubuntu runner published — same sha512, `diff -r`
+> over the extracted trees clean — and `pnpm release:verify 0.1.2` is green for all nine. The builds agree across
+> machines because `--frozen-lockfile` pins the whole toolchain (`typescript` 5.9.3, `turbo`, `@types/node` are all
+> caret ranges in `package.json` but exact in the committed lockfile), and nothing we emit embeds an absolute path, an
+> mtime or a hostname. So no source map, `.d.ts` or `tsbuildinfo` difference exists to chase.
+>
+> What the episode did expose is that the comparison is the *wrong check* for a CI-published release: it can only ever
+> assert that the verifier's machine agrees with the publisher's, so any disagreement — a stale toolchain, the wrong
+> commit resolved (the 0.1.1 CLI false positive), a dirty store — reads as though the registry served something it
+> should not have. `release:verify` now gates on the attestation instead and keeps the rebuild as a labelled
+> informational check: for an attested version a byte difference is a `warnings:` line, and for `0.1.0`/`0.1.1`, which
+> have no attestation, it stays the failing check because it is the only evidence there is.
+
 ## A1 — `api-diff` and `deprecations.json` (core; ∥ R1) — 🚧 In progress
 
 `packages/tools/src/api-diff.ts` + `api-diff.test.ts`; root `deprecations.json` (`[{ package, symbol, since, removeIn }]`).
