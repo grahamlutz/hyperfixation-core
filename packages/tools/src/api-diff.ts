@@ -320,17 +320,21 @@ export function constLiteralRemovals(before: string, after: string): string[] | 
 /** A quoted string exactly as the report prints one, escapes and all. */
 const STRING_LITERAL = /^"(?:[^"\\]|\\.)*"$/;
 
+/** A number as the report prints one — a threshold like `STALE_DUMP_HOURS`. */
+const NUMBER_LITERAL = /^-?\d+(?:\.\d+)?$/;
+
 /**
- * How the gate reads a const's literal type: `text` for a single string, `set` for a readonly
- * tuple or union whose every arm is a string literal, and `undefined` for anything else — which is
- * reported rather than excused, the safe direction for a shape this does not understand. A set
- * that shrank to one arm is `text` on the new side, and its values still compare.
+ * How the gate reads a const's literal type: `text` for a single string or number, `set` for a
+ * readonly tuple or union whose every arm is a string literal, and `undefined` for anything else —
+ * which is reported rather than excused, the safe direction for a shape this does not understand.
+ * A set that shrank to one arm is `text` on the new side, and its values still compare.
  */
 function literalShape(type: string): { kind: "text" | "set"; values: Set<string> } | undefined {
   const trimmed = type.trim();
   if (STRING_LITERAL.test(trimmed)) {
     return { kind: "text", values: new Set([trimmed.slice(1, -1)]) };
   }
+  if (NUMBER_LITERAL.test(trimmed)) return { kind: "text", values: new Set([trimmed]) };
   const arms = tupleArms(trimmed) ?? unionArms(trimmed);
   if (arms === undefined || !arms.every((arm) => STRING_LITERAL.test(arm))) return undefined;
   return { kind: "set", values: new Set(arms.map((arm) => arm.slice(1, -1))) };

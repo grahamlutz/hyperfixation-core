@@ -395,6 +395,16 @@ export const USAGE = "${usage}";
     );
   });
 
+  it("excuses a threshold const whose number moved", () => {
+    const before = report(`// @public
+export const STALE_DUMP_HOURS = 36;
+`);
+    const head = report(`// @public
+export const STALE_DUMP_HOURS = 24;
+`);
+    expect(apiChanges({ ...cli(head), baseline: before })).toEqual([]);
+  });
+
   it("keeps excusing the usage text on its own, and reports a tuple replaced wholesale", () => {
     const usageOnly = commands('["new", "migrate", "deploy"]', "a rewritten usage screen\\n");
     expect(apiChanges(cli(usageOnly))).toEqual([]);
