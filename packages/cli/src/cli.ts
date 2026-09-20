@@ -6,6 +6,7 @@ import { doctor, doctorLines } from "./doctor.js";
 import { generate } from "./gen.js";
 import { migrateApp } from "./migrate.js";
 import { newApp } from "./new.js";
+import { newAppCloud } from "./new-cloud.js";
 import { formatRestoreCheck, restoreCheckApp } from "./restore-check.js";
 import { statusTokenApp, type StatusTokenKind } from "./status-token.js";
 import { requireTemplateSource } from "./template-source.js";
@@ -27,6 +28,16 @@ export const COMMANDS = [
 export type Command = (typeof COMMANDS)[number];
 
 export const USAGE = `hf — the hyperfixation CLI
+
+  hf new <name>             provision the app in the cloud: fetch the template, push a private
+                            repo, register a backup, Sentry, Langfuse and DNS, create the
+                            database and its roles, create the Coolify application and its
+                            environment, deploy, and print what is left to do by hand.
+                            Resumable — a rerun repeats only what did not finish
+      --budget-usd <amount>   the app's monthly LLM budget (required; no default)
+      --email <address>       the bootstrap admin's address (required)
+      --from <specifier>      template to fetch (default: gh:grahamlutz/hyperfixation-template)
+      --into <dir>            where to create <name> (default: the working directory)
 
   hf new <name> --local     copy the template into ./<name>, substitute its placeholders, and
                             prompt for the bootstrap admin's email
@@ -142,14 +153,19 @@ async function commandNew(argv: readonly string[], io: Io): Promise<number> {
       from: { type: "string" },
       into: { type: "string" },
       email: { type: "string" },
+      "budget-usd": { type: "string" },
     },
     allowPositionals: true,
   });
 
   const name = positionals[0];
   if (name === undefined) {
-    io.err("hf new needs a name: hf new <name> --local");
+    io.err("hf new needs a name: hf new <name> --budget-usd <amount> --email <address>");
     return 1;
+  }
+
+  if (!values.local) {
+    return await commandNewCloud(name, values, io);
   }
 
   const from = values.from ?? (await requireTemplateSource());
@@ -170,6 +186,45 @@ async function commandNew(argv: readonly string[], io: Io): Promise<number> {
   );
   io.out("");
   io.out(`next: cd ${result.given} && hf up`);
+  return 0;
+}
+
+/**
+ * The cloud half: both inputs it cannot invent are refused up front.
+ *
+ * Neither has a default. `--email` designates the one admin an app is ever granted without an
+ * admin behind it, and a budget nobody chose is a deployed app that either cannot spend or
+ * cannot stop — `hf bootstrap` has refused an unset one since Phase 1, and this is the same rule
+ * one command earlier, where the answer costs nothing yet.
+ */
+async function commandNewCloud(
+  name: string,
+  values: { from?: string; into?: string; email?: string; "budget-usd"?: string },
+  io: Io,
+): Promise<number> {
+  const missing = [
+    ...(values["budget-usd"] === undefined ? ["--budget-usd <amount>"] : []),
+    ...(values.email === undefined ? ["--email <address>"] : []),
+  ];
+  if (missing.length > 0) {
+    io.err(
+      `hf new ${name} needs ${missing.join(" and ")}: a cloud app has no prompt and no .env to ` +
+        "carry either. Pass --local for Phase 1's local copy.",
+    );
+    return 1;
+  }
+
+  const result = await newAppCloud({
+    name,
+    budgetUsd: values["budget-usd"]!,
+    email: values.email!,
+    from: values.from,
+    into: values.into,
+    io,
+  });
+
+  io.out("");
+  for (const line of result.checklist) io.out(line);
   return 0;
 }
 

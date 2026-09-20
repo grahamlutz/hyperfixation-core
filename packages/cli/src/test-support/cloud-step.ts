@@ -1,4 +1,5 @@
 import type {
+  CloudCommands,
   CloudStepContext,
   StepExec,
   StepExecOptions,
@@ -6,6 +7,7 @@ import type {
   TemplateFetch,
 } from "../cloud-steps/index.js";
 import type { OperatorConfig } from "../config.js";
+import type { Database } from "../database.js";
 import { deriveNames, type AppNames } from "../names.js";
 import type { FetchLike } from "../providers/http.js";
 import type { AppStateStore } from "../state.js";
@@ -59,6 +61,14 @@ export interface StepContextOptions {
   fetchTemplate?: TemplateFetch;
   fetch?: FetchLike;
   from?: string;
+  email?: string;
+  budgetUsd?: string;
+  /** The box's cluster. Defaults to one that refuses, like `fetchTemplate` above. */
+  database?: () => Promise<Database>;
+  commands?: CloudCommands;
+  /** The `deploy` step's clock; `sleep` defaults to returning at once, so a poll loop spins. */
+  now?: () => number;
+  sleep?: (ms: number) => Promise<void>;
 }
 
 export interface TestStepContext extends CloudStepContext {
@@ -84,6 +94,21 @@ export function createStepContext(options: StepContextOptions): TestStepContext 
       (() => Promise.reject(new Error("this test context fetches no template"))),
     fetch: options.fetch,
     env: {},
+    email: options.email ?? "admin@example.com",
+    budgetUsd: options.budgetUsd ?? "25",
+    database:
+      options.database ??
+      (() => Promise.reject(new Error("this test context opens no database"))),
+    commands: options.commands ?? refusingCommands,
+    now: options.now ?? (() => Date.now()),
+    sleep: options.sleep ?? (async () => await Promise.resolve()),
     lines,
   };
 }
+
+/** What a context that has no business running the app's own commands does when asked. */
+const refusingCommands: CloudCommands = {
+  migrate: () => Promise.reject(new Error("this test context runs no migrate")),
+  bootstrap: () => Promise.reject(new Error("this test context runs no bootstrap")),
+  statusToken: () => Promise.reject(new Error("this test context mints no status token")),
+};

@@ -1,7 +1,35 @@
-import { secretsHash, STEPS, type AppState, type AppStateStore, type StepName } from "./state.js";
+import path from "node:path";
+import { checklistLines } from "./checklist.js";
+import { providerKeys } from "./cloud-steps/coolify.js";
+import {
+  cloudCommands,
+  CLOUD_STEPS,
+  defaultTemplateFetch,
+  spawnStepExec,
+  type CloudCommands,
+  type CloudStepContext,
+} from "./cloud-steps/index.js";
+import {
+  loadOperatorConfig,
+  requireOperatorConfig,
+  type ConfigKey,
+  type OperatorConfig,
+} from "./config.js";
+import { openDatabase, type AdminCredentials, type Database } from "./database.js";
+import { deriveNames } from "./names.js";
+import type { FetchLike } from "./providers/http.js";
+import { createSshRunner, type Runner } from "./runner.js";
+import {
+  openAppState,
+  secretsHash,
+  STEPS,
+  type AppState,
+  type AppStateStore,
+  type StepName,
+} from "./state.js";
 
 /** The steps themselves; the runner is what orders and records them. */
-export { CLOUD_STEPS } from "./cloud-steps/index.js";
+export { CLOUD_STEPS };
 
 /**
  * The steps whose "done" depends on more than having run once.
@@ -12,7 +40,9 @@ export { CLOUD_STEPS } from "./cloud-steps/index.js";
  */
 const SECRET_CARRYING_STEPS: readonly StepName[] = ["coolify", "deploy"];
 
-/** What every step of a cloud `hf new` is handed; PRs 2 and 3 widen it with clients and config. */
+/**
+ * What the runner itself is handed. The steps get `CloudStepContext`, which extends it.
+ */
 export interface CloudContext {
   state: AppStateStore;
   /**
@@ -141,11 +171,142 @@ export async function runSteps<Context extends CloudContext>(
 }
 
 /**
+ * Every operator config key a cloud `hf new` needs, checked before the first step.
+ *
+ * All at once, and before anything is created: `requireOperatorConfig` names every missing key,
+ * and an operator who learns about them one failed step at a time pays for a half-provisioned app
+ * each time. The optional keys are deliberately absent — `HF_DB_HOST_INTERNAL` has a default, and
+ * the two provider keys are what the checklist warns about when they are unset.
+ */
+export const REQUIRED_CLOUD_CONFIG: readonly ConfigKey[] = [
+  "HF_COOLIFY_URL",
+  "HF_COOLIFY_TOKEN",
+  "HF_COOLIFY_SERVER_UUID",
+  "HF_COOLIFY_GITHUB_APP_UUID",
+  "HF_COOLIFY_POSTGRES_UUID",
+  "HF_SSH_HOST",
+  "HF_BASE_DOMAIN",
+  "HF_SMTP_URL",
+  "HF_EMAIL_FROM",
+  "HF_LANGFUSE_URL",
+];
+
+/** The cluster role `hf new` provisions the app's database and roles as. */
+const CLUSTER_ADMIN_USER = "postgres";
+
+export interface NewAppCloudOptions {
+  name: string;
+  /** Required in the cloud: a deployed app never starts under a cap nobody chose. */
+  budgetUsd: string;
+  /** Required in the cloud: there is no prompt and no `.env` to carry it. */
+  email: string;
+  from?: string;
+  /** Where `<name>` is created. Defaults to the working directory. */
+  into?: string;
+  io: { out(line: string): void };
+  config?: OperatorConfig;
+  env?: NodeJS.ProcessEnv;
+  /** Where the per-app state files are. Defaults to `stateDir()`. */
+  stateDir?: string;
+  /** Replaces `CLOUD_STEPS`; the tests run a shorter list, never a different order. */
+  steps?: readonly Step<CloudStepContext>[];
+  commands?: CloudCommands;
+  runner?: Runner;
+  /** The cluster admin the database is provisioned as. Defaults to `postgres`/`PGPASSWORD`. */
+  clusterAdmin?: AdminCredentials;
+  fetch?: FetchLike;
+  now?: () => number;
+  sleep?: (ms: number) => Promise<void>;
+}
+
+export interface NewAppCloudResult extends RunStepsResult {
+  dir: string;
+  fqdn: string;
+  /** What the operator still has to do, ready to print. */
+  checklist: readonly string[];
+}
+
+/**
+ * `hf new <name>` without `--local`: the ten steps, resumable, then the checklist.
+ *
+ * Nothing here is interactive and nothing is prompted for — this runs against five APIs and a box
+ * — so every input is a flag or a config key, and a missing one is reported before the first
+ * request rather than half way through.
+ */
+export async function newAppCloud(options: NewAppCloudOptions): Promise<NewAppCloudResult> {
+  const env = options.env ?? process.env;
+  const config = options.config ?? (await loadOperatorConfig({ env }));
+  const required = requireOperatorConfig(config, REQUIRED_CLOUD_CONFIG, { env });
+
+  const names = deriveNames(options.name);
+  const state = await openAppState(names.given, { dir: options.stateDir, env });
+  const runner = options.runner ?? createSshRunner({ host: required.HF_SSH_HOST });
+
+  // `PGPASSWORD` is libpq's own name for it, and the same place `hf restore-check` reads it:
+  // Coolify's cluster password is not an hf config key, because nothing of ours should hold it.
+  const clusterAdmin: AdminCredentials =
+    options.clusterAdmin ?? { user: CLUSTER_ADMIN_USER, password: env.PGPASSWORD };
+
+  let database: Database | undefined;
+  const hadWriteToken = state.state.statusTokens?.write !== undefined;
+
+  const fqdn = `${names.given}.${required.HF_BASE_DOMAIN}`;
+  const context: CloudStepContext = {
+    state,
+    rotated: false,
+    names,
+    dir: path.resolve(options.into ?? process.cwd(), names.given),
+    config,
+    env,
+    io: options.io,
+    checklist: [],
+    exec: spawnStepExec,
+    from: options.from,
+    fetchTemplate: defaultTemplateFetch,
+    fetch: options.fetch,
+    email: options.email,
+    budgetUsd: options.budgetUsd,
+    database: async () => {
+      // No `container`: the `docker exec psql` transport has no address, and every use of the
+      // cluster here — `provisionRoles`, the migrator, the tokens — is a pg client.
+      database ??= await openDatabase(runner, { admin: clusterAdmin });
+      return database;
+    },
+    commands: options.commands ?? cloudCommands,
+    now: options.now ?? (() => Date.now()),
+    sleep: options.sleep ?? (async (ms) => await new Promise((resolve) => setTimeout(resolve, ms))),
+  };
+
+  let result: RunStepsResult;
+  try {
+    result = await runSteps(options.steps ?? CLOUD_STEPS, context);
+  } finally {
+    await database?.close();
+  }
+
+  const checklist = checklistLines({
+    names,
+    fqdn,
+    repo: state.state.repo,
+    dbHost: config.HF_DB_HOST_INTERNAL ?? required.HF_COOLIFY_POSTGRES_UUID,
+    stateFile: state.file,
+    providerKeysSent: providerKeys(config).map(([key]) => key),
+    // Whatever the steps themselves asked the operator to look at — the backup schedule included,
+    // which is the one thing Coolify's API cannot be asked about.
+    fromSteps: context.checklist,
+    // Shown once means the run that minted it; every later run leaves it in the state file alone.
+    writeToken: hadWriteToken ? undefined : state.state.statusTokens?.write,
+  });
+
+  return { ...result, dir: context.dir, fqdn, checklist };
+}
+
+/**
  * `STEPS`' order is the rotation-safety argument — every fallible create before `database`, and
  * `coolify` straight after it — so a caller that assembles its list in another order is a bug
  * here rather than a stranded app on the box.
  */
-function assertStepOrder(steps: readonly Step<CloudContext>[]): void {
+function assertStepOrder(steps: readonly { name: StepName }[]): void {
   const positions = steps.map((step) => STEPS.indexOf(step.name));
   for (let index = 1; index < positions.length; index += 1) {
     if (positions[index]! <= positions[index - 1]!) {

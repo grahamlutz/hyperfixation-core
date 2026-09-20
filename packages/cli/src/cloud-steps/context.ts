@@ -1,9 +1,13 @@
 import { spawn } from "node:child_process";
 import { access } from "node:fs/promises";
-import type { OperatorConfig } from "../config.js";
+import { bootstrapApp } from "../bootstrap.js";
+import { requireOperatorConfig, type OperatorConfig } from "../config.js";
+import type { Database } from "../database.js";
+import { migrateApp } from "../migrate.js";
 import type { AppNames } from "../names.js";
 import type { CloudContext } from "../new-cloud.js";
 import type { FetchLike } from "../providers/http.js";
+import { statusTokenApp } from "../status-token.js";
 import { fetchTemplate } from "../template-source.js";
 
 /**
@@ -55,6 +59,28 @@ export type StepExec = (
 /** `fetchTemplate`, narrowed to what the template step asks of it so a test can be one. */
 export type TemplateFetch = (source: string | undefined, dir: string) => Promise<string>;
 
+/**
+ * The app's own commands, as the `coolify` step runs them through the tunnel.
+ *
+ * An interface rather than three direct calls because these are the three things a test cannot
+ * run — each needs the generated app's toolchain and a migrated database — and because the `env`
+ * overlay they take is the whole point: the cloud path never reads or writes a `.env`.
+ */
+export interface CloudCommands {
+  migrate(options: { dir: string; env: Record<string, string> }): Promise<void>;
+  bootstrap(options: {
+    dir: string;
+    env: Record<string, string>;
+    email: string;
+    budgetUsd: string;
+  }): Promise<void>;
+  /** The plaintext of each token it generated — the only moment either exists outside a hash. */
+  statusToken(options: {
+    dir: string;
+    env: Record<string, string>;
+  }): Promise<{ read?: string; write?: string }>;
+}
+
 /** What every step of a cloud `hf new` needs beyond the state the runner keeps. */
 export interface CloudStepContext extends CloudContext {
   names: AppNames;
@@ -76,6 +102,20 @@ export interface CloudStepContext extends CloudContext {
   fetch?: FetchLike;
   /** Named by `MissingConfig` when a step needs a key the operator has not set. */
   env?: NodeJS.ProcessEnv;
+  /** The bootstrap admin's address and the app's starting budget; both required in the cloud. */
+  email: string;
+  budgetUsd: string;
+  /**
+   * The box's Postgres cluster, opened on first use and shared for the rest of the run.
+   *
+   * One tunnel: `database` and `coolify` both need one, and a second `ssh -L` would be a second
+   * thing to leak. The run closes it in a `finally`.
+   */
+  database(): Promise<Database>;
+  commands: CloudCommands;
+  /** The clock and the wait the `deploy` step polls against; a test replaces both. */
+  now(): number;
+  sleep(ms: number): Promise<void>;
 }
 
 export const spawnStepExec: StepExec = async (command, args, options) => {
@@ -105,6 +145,29 @@ export const spawnStepExec: StepExec = async (command, args, options) => {
 
 export const defaultTemplateFetch: TemplateFetch = async (source, dir) =>
   await fetchTemplate(source, dir);
+
+/** The real three, each under the env overlay the `coolify` step builds. */
+export const cloudCommands: CloudCommands = {
+  // `skipRoles`: the database step created all three, and the cloud migrator cannot create one.
+  migrate: async ({ dir, env }) => {
+    await migrateApp({ dir, skipRoles: true, env });
+  },
+  bootstrap: async ({ dir, env, email, budgetUsd }) => {
+    await bootstrapApp({ dir, env, email, budgetUsd });
+  },
+  // `rotate`, because reaching this call at all means the state cache has no plaintext to reuse:
+  // whatever hash the column holds is one nothing can authenticate against any more.
+  statusToken: async ({ dir, env }) =>
+    (await statusTokenApp({ dir, env, kinds: ["read", "write"], rotate: true })).tokens,
+};
+
+/** `<app>.<HF_BASE_DOMAIN>` — the host Coolify serves and the passkey relying-party origin. */
+export function appFqdn(context: CloudStepContext): string {
+  const { HF_BASE_DOMAIN } = requireOperatorConfig(context.config, ["HF_BASE_DOMAIN"], {
+    env: context.env,
+  });
+  return `${context.names.given}.${HF_BASE_DOMAIN}`;
+}
 
 /** Runs a command in the app directory and throws on a non-zero exit. */
 export async function mustRun(

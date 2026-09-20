@@ -103,11 +103,19 @@ describe("hf new through main", () => {
     expect(err[0]).toContain("app name must match");
   });
 
-  it("refuses without --local, so a half-provisioned cloud app is never the outcome", async () => {
+  it("refuses a cloud run without a budget and an admin address, naming both", async () => {
     const { io: sink, err } = io();
 
     expect(await main(["new", "demo-app", "--from", source, "--into", workspace], sink)).toBe(1);
+    expect(err[0]).toContain("--budget-usd <amount> and --email <address>");
     expect(err[0]).toContain("--local");
+  });
+
+  it("names only the flag that is missing", async () => {
+    const { io: sink, err } = io();
+
+    expect(await main(["new", "demo-app", "--email", "g@example.com"], sink)).toBe(1);
+    expect(err[0]).toContain("--budget-usd <amount>:");
   });
 
   it("needs a name", async () => {

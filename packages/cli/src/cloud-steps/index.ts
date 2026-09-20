@@ -1,6 +1,9 @@
 import type { Step } from "../new-cloud.js";
 import { backupStep } from "./backup.js";
 import type { CloudStepContext } from "./context.js";
+import { coolifyStep } from "./coolify.js";
+import { databaseStep } from "./database.js";
+import { deployStep } from "./deploy.js";
 import { dnsStep } from "./dns.js";
 import { installStep } from "./install.js";
 import { langfuseStep } from "./langfuse.js";
@@ -20,13 +23,32 @@ export const CLOUD_STEPS: readonly Step<CloudStepContext>[] = [
   sentryStep,
   langfuseStep,
   dnsStep,
+  databaseStep,
+  coolifyStep,
+  deployStep,
 ];
 
-export { backupStep, dnsStep, installStep, langfuseStep, repoStep, sentryStep, templateStep };
 export {
+  backupStep,
+  coolifyStep,
+  databaseStep,
+  deployStep,
+  dnsStep,
+  installStep,
+  langfuseStep,
+  repoStep,
+  sentryStep,
+  templateStep,
+};
+export { EnvDrift, neededEnvNames } from "./coolify.js";
+export { DEPLOY_TIMEOUT_MS } from "./deploy.js";
+export {
+  appFqdn,
+  cloudCommands,
   defaultTemplateFetch,
   spawnStepExec,
   StepFailed,
+  type CloudCommands,
   type CloudStepContext,
   type StepExec,
   type StepExecOptions,
