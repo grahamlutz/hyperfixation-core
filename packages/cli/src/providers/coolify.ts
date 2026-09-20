@@ -116,9 +116,34 @@ export interface CoolifyBackupRequest {
   database_backup_retention_days_locally?: number;
 }
 
+/**
+ * What `PATCH /databases/{uuid}/backups/{scheduled_backup_uuid}` accepts of the fields E3 sets.
+ *
+ * Every field is optional upstream and only the ones a rerun reconciles are here: the schedule it
+ * finds was registered by an earlier `hf new`, and rewriting fields nobody set would undo whatever
+ * the operator changed in Coolify's own UI.
+ */
+export interface CoolifyBackupUpdate {
+  frequency?: string;
+  enabled?: boolean;
+  save_s3?: boolean;
+  s3_storage_uuid?: string;
+  databases_to_backup?: string;
+  dump_all?: boolean;
+}
+
 export interface CoolifyBackup {
   uuid: string;
   message?: string;
+}
+
+/** An S3 storage as `GET /s3-storages` lists it; `is_usable` is Coolify's own validation verdict. */
+export interface CoolifyS3Storage {
+  uuid: string;
+  name: string;
+  bucket?: string;
+  region?: string;
+  is_usable?: boolean;
 }
 
 export interface CoolifyClientOptions {
@@ -224,6 +249,29 @@ export class CoolifyClient {
       path: `/databases/${segment(databaseUuid)}/backups`,
       body,
     });
+  }
+
+  async updateDatabaseBackup(
+    databaseUuid: string,
+    backupUuid: string,
+    body: CoolifyBackupUpdate,
+  ): Promise<unknown> {
+    return await this.request({
+      method: "PATCH",
+      path: `/databases/${segment(databaseUuid)}/backups/${segment(backupUuid)}`,
+      body,
+    });
+  }
+
+  /**
+   * Every S3 storage the token's team has configured.
+   *
+   * A backup registered with `save_s3` and no `s3_storage_uuid` is accepted, then runs with
+   * `S3 storage configuration is missing` in its log and keeps the dump on the box alone — so the
+   * uuid has to come from somewhere, and this is the only place the API offers one.
+   */
+  async listS3Storages(): Promise<CoolifyS3Storage[]> {
+    return await this.request({ method: "GET", path: "/s3-storages" });
   }
 
   /**

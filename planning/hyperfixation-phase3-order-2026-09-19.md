@@ -440,6 +440,23 @@ its evidence line pasted here.
 > `message` and `errors` now reach the error, truncated, with every credential and every value the request sent blanked
 > out of them.
 
+> **Finding (step 4, 2026-09-20): the daily backup never left the box.** The `backup` step registered
+> the schedule for `hf_<app>` with `save_s3: true` and no `s3_storage_uuid`. Coolify 4.3.21 accepts
+> that, runs the backup, logs `Warning: S3 upload failed: S3 storage configuration is missing or has
+> been deleted (S3 storage ID: null). S3 backup has been disabled` and keeps the only copy on the
+> same disk as the database — which is not a backup, and which is what E5's `--from-s3` would have
+> found nothing in. The POST schema does say `s3_storage_uuid` is "required if save_s3 is true", in a
+> description no validator reads, so the msw harness was green throughout. The step now resolves a
+> storage first: `HF_COOLIFY_S3_STORAGE_UUID`, else the one `is_usable` entry `GET /s3-storages`
+> lists. With none or several it does not guess — it registers `save_s3: false` and prints a
+> `WARNING:` plus a closing-checklist line saying the backups are local-only, naming the candidates
+> when there are several. `PATCH /databases/{uuid}/backups/{backup_uuid}` with `save_s3` and the uuid
+> is what fixed the live schedule by hand, and it is also what closes **X1 q6**: the step lists the
+> database's schedules, and PATCHes the one whose `databases_to_backup` is this app's database rather
+> than registering a second. Coolify documents that list as "Content is very complex", so the
+> response is narrowed by hand and anything unreadable falls back to the old behaviour — register,
+> and say in the checklist that a duplicate is possible.
+>
 > **Finding (pre-flight, 2026-09-20): Coolify publishes no port for its Postgres**, so the box's `127.0.0.1:5432` was
 > never a listener and every tunnel command failed at the first query. The container is reachable from the box host at
 > its address on the `coolify` docker network, and publishing the port would bind all interfaces, so the tunnel now asks
