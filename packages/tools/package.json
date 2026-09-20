@@ -9,6 +9,7 @@
     "lint": "eslint src",
     "test": "vitest run --passWithNoTests",
     "template-check": "tsx src/template-check.ts",
+    "api-diff": "tsx src/api-diff.ts",
     "release-publish": "tsx src/publish.ts",
     "release-rehearse": "tsx src/rehearse.ts",
     "release-verify": "tsx src/verify.ts",
