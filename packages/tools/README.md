@@ -33,6 +33,19 @@ integrity mismatch for the CLI because it packed a feature branch. A `404` on a 
 retried with backoff for three minutes before it counts as missing: after a publish npmjs answers
 `npm view` at once but 404s the per-version document for about a minute.
 
+## Running a probe under CPU load
+
+```sh
+pnpm load:run 24 120 -- pnpm --filter @hyperfixation/workflows exec vitest run src/some-race.test.ts
+```
+
+Spins one core per worker while the command runs. The workers stop when the command exits, when
+`load:run` is signalled, after the seconds given, and when `load:run` dies — even by SIGKILL,
+because they watch their parent's IPC channel. Don't hand-roll this as
+`(while :; do :; done) &` with `kill $(jobs -p)`: zsh's `jobs` is empty inside a command
+substitution, so nothing is killed, and 24 such loops once burned 12 cores for hours after their
+session was torn down.
+
 ## `release:ci` — the automated path
 
 `.github/workflows/release.yml` (`push: main`) mints a token from the `hyperfixation-bot` GitHub

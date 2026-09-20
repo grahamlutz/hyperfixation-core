@@ -17,7 +17,8 @@
     "plan-sync": "tsx src/plan-sync.ts",
     "dev-doctor": "tsx src/dev-doctor.ts",
     "dev-clean": "tsx src/dev-clean.ts",
-    "worktrees-clean": "tsx src/worktrees-clean.ts"
+    "worktrees-clean": "tsx src/worktrees-clean.ts",
+    "with-load": "tsx src/with-load.ts"
   },
   "devDependencies": {
     "@hyperfixation/eslint-config": "workspace:*",

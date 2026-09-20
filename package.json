@@ -24,6 +24,7 @@
     "dev:doctor": "pnpm --filter @hyperfixation/tools run dev-doctor",
     "dev:clean": "pnpm --filter @hyperfixation/tools run dev-clean",
     "worktrees:clean": "pnpm --filter @hyperfixation/tools run worktrees-clean",
+    "load:run": "pnpm --filter @hyperfixation/tools run with-load",
     "changeset": "changeset"
   },
   "devDependencies": {
