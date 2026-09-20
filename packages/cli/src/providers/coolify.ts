@@ -45,6 +45,27 @@ export interface CoolifyApplication {
   uuid: string;
 }
 
+/** What `GET /applications` returns per item; the document's `Application` has both of these. */
+export interface CoolifyApplicationSummary {
+  uuid: string;
+  name: string;
+  fqdn?: string;
+}
+
+/**
+ * What `PATCH /databases/{uuid}` accepts of the fields E2 might need.
+ *
+ * Narrow on purpose: the document lists every engine's credentials, and nothing in it attaches a
+ * database to a docker network — `is_public`/`public_port` is the only reach the API has over how
+ * a database is addressed.
+ */
+export interface CoolifyDatabaseUpdate {
+  name?: string;
+  description?: string;
+  is_public?: boolean;
+  public_port?: number;
+}
+
 export interface CoolifyEnvironmentVariable {
   key: string;
   value: string;
@@ -109,6 +130,11 @@ export class CoolifyClient {
     return await this.request({ method: "POST", path: "/projects", body });
   }
 
+  /** Every project on the instance; `hf new` finds its own by name rather than creating a second. */
+  async listProjects(): Promise<CoolifyProject[]> {
+    return await this.request({ method: "GET", path: "/projects" });
+  }
+
   async getProject(uuid: string): Promise<CoolifyProject> {
     return await this.request({ method: "GET", path: `/projects/${segment(uuid)}` });
   }
@@ -124,6 +150,16 @@ export class CoolifyClient {
     body: CoolifyApplicationRequest,
   ): Promise<CoolifyApplication> {
     return await this.request({ method: "POST", path: "/applications/private-github-app", body });
+  }
+
+  /**
+   * Every application, so a rerun can find the one it created last time by name.
+   *
+   * The state cache is the first place to look for the uuid; this is what answers the case where
+   * the application exists but the state file does not, which is a cold run against a live app.
+   */
+  async listApplications(options: { tag?: string } = {}): Promise<CoolifyApplicationSummary[]> {
+    return await this.request({ method: "GET", path: "/applications", query: { tag: options.tag } });
   }
 
   async updateEnvsBulk(
@@ -161,5 +197,28 @@ export class CoolifyClient {
       path: `/databases/${segment(databaseUuid)}/backups`,
       body,
     });
+  }
+
+  /**
+   * The database's scheduled backups.
+   *
+   * `unknown`, not a model: upstream documents this response as a string whose example reads
+   * "Content is very complex. Will be implemented later.", so there is nothing to type against.
+   * A caller that needs a field has to narrow it against the box itself.
+   */
+  async listDatabaseBackups(databaseUuid: string): Promise<unknown> {
+    return await this.request({
+      method: "GET",
+      path: `/databases/${segment(databaseUuid)}/backups`,
+    });
+  }
+
+  /** The database as Coolify holds it — undocumented in shape, same as the backups list. */
+  async getDatabase(uuid: string): Promise<unknown> {
+    return await this.request({ method: "GET", path: `/databases/${segment(uuid)}` });
+  }
+
+  async updateDatabase(uuid: string, body: CoolifyDatabaseUpdate): Promise<unknown> {
+    return await this.request({ method: "PATCH", path: `/databases/${segment(uuid)}`, body });
   }
 }

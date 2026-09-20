@@ -40,6 +40,7 @@
     "@hyperfixation/auth": "workspace:*",
     "@hyperfixation/core": "workspace:*",
     "@hyperfixation/db": "workspace:*",
+    "giget": "3.3.1",
     "pg": "^8.23.0"
   },
   "devDependencies": {

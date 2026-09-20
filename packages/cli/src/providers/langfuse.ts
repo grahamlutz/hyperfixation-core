@@ -5,6 +5,10 @@ export interface LangfuseProject {
   name: string;
 }
 
+export interface LangfuseProjects {
+  data: LangfuseProject[];
+}
+
 export interface LangfuseApiKey {
   id: string;
   publicKey: string;
@@ -37,6 +41,11 @@ export class LangfuseClient {
       },
       fetch: options.fetch,
     });
+  }
+
+  /** The org key's projects; a rerun finds the app's own by name instead of creating a second. */
+  async listProjects(): Promise<LangfuseProjects> {
+    return await this.request({ method: "GET", path: "/api/public/projects" });
   }
 
   /** `retention` is required by the API: 0 keeps data indefinitely. */

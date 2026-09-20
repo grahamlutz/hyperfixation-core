@@ -20,12 +20,26 @@ export interface ResolvedApp {
   names: AppNames;
   /** The app's own migrations, which `hf migrate` and E005 both read. */
   migrationsDir: string;
-  /** `.env` under `process.env`, the precedence every dotenv loader uses. */
+  /** `.env` under `process.env` under the caller's overlay; the precedence dotenv loaders use. */
   env: Record<string, string | undefined>;
   /** `.env` alone, so `hf check` can say a name is missing from the file and not from a shell. */
   envFile: Record<string, string>;
   /** The names `.env.example` declares; the app's env contract, kept equal to `REQUIRED_ENV`. */
   declared: readonly string[];
+  /** The overlay this app was resolved with, so a command can hand the same one to a child. */
+  envOverlay: Record<string, string>;
+}
+
+export interface ResolveAppOptions {
+  /**
+   * Names → values laid over `.env` **and** over `process.env`.
+   *
+   * The cloud path has no `.env` to read: `hf new` runs `migrate`, `bootstrap` and
+   * `status-token` against a freshly provisioned app through the E2 tunnel, holding the
+   * connection URLs itself. Highest precedence rather than lowest, because a laptop that
+   * happens to export `DATABASE_URL` for its own dev app must not redirect a cloud run into it.
+   */
+  env?: Record<string, string>;
 }
 
 /**
@@ -35,7 +49,10 @@ export interface ResolvedApp {
  * template's `package.json` carries `__APP_NAME__`, so after substitution it already *is* the
  * record, and a second copy of the name is a second thing that can disagree.
  */
-export async function resolveApp(dir: string = process.cwd()): Promise<ResolvedApp> {
+export async function resolveApp(
+  dir: string = process.cwd(),
+  options: ResolveAppOptions = {},
+): Promise<ResolvedApp> {
   const root = await findAppRoot(path.resolve(dir));
   const manifest = JSON.parse(await readFile(path.join(root, "package.json"), "utf8")) as {
     name?: unknown;
@@ -46,15 +63,17 @@ export async function resolveApp(dir: string = process.cwd()): Promise<ResolvedA
 
   const envFile = await readEnvFile(path.join(root, ".env"));
   const example = await readEnvFile(path.join(root, ".env.example"));
+  const envOverlay = options.env ?? {};
 
   return {
     dir: root,
     appName: manifest.name,
     names: deriveNames(manifest.name),
     migrationsDir: path.join(root, "drizzle"),
-    env: { ...envFile, ...process.env },
+    env: { ...envFile, ...process.env, ...envOverlay },
     envFile,
     declared: Object.keys(example),
+    envOverlay,
   };
 }
 

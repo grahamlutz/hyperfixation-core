@@ -6,6 +6,7 @@ import {
   CONFIG_KEYS,
   ConfigFileInvalid,
   configFile,
+  githubAppSlugs,
   loadOperatorConfig,
   MissingConfig,
   requireOperatorConfig,
@@ -121,8 +122,20 @@ describe("operator config", () => {
     expect((refusal as Error).message).not.toContain(COOLIFY_TOKEN);
   });
 
-  it("carries the eighteen keys Phase 3 settled on", () => {
-    expect(CONFIG_KEYS).toHaveLength(18);
-    expect(new Set(CONFIG_KEYS).size).toBe(18);
+  it("carries the twenty keys Phase 3 settled on", () => {
+    expect(CONFIG_KEYS).toHaveLength(20);
+    expect(new Set(CONFIG_KEYS).size).toBe(20);
+    expect(CONFIG_KEYS).toContain("HF_GITHUB_APP_SLUGS");
+    expect(CONFIG_KEYS).toContain("HF_DB_HOST_INTERNAL");
+  });
+
+  it("splits HF_GITHUB_APP_SLUGS into the apps to assert, and an unset key into none", async () => {
+    await write({ HF_GITHUB_APP_SLUGS: "coolify, hyperfixation-bump ,," });
+
+    expect(githubAppSlugs(await loadOperatorConfig({ file, env: {} }))).toEqual([
+      "coolify",
+      "hyperfixation-bump",
+    ]);
+    expect(githubAppSlugs({})).toEqual([]);
   });
 });

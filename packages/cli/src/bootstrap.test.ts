@@ -104,6 +104,27 @@ describe("hf bootstrap", () => {
     }
   });
 
+  it("connects through the overlay rather than the app's .env, which the cloud has none of", async () => {
+    // The `.env` here points somewhere unreachable on purpose: only the overlay winning gets the
+    // run as far as `BootstrapRefused`, which this shared database already earns.
+    const cloud = await fakeApp({
+      appName: db.appName,
+      env: { DATABASE_URL: "postgres://nobody@127.0.0.1:1/dev" },
+    });
+    try {
+      await expect(
+        bootstrapApp({
+          dir: cloud,
+          email: "cloud@example.com",
+          budgetUsd: "75",
+          env: { DATABASE_URL: db.applicationUrl },
+        }),
+      ).rejects.toThrow(BootstrapRefused);
+    } finally {
+      await rm(cloud, { recursive: true, force: true });
+    }
+  }, 30_000);
+
   it("refuses a non-positive budget", async () => {
     const empty = await fakeApp({
       appName: "demo_app",

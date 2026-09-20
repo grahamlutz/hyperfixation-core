@@ -13,12 +13,20 @@ export const CONFIG_KEYS = [
   "HF_COOLIFY_SERVER_UUID",
   "HF_COOLIFY_GITHUB_APP_UUID",
   "HF_COOLIFY_POSTGRES_UUID",
+  // The Postgres container's hostname on the docker network, as the app's containers see it.
+  // Configurable because Coolify's API document reports no such field: its own compose generator
+  // names the container after the database's uuid, so `HF_COOLIFY_POSTGRES_UUID` is the default a
+  // caller falls back to, and this is how a box that disagrees is told to us rather than guessed.
+  "HF_DB_HOST_INTERNAL",
   "HF_SSH_HOST",
   "HF_CLOUDFLARE_TOKEN",
   "HF_CLOUDFLARE_ZONE_ID",
   "HF_BASE_DOMAIN",
   "HF_GITHUB_TOKEN",
   "HF_GITHUB_OWNER",
+  // Comma-separated `app_slug`s — Coolify's GitHub App and the bump bot's — every one of which
+  // has to be installed on a new app's repository; `githubAppSlugs` is what splits it.
+  "HF_GITHUB_APP_SLUGS",
   "HF_SENTRY_TOKEN",
   "HF_SENTRY_ORG",
   "HF_LANGFUSE_URL",
@@ -132,6 +140,19 @@ export function requireOperatorConfig<Key extends ConfigKey>(
     throw new MissingConfig(missing, options.file ?? configFile(options.env));
   }
   return required;
+}
+
+/**
+ * `HF_GITHUB_APP_SLUGS` as a list: split on commas, trimmed, empties dropped.
+ *
+ * A config value is a string — one flat list of names is the whole contract — so the split lives
+ * here rather than in the file format, and an unset key is an empty list: nothing to assert.
+ */
+export function githubAppSlugs(config: OperatorConfig): readonly string[] {
+  return (config.HF_GITHUB_APP_SLUGS ?? "")
+    .split(",")
+    .map((slug) => slug.trim())
+    .filter((slug) => slug !== "");
 }
 
 function parseConfig(contents: string, file: string): OperatorConfig {

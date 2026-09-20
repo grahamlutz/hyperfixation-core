@@ -120,6 +120,27 @@ describe("hf status-token", () => {
       expect(rows[0]!.write_token_hash).toBe(hashStatusToken(second.tokens.write!));
     });
 
+    it("runs against an app with no .env at all, on the overlay alone — the cloud's case", async () => {
+      // No DATABASE_URL in this dir's `.env`, and a stale one in the file to be beaten: `hf new`
+      // provisions through the E2 tunnel, before the app has a `.env` anywhere.
+      const cloud = await fakeApp({
+        appName: db.appName,
+        env: { DATABASE_URL: "postgres://nobody@127.0.0.1:1/dev" },
+      });
+      try {
+        const result = await statusTokenApp({
+          dir: cloud,
+          kinds: ["read"],
+          explicit: true,
+          env: { DATABASE_URL: db.applicationUrl },
+        });
+
+        expect(result.tokens.read).toBeTypeOf("string");
+      } finally {
+        await rm(cloud, { recursive: true, force: true });
+      }
+    }, 30_000);
+
     it("audits what it provisioned, and only that — never the plaintext", async () => {
       const result = await statusTokenApp({ dir, kinds: ["read"], explicit: true });
 
