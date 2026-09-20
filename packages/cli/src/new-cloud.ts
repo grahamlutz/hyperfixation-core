@@ -1,5 +1,8 @@
 import { secretsHash, STEPS, type AppState, type AppStateStore, type StepName } from "./state.js";
 
+/** The steps themselves; the runner is what orders and records them. */
+export { CLOUD_STEPS } from "./cloud-steps/index.js";
+
 /**
  * The steps whose "done" depends on more than having run once.
  *
