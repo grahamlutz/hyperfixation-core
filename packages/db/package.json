@@ -1,6 +1,6 @@
 {
   "name": "@hyperfixation/db",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "license": "MIT",
   "description": "Drizzle schema of every hf_* table, migrations, the migrator, boot checks, and the step/control pool factories",
   "repository": {

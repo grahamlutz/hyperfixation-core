@@ -1,5 +1,51 @@
 # @hyperfixation/cli
 
+## 0.1.7
+
+### Patch Changes
+
+- 9f25384: `hf doctor` gains two findings per app, read over the tunnel E006 already opens. `connections`
+  counts every backend belonging to an `hf_*` role against the one `max_connections` the box's apps
+  share — a `WARN` past 80% of it — and shows the app's own role against its `CONNECTION LIMIT` of
+  25. `lock` counts the advisory locks in the app's database and checks that exactly one is held
+  under `hashtext('hf-worker:' || <app>)`, the key `acquireWorkerLock` takes: none means no live
+  worker and two means two, and both are a `FAIL`. Neither needs operator config, and a query that
+  refuses is a `FAIL` line rather than a dead command.
+- 532f1f1: `hf new --local` now refuses a missing `--budget-usd` or `--email` up front, exactly as the
+  cloud path has since Phase 3, and writes the budget to the new app's `.env` as
+  `HF_BOOTSTRAP_BUDGET_USD`. The local half asked for the address at an interactive prompt and
+  never asked for a budget at all, which left `hf up` to seed its own dev default — an app
+  running under a cap nobody chose, and a `hf new --local` that could not be run unattended at
+  all. `newApp` takes the budget as `budgetUsd` and reports it as `wroteBootstrapBudget`; the
+  prompt is still there for a caller that supplies its own.
+- 37ea0d2: `hf restore-check` no longer reads a running app's own churn as data loss. Against a 1.3-hour-old
+  dump of `demo-app`, X1 reported 9 of 24 tables mismatched — `hf_run` 30 against 3, `hf_activity` 2
+  against 0 — and the same check against a fresh dump matched all 24: every one of those tables had
+  simply gained rows since the dump was taken. A committed list, `APPEND_ONLY_TABLES`, names the
+  eight `hf_*` tables no code path deletes from and none updates in a way that lowers their count,
+  and for those a restored count *below* the live one is now `ok (drift +N)` rather than a
+  mismatch. A restored count above the live one stays a mismatch there — that is the data loss the
+  command exists to catch — and every other table, including one that merely looks append-only, is
+  still compared exactly. `--strict` drops the allowance and compares everything exactly.
+  
+  A dump older than 24 h (was 36 h) now prints a `WARN` line and, following `hf doctor`, exits 1:
+  a check against stale data is not a passing check. `RestoreCheckResult` gains `strict` and
+  `matched` — no table failed, which is what `lastRestoreCheckAt` is written on — alongside `ok`,
+  which is now `matched` and a fresh dump; `RestoreCheckRow` gains `drift`. `RestoreVerdict` is
+  unchanged: drift is not its own outcome, it is an `ok` the table prints a reason beside.
+- fc7974e: `hf --version` (also `-v` and `hf version`) prints the `@hyperfixation/cli` version, read from the
+  package's own `package.json` at runtime so a release cannot leave it behind. And a `hf new` that
+  finds something in its way now names the absolute path and the one move that clears it, for both
+  directories it cares about: the app directory, and the dot-prefixed `.<name>.hf-new` scratch beside
+  it. The scratch is cleared only on a genuine resume — the state cache records the fetch's start the
+  way it already records the rename's — so a first run refuses one it has no record of creating
+  instead of deleting a directory that was never hf's.
+- Updated dependencies [ecd68f2]
+- Updated dependencies [06695ea]
+  - @hyperfixation/db@0.1.7
+  - @hyperfixation/auth@0.1.7
+  - @hyperfixation/core@0.1.7
+
 ## 0.1.6
 
 ### Patch Changes
