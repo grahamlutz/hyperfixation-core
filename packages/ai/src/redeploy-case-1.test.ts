@@ -3,6 +3,7 @@ import {
   createTestDatabase,
   spawnWorker,
   testBuildSha,
+  waitForWorkflowStatus,
   type SpawnedWorker,
   type TestDatabase,
 } from "@hyperfixation/testing";
@@ -100,8 +101,10 @@ describe("redeploy case 1 — an approval across a redeploy with changed code", 
         await startRun(probe, flow, INPUT, runId);
         await waitForStatus(probe, runId, "waiting", 120_000);
 
-        // The attempt ended cleanly at the gate: SUCCESS, not a workflow held open.
-        expect(await workflowRow(probe, runId)).toMatchObject({ status: "SUCCESS" });
+        // The attempt ended cleanly at the gate: SUCCESS, not a workflow held open. Polled,
+        // because the `waiting` write above is committed from inside the body — DBOS marks the
+        // attempt SUCCESS only once that body returns.
+        await waitForWorkflowStatus(probe.pool, runId, "SUCCESS", { timeoutMs: 30_000 });
         expect(await ledgerRows(probe, runId)).toMatchObject([{ key: DRAFT_KEY, status: "ok" }]);
         expect(await approvalRows(probe, runId)).toMatchObject([
           { key: APPROVAL_KEY, status: "pending" },

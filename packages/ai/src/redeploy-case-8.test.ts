@@ -6,6 +6,7 @@ import {
   killWhenParked,
   spawnWorker,
   testBuildSha,
+  waitForWorkflowStatus,
   type SpawnedWorker,
   type TestDatabase,
 } from "@hyperfixation/testing";
@@ -119,7 +120,9 @@ describe("redeploy case 8 — a reconcile bump, then an approval", () => {
       });
 
       await waitForStatus(probe, runId, "waiting", 120_000);
-      expect(await workflowRow(probe, `${runId}:2`)).toMatchObject({ status: "SUCCESS" });
+      // Polled: the `waiting` write is committed from inside the body, so DBOS marks the
+      // attempt SUCCESS only once that body returns.
+      await waitForWorkflowStatus(probe.pool, `${runId}:2`, "SUCCESS", { timeoutMs: 30_000 });
       const [approval] = await approvalRows(probe, runId);
       const approvalId = Number(approval!.id);
       const decisionKey = `web-${runId}`;

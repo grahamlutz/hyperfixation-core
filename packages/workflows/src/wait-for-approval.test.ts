@@ -7,6 +7,7 @@ import {
   killWhenParked,
   spawnWorker,
   testBuildSha,
+  waitForWorkflowStatus,
   type SpawnedWorker,
   type TestDatabase,
 } from "@hyperfixation/testing";
@@ -149,12 +150,10 @@ describe("waitForApproval — the gate, the suspend, and the attempt decide() en
       expect(pending!.notified_at).not.toBeNull();
       expect(worker.output()).toContain(`${NOTIFY_MARKER} ${APPROVAL_KEY}`);
       // The workflow ended rather than parking in it: that is what makes the wait survive a
-      // redeploy, and `waiting` is only reachable through `Suspend`.
-      const [attempt1] = await query<{ status: string }>(
-        "SELECT status FROM dbos.workflow_status WHERE workflow_uuid = $1",
-        [runId],
-      );
-      expect(attempt1).toMatchObject({ status: "SUCCESS" });
+      // redeploy, and `waiting` is only reachable through `Suspend`. Polled, because the
+      // `waiting` write above is committed from inside the body — DBOS marks the attempt
+      // SUCCESS only once that body returns.
+      await waitForWorkflowStatus(control.pool, runId, "SUCCESS", { timeoutMs: 30_000 });
       expect(await counter(runId, "after")).toBeUndefined();
 
       await decide(control.pool, client, {
