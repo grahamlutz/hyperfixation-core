@@ -22,6 +22,8 @@ export {
   createProviders,
   fixedCost,
   perMillionTokens,
+  providersMode,
+  reportProvidersMode,
   type CostActualUsage,
   type CostEstimateCall,
   type CostProvider,
@@ -29,4 +31,5 @@ export {
   type ModelCost,
   type PerMillionTokensRow,
   type ProviderRegistry,
+  type ProvidersMode,
 } from "./providers.js";

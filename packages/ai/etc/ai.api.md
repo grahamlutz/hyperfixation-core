@@ -6,6 +6,7 @@
 
 import { JSONSchema7 } from '@ai-sdk/provider';
 import type { LanguageModelV4 } from '@ai-sdk/provider';
+import type { Pool } from 'pg';
 import type { StepDatabase } from '@hyperfixation/db';
 
 // @public (undocumented)
@@ -201,6 +202,15 @@ export interface ProviderRegistry {
     // (undocumented)
     model(name: string): LanguageModelV4;
 }
+
+// @public
+export type ProvidersMode = "live" | "fixtures" | "unknown";
+
+// @public
+export function providersMode(): ProvidersMode;
+
+// @public
+export function reportProvidersMode(pool: Pool): Promise<ProvidersMode>;
 
 // @public
 export class UnknownModel extends Error {

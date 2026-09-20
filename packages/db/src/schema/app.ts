@@ -24,6 +24,10 @@ export const hfAppState = pgTable(
     budgetUsd: numeric("budget_usd", { precision: 12, scale: 4 }).notNull(),
     readTokenHash: text("read_token_hash"),
     writeTokenHash: text("write_token_hash"),
+    // Which provider the process that last built an LLM registry selected, so `/api/status`
+    // can say that a deploy with no API key is serving fixture drafts. Plain `text`, and null
+    // until a process reports — the web that serves the status route never builds one.
+    llmMode: text("llm_mode"),
   },
   (t) => [check("hf_app_state_singleton", sql`${t.id} = 1`)],
 );
