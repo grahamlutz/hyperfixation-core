@@ -1,6 +1,6 @@
 {
   "name": "@hyperfixation/eslint-config",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "license": "MIT",
   "description": "The shared flat ESLint config: the DBOS primitive ban, the deep-import ban, and the raw-handle hint in flows",
   "repository": {
