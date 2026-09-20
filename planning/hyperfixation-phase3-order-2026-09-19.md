@@ -147,7 +147,7 @@ network; `next build` still prerenders with the DSN empty.
 > dev` while the build passed. Worker auto-instrumentation under ESM would need `--import @sentry/node/preload` in `pnpm
 > worker` and the image `CMD`; irrelevant at sampling 0. Sentry still sends request-driven session counts.
 
-### D3 — The prod stack comes up locally (after D1) — 🚧 In progress
+### D3 — The prod stack comes up locally (after D1) — ✅ Done (deviated — see note; template #31)
 
 `tests/e2e/prod-compose.e2e.ts`: dev compose's Postgres, `provisionRoles` + `CREATE DATABASE` via the test's admin URL,
 then `docker compose -f docker-compose.prod.yml up -d --build` with `SOURCE_COMMIT` set; assert `migrate` exited 0,
@@ -157,7 +157,19 @@ then `docker compose -f docker-compose.prod.yml up -d --build` with `SOURCE_COMM
 
 **Done:** the file green in template CI's `image` job.
 
-### D4 — Redeploy across a step change, in CI (after D3) — ⬜ Not started
+> **Built (template #31).** `tests/e2e/prod-stack.ts` (reusable: `startProdStack()`, `deploy(sourceCommit)`, `exitCodeOf`, `logsOf`,
+> `stop()`), `prod-compose.e2e.ts`, `prod-compose.hostdb.yml`, `vitest.prod.config.ts`, and `pnpm test:prod`; wired as steps of the
+> D1 `image` job (2m25s of it). It asserts `migrate` exits 0, `/api/status` is 401 without a token and 200 with the read token,
+> `applicationVersion === SOURCE_COMMIT`, the worker's launch marker, and `docker compose stop worker` exits 0 in under 5 s
+> when idle; it always tears down. **The first real `up` needed no Dockerfile or compose change.** Differences from the plan:
+> (1) the suite **generates an app** with `newApp` instead of deploying this checkout, because `docker-compose.prod.yml` here
+> names `__APP_NAME__`, which `roleNames()` refuses, so `migrate` would exit non-zero; (2) `host.docker.internal` reaches the
+> cluster through an additive overlay (`host-gateway` on Linux only), so the compose file is untouched. Environment notes: compose
+> falls back to the classic builder without the `buildx` plugin and then fails on the Dockerfile's `RUN --mount=type=cache`
+> (documented in CLAUDE.md); the colima Docker data disk is 30 GB and filled up once, which took down the dev Postgres.
+
+
+### D4 — Redeploy across a step change, in CI (after D3) — ✅ Done (template #32)
 
 The automated half of the plan's first manual item. Same harness: start `draftDemoOutreach` until an approval is
 `pending`; patch `src/flows/draft-demo-outreach.ts` to insert a keyed `activity.record` step before `waitForApproval`;
@@ -165,7 +177,20 @@ rebuild with a new `SOURCE_COMMIT`; `docker compose up -d` (recreates all three)
 the harness pool; assert `hf_run.attempt = 2`, `current_workflow_id = '<run>:2'`, run `done`,
 `/api/status.applicationVersion` is the new sha, one `hf_action_log` row `ok`.
 
-**Done:** green twice in CI; wall clock recorded in this doc (two image builds — expect 4–8 min).
+**Done:** green in CI; wall clock recorded in this doc (two image builds — expect 4–8 min). *(The original wording said "green twice"; that had no stated reason, is a weak flake detector, and was dropped 2026-09-19 — a flake is treated as a bug when it shows.)*
+
+> **Built (template #32).** `tests/e2e/prod-redeploy.e2e.ts` (named `prod-*` because `vitest.prod.config.ts` globs
+> `tests/e2e/prod-*.e2e.ts`) extends `prod-stack.ts`: commit A up, `draftDemoOutreach` to a `pending` approval, the generated app's
+> flow patched with a keyed `activity.record` before `waitForApproval`, commit B built and `compose up -d`, the approval decided
+> through `workspace.decide`; it asserts `attempt = 2`, `current_workflow_id = '<run>:2'`, the run `done`, `/api/status` reporting B,
+> exactly one `ok` send row, and the inserted step's activity row exactly once — **that row is the proof of a redeploy**, since a
+> plain decide also bumps to attempt 2. The mechanics held as redeploy case 1 describes: attempt 1's workflow ends `SUCCESS` at
+> the gate, so reconcile correctly leaves the `waiting` run alone across the redeploy. Wall clock: the `image` job is now
+> **9m49s and 10m46s** (D4's step 4m16s / 4m41s, D3's 2m25s / 2m38s), in parallel with the 3-minute `check` job; no fallback
+> workflow was needed, but a nightly-only redeploy is the small change to make if template CI time becomes a nuisance. Also:
+> `prod-stack.ts` deploys with `SMTP_URL=""` (nodemailer's `jsonTransport`; there is no mailpit on a runner), and `stop()` removes
+> the tagged images it deployed.
+
 
 ## Track E — the `hf` cloud path (`packages/cli`)
 
@@ -220,7 +245,7 @@ published-on-localhost port (Phase 0 left it unexposed publicly — verify it li
 > password to reuse, so the next run generates a fresh one and `ALTER`s again (one extra rotation). `packages/db` is untouched.
 
 
-### E3 — `hf new <name>` in the cloud (after E2) — 🚧 In progress (planned into four PRs; PR 1 open)
+### E3 — `hf new <name>` in the cloud (after E2) — ✅ Done (core #58, #61, #62)
 
 The ten steps, resumable by state. Order: copy template (`giget gh:grahamlutz/hyperfixation-template` when `--from`
 is absent and `--local` is not passed) → `pnpm install`, initial commit → GitHub private repo + push (bot secrets
@@ -260,6 +285,33 @@ rerun, resumes at Cloudflare with no earlier `POST`; (d) `--local` is byte-for-b
 > `HEAD` (an unrelated repo of the same name answers 200 too); DNS never creates a second A record. **Empty provider keys:**
 > a deployed app with no `ANTHROPIC_API_KEY`/`OPENAI_API_KEY` silently serves fixture drafts — `/api/status` now reports
 > `llm.mode` (core #57) and `hf doctor` warns on `fixtures`.
+
+> **Built.** **PR 1 (#58):** `giget` and `fetchTemplate`; an `env` overlay on `migrateApp`/`bootstrapApp`/`statusTokenApp` (it wins over a
+> laptop's dev `.env`, and the `migrate` child gets a minimal environment); `betterAuthSecret`, `coolify.envsSecretsHash` and
+> the new step order in the state; `HF_GITHUB_APP_SLUGS` and `HF_DB_HOST_INTERNAL`; the vendored GitHub `GET /users/{u}`,
+> `GET /repos/{o}/{r}`, `GET /user/installations` (+ repositories), Coolify `GET /applications` and `GET /projects`, the backups
+> list, and Langfuse `GET /api/public/projects`; `new-cloud.ts`'s `runSteps`. **PR 2 (#61):** `cloud-steps/{template,install,repo,backup,sentry,langfuse,dns}.ts`
+> with `context.ts` and `index.ts` (`CLOUD_STEPS`) — each remote-first, state-second, skipped when done, cold detection by
+> name; the repo push authenticates with `Basic base64(x-access-token:<token>)` in the child's env only. **PR 3 (#62):** `database`,
+> `coolify`, `deploy`, `checklist.ts` and the CLI — `hf new <name> --budget-usd <n> --email <admin>` (both required in the cloud, no
+> default budget); the env PATCH re-runs whenever the recorded secrets hash differs (the rotation-lockout fix); the two provider
+> keys are **omitted, not sent empty**, when the operator config has none, and the checklist says the app is on fixtures;
+> a drift assertion (before any request) compares the sent keys with what `.env.example` and both compose blocks need.
+> **Real-box questions (X1):** (1) Langfuse's vendored `GET /api/public/projects` is project-scoped, so lookup by name with an org
+> key is unproven (a 401/403 is a body-less `ProviderError`); (2) Coolify has no create-environment endpoint, so a project
+> without a `production` environment fails with instructions — confirm Coolify creates it with a project; (3) whether
+> `HF_DB_HOST_INTERNAL` or the Postgres uuid is the hostname the app containers can reach, and **a Coolify database cannot be
+> attached to a docker network via the API** (`PATCH /databases/{uuid}` reaches only `is_public` and `public_port`); (4) the
+> cluster admin password comes from `PGPASSWORD` (as in `hf restore-check`) — confirm the box accepts it over the loopback
+> tunnel; (5) `SOURCE_COMMIT` reaching the image — `deploy` fails after 15 minutes if `/api/status` never reports the pushed sha; (6) the
+> backup step cannot detect an existing schedule (Coolify's list response is undocumented), so a cold re-run prints a checklist
+> line instead of registering a second one. The `_ro` connection string is printed with `<password>` and a pointer to
+> `database.readonlyPassword` in the state file, so the write token stays the only secret printed.
+> **Also landed around it:** core **#57** (`/api/status` reports `llm.mode` — `live`, `fixtures` or `unknown` — carried by a nullable
+> `hf_app_state.llm_mode` from migration 0008, written by `reportProvidersMode(pool)` at worker boot; `hf doctor` WARNs on
+> `fixtures`) — **the template must call `reportProvidersMode(pool)` in its worker, which needs the next core publish**; core **#60**
+> (an unhandled `EPIPE` on a child's stdin in `spawnCollecting` failed whole vitest runs intermittently — seen on #57 and #58; fixed
+> with a listener and a regression test that reproduces it every time without the fix).
 
 
 ### E4 — `hf doctor` (after E2; ∥ E5) — ✅ Done (core #55)
