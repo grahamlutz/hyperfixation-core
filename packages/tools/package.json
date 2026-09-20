@@ -11,7 +11,8 @@
     "template-check": "tsx src/template-check.ts",
     "release-publish": "tsx src/publish.ts",
     "release-rehearse": "tsx src/rehearse.ts",
-    "release-verify": "tsx src/verify.ts"
+    "release-verify": "tsx src/verify.ts",
+    "plan-sync": "tsx src/plan-sync.ts"
   },
   "devDependencies": {
     "@hyperfixation/eslint-config": "workspace:*",
