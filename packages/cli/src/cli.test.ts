@@ -46,8 +46,8 @@ describe("the hf binary's argument handling", () => {
   it("names an unknown command", async () => {
     const { io: sink, err } = io();
 
-    expect(await main(["deploy"], sink)).toBe(1);
-    expect(err.join("\n")).toContain('unknown command "deploy"');
+    expect(await main(["provision"], sink)).toBe(1);
+    expect(err.join("\n")).toContain('unknown command "provision"');
   });
 
   it("documents every command it dispatches", () => {
@@ -60,6 +60,7 @@ describe("the hf binary's argument handling", () => {
       "gen",
       "dev",
       "up",
+      "deploy",
       "doctor",
       "restore-check",
     ]);

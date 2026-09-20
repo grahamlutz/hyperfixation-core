@@ -28,9 +28,12 @@ export const COMPOSE_DOMAIN_SERVICE = "web";
 export const PROD_COMPOSE_FILE = "docker-compose.prod.yml";
 
 /**
- * Set by compose itself rather than by us: `DOCKER_IMAGE` has a default in the `x-app` anchor and
- * `SOURCE_COMMIT` is what Coolify's builder exports for the image tag and the build arg. Sending
- * either as an application environment variable would override the deploy's own.
+ * Interpolated by the compose file but never part of this step's bulk PATCH.
+ *
+ * `DOCKER_IMAGE` has a default in the `x-app` anchor. `SOURCE_COMMIT` is written by the `deploy`
+ * step instead, once per deployment and against the commit being deployed — it is not one of the
+ * app's secrets, so it belongs neither in `secretsHash` nor in a PATCH that a rotation replays.
+ * Both are excused here rather than counted as drift.
  */
 export const COMPOSE_PROVIDED_ENV = ["DOCKER_IMAGE", "SOURCE_COMMIT"] as const;
 
@@ -341,6 +344,10 @@ async function findOrCreateApplication(
     docker_compose_domains: [{ name: COMPOSE_DOMAIN_SERVICE, domain: `https://${fqdn}` }],
     // The `deploy` step is what deploys, once the environment is set and the database migrated.
     instant_deploy: false,
+    // Coolify's default is true: a push to main would then deploy whatever arrived against
+    // whatever `SOURCE_COMMIT` happened to hold, and the app would report a version it is not
+    // running. Every deploy goes through `hf` — `hf new`'s tenth step, or `hf deploy <name>`.
+    is_auto_deploy_enabled: false,
   });
   await context.state.patch({ coolify: { appUuid: created.uuid } });
   context.io.out(`${name}: created the Coolify application at https://${fqdn}`);

@@ -88,6 +88,24 @@ export interface CoolifyEnvironmentVariable {
   is_literal?: boolean;
   is_multiline?: boolean;
   is_shown_once?: boolean;
+  /**
+   * Whether the builder interpolates the variable, and whether the containers get it.
+   *
+   * Both default true in Coolify's UI and neither is in the document's *request* schemas —
+   * only in its `EnvironmentVariable` model — but the box accepts and stores them (verified
+   * against 4.3.21). `SOURCE_COMMIT` needs both: it is the compose image tag and build arg as
+   * well as the `HF_BUILD_SHA` three services read.
+   */
+  is_buildtime?: boolean;
+  is_runtime?: boolean;
+}
+
+/** One entry of `GET /applications/{uuid}/envs`, narrowed to what an upsert has to match on. */
+export interface CoolifyEnvEntry {
+  uuid: string;
+  key: string;
+  value?: string;
+  is_preview?: boolean;
 }
 
 export interface CoolifyDeploymentRequest {
@@ -197,6 +215,30 @@ export class CoolifyClient {
       // The app's whole environment goes out in this one call, and a 422 names the variables it
       // rejected by quoting them.
       secrets: data.map((variable) => variable.value),
+    });
+  }
+
+  /** Every environment variable on the application, preview and non-preview alike. */
+  async listEnvs(appUuid: string): Promise<CoolifyEnvEntry[]> {
+    return await this.request({ method: "GET", path: `/applications/${segment(appUuid)}/envs` });
+  }
+
+  async createEnv(appUuid: string, variable: CoolifyEnvironmentVariable): Promise<{ uuid: string }> {
+    return await this.request({
+      method: "POST",
+      path: `/applications/${segment(appUuid)}/envs`,
+      body: variable,
+      secrets: [variable.value],
+    });
+  }
+
+  /** Keyed by `key` — and by `is_preview`, which is why an upsert sends the entry's own flag. */
+  async updateEnv(appUuid: string, variable: CoolifyEnvironmentVariable): Promise<unknown> {
+    return await this.request({
+      method: "PATCH",
+      path: `/applications/${segment(appUuid)}/envs`,
+      body: variable,
+      secrets: [variable.value],
     });
   }
 
