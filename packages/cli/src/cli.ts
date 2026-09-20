@@ -73,7 +73,8 @@ export const USAGE = `hf — the hyperfixation CLI
 
   hf doctor [name]          every deployed app in the state cache, or one: /api/status under its
                             read token, the deployed version against main, E006 as the app role,
-                            the last restore check, and open core-bump PRs. Exits 1 on any finding
+                            the box's connection slots, the worker's advisory lock, the last
+                            restore check, and open core-bump PRs. Exits 1 on any finding
 
   hf gen [generator]        the app's turbo generators
 
