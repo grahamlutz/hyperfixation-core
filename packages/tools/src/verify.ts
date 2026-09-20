@@ -32,7 +32,7 @@ import {
 
 const CORE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 
-const USAGE = `Usage: pnpm release:verify <version> [--registry <url>] [--root <dir>]
+const USAGE = `Usage: pnpm release:verify <version> [--registry <url>] [--root <dir>] [--no-fetch]
 
 The checks a release needs whoever did the publishing: the release commit's fixed group is at
 <version> with no workspace: ranges surviving \`pnpm pack\`, every package's version document
@@ -45,12 +45,16 @@ A rebuild of the release commit in a throwaway worktree is still packed and comp
 attested version a byte difference is reported as a warning: the attestation already pins the
 tarball, and a rebuild only ever proved that this machine agreed with the publisher's.
 For a version with no attestation (0.1.0, 0.1.1) that rebuild comparison is the only check there
-is, and a difference fails. See the README.`;
+is, and a difference fails. \`origin/main\` and the tags are fetched first, because the release
+commit is resolved from them; --no-fetch verifies against the refs the checkout already has.
+See the README.`;
 
 export type VerifyOptions = {
   readonly version: string;
   readonly root: string;
   readonly registry: string;
+  /** Refresh `origin/main` and the tags before resolving the release commit. Default: true. */
+  readonly fetch?: boolean;
 };
 
 export type VerifyDeps = {
@@ -75,6 +79,18 @@ function capture(exec: Exec, root: string, args: readonly string[]): string | un
   const result = exec("git", args, { cwd: root, capture: true });
   const output = result.stdout.trim();
   return result.status === 0 && output !== "" ? output : undefined;
+}
+
+/**
+ * Every ref the release commit is resolved from is local, so a checkout that has not fetched
+ * since the publish resolves the wrong commit and then reports the whole group as mismatched.
+ */
+export function fetchReleaseRefs(exec: Exec, root: string): void {
+  if (exec("git", ["fetch", "origin", "main", "--tags", "--quiet"], { cwd: root }).status !== 0) {
+    throw new Error(
+      `git fetch origin main --tags failed in ${root}. The release commit is resolved from origin/main and the tags, and a stale ref reports the wrong commit's tarballs as mismatched; fix the fetch, or pass --no-fetch to accept the refs this checkout already has.`,
+    );
+  }
 }
 
 /**
@@ -147,7 +163,7 @@ async function originProblems(
       // Pre-OIDC: nothing says where the tarball came from, so a rebuild that disagrees is all
       // the evidence there is and it has to count.
       if (difference !== undefined) {
-        problems.push(`${difference} — and ${comparison.name}@${options.version} has no provenance attestation, so the rebuild is the only check`);
+        problems.push(`${difference} — and ${comparison.name}@${options.version} has no provenance attestation, so the rebuild is the only check (rebuilt from ${commit.sha}, ${commit.source})`);
       }
       continue;
     }
@@ -165,7 +181,7 @@ async function originProblems(
       ),
     );
     if (difference !== undefined) {
-      warnings.push(`${difference} — informational: the provenance attestation covers the registry's tarball, so this is a difference between the two builds, not a bad publish`);
+      warnings.push(`${difference} — informational: the provenance attestation covers the registry's tarball, so this is a difference between the two builds, not a bad publish (rebuilt from ${commit.sha}, ${commit.source})`);
     }
     if (provenance.runUrl !== undefined) deps.log(`attested  ${comparison.name} ${provenance.runUrl}`);
   }
@@ -182,6 +198,7 @@ export async function verify(
   options: VerifyOptions,
   deps: VerifyDeps,
 ): Promise<VerifyReport> {
+  if (options.fetch !== false) fetchReleaseRefs(deps.exec, options.root);
   const commit = resolveReleaseCommit(deps.exec, options.root, options.version);
   const work = await mkdtemp(join(tmpdir(), "hf-verify-"));
   const checkout = join(work, "core");
@@ -226,6 +243,7 @@ async function main(): Promise<number> {
     options: {
       registry: { type: "string", default: NPMJS_REGISTRY },
       root: { type: "string", default: CORE_ROOT },
+      "no-fetch": { type: "boolean", default: false },
       help: { type: "boolean", default: false },
     },
   });
@@ -238,6 +256,7 @@ async function main(): Promise<number> {
     version: positionals[0],
     root: resolve(values.root),
     registry: values.registry,
+    fetch: !values["no-fetch"],
   };
   const report = await verify(options, {
     exec: spawnExec,
