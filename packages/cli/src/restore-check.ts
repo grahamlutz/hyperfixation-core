@@ -10,12 +10,13 @@ import {
   pgAdminUser,
   postgresContainers,
   requireOperatorConfig,
+  DEFAULT_PG_ADMIN_USER,
 } from "./config.js";
 import {
+  findPostgresContainer,
   openDatabase,
   openDatabaseUrl,
   redactPasswords,
-  DEFAULT_POSTGRES_PORT,
   type AdminCredentials,
   type Database,
 } from "./database.js";
@@ -32,8 +33,6 @@ const MAX_IDENTIFIER_BYTES = 63;
 
 /** Older than this and the dump gets a warning line; it never changes the exit code. */
 export const STALE_DUMP_HOURS = 36;
-
-const CLUSTER_ADMIN_DATABASE = "postgres";
 
 export type RestoreVerdict = "ok" | "mismatch" | "live only" | "restored only";
 
@@ -72,20 +71,26 @@ export interface RestoreCheckOptions {
   app: string;
   state: AppStateStore;
   source: BackupSource;
-  /** Where `pg_restore` runs: the box, or this machine in a test. */
+  /** Where the dump file is and where `docker` is run: the box, or this machine in a test. */
   runner: Runner;
   /** How the scratch database is created and both sides are counted. */
   database: Database | string;
   /**
-   * The cluster's admin URL **as the runner sees it**, for `pg_restore`.
+   * The Postgres container `pg_restore` runs inside.
    *
-   * Not the same address as `database`: the laptop reaches the cluster through an `ssh -L`
-   * forward onto a local port, and a `pg_restore` running on the far side of that forward has to
-   * dial the box's own loopback. Defaults to `database`'s URL, which is what a test wants when
-   * both sides are the same machine.
+   * The box host has no Postgres client tools — Postgres runs only in Coolify's container — so a
+   * `pg_restore` on the host exits 127. The dump is the host's and is not mounted into the
+   * container, so it goes down `docker exec -i`'s stdin.
+   */
+  container: string;
+  /** The superuser inside the container; `HF_PG_ADMIN_USER`, default `postgres`. */
+  adminUser?: string;
+  /**
+   * @deprecated Unused: `pg_restore` no longer dials an address, it runs beside the server inside
+   * `container`. Removed in 0.2.0.
    */
   restoreAdminUrl?: string;
-  /** The `pg_restore` binary on the runner. */
+  /** The `pg_restore` binary inside the container. */
   pgRestorePath?: string;
   now?: Date;
 }
@@ -124,12 +129,11 @@ export async function restoreCheck(options: RestoreCheckOptions): Promise<Restor
   const clusterUrl = db.adminUrl();
   if (clusterUrl === undefined) {
     throw new RestoreCheckError(
-      `a restore cannot be run over the ${db.kind} transport: pg_restore needs an address. ` +
-        "Name the Postgres container — HF_DB_CONTAINER, or HF_COOLIFY_POSTGRES_UUID — so the " +
-        "tunnel can discover one.",
+      `a restore cannot be checked over the ${db.kind} transport: counting the restored side ` +
+        "needs an address a client library can dial. Name the Postgres container — " +
+        "HF_DB_CONTAINER, or HF_COOLIFY_POSTGRES_UUID — so the tunnel can discover one.",
     );
   }
-  const restoreTarget = urlOnto(options.restoreAdminUrl ?? clusterUrl, scratchDatabase);
 
   const now = options.now ?? new Date();
   const dumpAgeHours = (now.getTime() - dump.takenAt.getTime()) / 3_600_000;
@@ -160,7 +164,7 @@ export async function restoreCheck(options: RestoreCheckOptions): Promise<Restor
         await scratch.query(
           `GRANT CREATE, USAGE ON SCHEMA public TO ${quoteIdent(names.migratorRole)}`,
         );
-        await runRestore(options, restoreTarget, names.migratorRole, dump.path);
+        await runRestore(options, scratchDatabase, names.migratorRole, dump.path);
         rows = compare(await countTables(db, names.databaseName), await countTables(scratch));
       } finally {
         await scratch.close();
@@ -186,7 +190,12 @@ export async function restoreCheck(options: RestoreCheckOptions): Promise<Restor
   }
 }
 
-/** The argv `restoreCheck` runs — the array the test asserts against. */
+/**
+ * The argv `restoreCheck` runs — the array the test asserts against.
+ *
+ * @deprecated The box host has no `pg_restore`; the restore runs inside the Postgres container.
+ * Use `pgRestoreInContainerArgv`. Removed in 0.2.0.
+ */
 export function pgRestoreArgv(options: {
   url: string;
   role: string;
@@ -196,9 +205,6 @@ export function pgRestoreArgv(options: {
   return [
     options.pgRestorePath ?? "pg_restore",
     "--no-owner",
-    // Every object comes out owned by the migrator, as in the live database. `--no-comments`
-    // because a dump's `COMMENT ON EXTENSION` belongs to the admin that created the extension,
-    // and a comment nobody may set is not a restore failure.
     "--no-comments",
     `--role=${options.role}`,
     "--dbname",
@@ -207,22 +213,71 @@ export function pgRestoreArgv(options: {
   ];
 }
 
+/**
+ * The argv `restoreCheck` runs — the array the test asserts against.
+ *
+ * No `--dbname` URL: inside the container the server is on the local socket, so the admin user
+ * and the database name are all it takes and no password crosses an argv. The dump arrives on
+ * stdin, which is why there is no file argument either.
+ */
+export function pgRestoreInContainerArgv(options: {
+  container: string;
+  adminUser: string;
+  database: string;
+  role: string;
+  pgRestorePath?: string;
+}): string[] {
+  return [
+    "docker",
+    "exec",
+    "-i",
+    options.container,
+    options.pgRestorePath ?? "pg_restore",
+    "--no-owner",
+    // Every object comes out owned by the migrator, as in the live database. `--no-comments`
+    // because a dump's `COMMENT ON EXTENSION` belongs to the admin that created the extension,
+    // and a comment nobody may set is not a restore failure.
+    "--no-comments",
+    `--role=${options.role}`,
+    "-U",
+    options.adminUser,
+    "-d",
+    options.database,
+  ];
+}
+
 async function runRestore(
   options: RestoreCheckOptions,
-  url: string,
+  database: string,
   role: string,
   file: string,
 ): Promise<void> {
-  const argv = pgRestoreArgv({ url, role, file, pgRestorePath: options.pgRestorePath });
-  const result = await options.runner.exec(argv);
-  if (result.code !== 0) {
-    // `url` carries the cluster's admin password, and so does anything pg_restore echoed of it.
-    throw new RestoreCheckError(
-      `pg_restore exited ${String(result.code)} restoring ${file}: ` +
-        redactPasswords(result.stderr.trim()),
-    );
-  }
+  const { container } = options;
+  const argv = pgRestoreInContainerArgv({
+    container,
+    adminUser: options.adminUser ?? DEFAULT_PG_ADMIN_USER,
+    database,
+    role,
+    pgRestorePath: options.pgRestorePath,
+  });
+  const result = await options.runner.exec(argv, { inputFile: file });
+  if (result.code === 0) return;
+
+  // Anything `pg_restore` echoed of a connection string carries the cluster's admin password.
+  const stderr = redactPasswords(result.stderr.trim());
+  throw new RestoreCheckError(
+    `pg_restore exited ${String(result.code)} restoring ${file} in ${container}: ${stderr}` +
+      (result.code === NOT_FOUND_EXIT
+        ? ` — exit ${String(NOT_FOUND_EXIT)} means "command not found". The box host has no ` +
+          "Postgres client tools; only the container does. Check that docker is on the box's " +
+          `PATH and that ${container} is the Postgres container (HF_DB_CONTAINER, or ` +
+          "HF_COOLIFY_POSTGRES_UUID)."
+        : ""),
+  );
 }
+
+/** A shell's, and `docker exec`'s, "command not found". */
+const NOT_FOUND_EXIT = 127;
 
 /**
  * Row counts for every table the app's data lives in: `hf_*`, plus every table carrying
@@ -354,7 +409,8 @@ export async function restoreCheckApp(
 
   const runner = createSshRunner({ host: HF_SSH_HOST });
   const admin: AdminCredentials = { user: pgAdminUser(config), password: env.PGPASSWORD };
-  const db = await openDatabase(runner, { admin, containers: postgresContainers(config) });
+  const containers = postgresContainers(config);
+  const db = await openDatabase(runner, { admin, containers });
 
   try {
     return await restoreCheck({
@@ -366,7 +422,8 @@ export async function restoreCheckApp(
           : createLocalDirectoryBackupSource({ runner, directory: options.backupDir }),
       runner,
       database: db,
-      restoreAdminUrl: boxAdminUrl(admin, db.boxAddress),
+      container: await restoreContainer(runner, db, containers),
+      adminUser: admin.user,
     });
   } finally {
     await db.close();
@@ -374,22 +431,26 @@ export async function restoreCheckApp(
 }
 
 /**
- * The cluster as the box itself sees it, where `pg_restore` runs.
+ * The container `pg_restore` runs inside.
  *
- * `address` is whatever the tunnel settled on: with 5432 unpublished the box's loopback is no more
- * a listener for `pg_restore` than for the forward, and the container's address on the docker
- * network is what both have to dial.
+ * `openDatabase` already knows it whenever the box's loopback had no listener, which is the box
+ * Coolify builds; a box that does publish 5432 answers on the loopback and never looks, so the
+ * discovery runs here instead of leaving the check with nowhere to restore.
  */
-function boxAdminUrl(
-  admin: AdminCredentials,
-  address: { host: string; port: number } | undefined,
-): string {
-  const url = new URL(`postgresql://${address?.host ?? "127.0.0.1"}`);
-  url.port = String(address?.port ?? DEFAULT_POSTGRES_PORT);
-  url.username = encodeURIComponent(admin.user);
-  if (admin.password !== undefined) url.password = encodeURIComponent(admin.password);
-  url.pathname = `/${CLUSTER_ADMIN_DATABASE}`;
-  return url.toString();
+async function restoreContainer(
+  runner: Runner,
+  db: Database,
+  containers: readonly string[],
+): Promise<string> {
+  if (db.container !== undefined) return db.container;
+  if (containers.length === 0) {
+    throw new RestoreCheckError(
+      "pg_restore has to run inside the Postgres container — the box host has no Postgres " +
+        "client tools — and no container was named. Set HF_DB_CONTAINER, or " +
+        "HF_COOLIFY_POSTGRES_UUID, in the operator config.",
+    );
+  }
+  return (await findPostgresContainer(runner, containers)).container;
 }
 
 function urlOnto(connectionString: string, database: string): string {
