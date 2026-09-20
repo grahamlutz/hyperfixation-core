@@ -8,7 +8,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src",
     "test": "vitest run --passWithNoTests",
-    "template-check": "tsx src/template-check.ts"
+    "template-check": "tsx src/template-check.ts",
+    "plan-sync": "tsx src/plan-sync.ts"
   },
   "devDependencies": {
     "@hyperfixation/eslint-config": "workspace:*",
