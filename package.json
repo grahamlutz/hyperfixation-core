@@ -12,6 +12,7 @@
     "api-extractor": "turbo run api-extractor",
     "api-extractor:update": "turbo run api-extractor:update",
     "test": "turbo run test",
+    "template:check": "pnpm --filter @hyperfixation/tools run template-check",
     "changeset": "changeset"
   },
   "devDependencies": {

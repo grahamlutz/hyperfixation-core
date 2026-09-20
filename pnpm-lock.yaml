@@ -484,6 +484,21 @@ importers:
         specifier: ^10.10.0
         version: 10.10.0(supports-color@8.1.1)
 
+  packages/tools:
+    devDependencies:
+      '@hyperfixation/eslint-config':
+        specifier: workspace:*
+        version: link:../eslint-config
+      eslint:
+        specifier: ^10.10.0
+        version: 10.10.0(supports-color@8.1.1)
+      tsx:
+        specifier: 4.23.13
+        version: 4.23.13
+      yaml:
+        specifier: 2.9.1
+        version: 2.9.1
+
   packages/workflows:
     dependencies:
       '@dbos-inc/dbos-sdk':

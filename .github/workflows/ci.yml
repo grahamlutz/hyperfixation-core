@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  merge_group:
 
 jobs:
   changeset:
@@ -55,3 +56,56 @@ jobs:
       # its committed `etc/*.api.md` and fails on any difference, so its failure means
       # "the public API changed" rather than "the code is broken".
       - run: pnpm turbo api-extractor
+
+  # The template, against this PR's packages rather than the published ones. `template:check`
+  # packs every publishable package here and installs the tarballs over the template's
+  # `@hyperfixation/*` specs, so a change that compiles in core and does not in an app fails
+  # here instead of on the template's main.
+  downstream:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      # The template's tests provision a database per test off this admin connection, exactly
+      # as the `test` job above and the template's own CI do.
+      HF_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+      HF_TEMPLATE_DIR: ${{ github.workspace }}/hyperfixation-template
+    # Two checkouts, so neither is the workspace root — `actions/checkout` refuses a `path`
+    # outside it, which is why the sibling layout `HF_TEMPLATE_DIR` defaults to is built here
+    # rather than inherited.
+    defaults:
+      run:
+        working-directory: hyperfixation-core
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: hyperfixation-core
+      # Public, so no token. Pinned to `main`: the question this job answers is whether the
+      # template as shipped survives this PR.
+      - uses: actions/checkout@v4
+        with:
+          repository: grahamlutz/hyperfixation-template
+          ref: main
+          path: hyperfixation-template
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.4.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: hyperfixation-core/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm template:check

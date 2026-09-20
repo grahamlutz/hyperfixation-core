@@ -82,6 +82,10 @@ pnpm api-extractor  # fails if a public API changed without updating etc/*.api.m
 If you change a public API, regenerate the reports with `pnpm api-extractor:update` and add a
 changeset with `pnpm changeset`.
 
+To ask whether an app survives the change, `pnpm template:check` packs these packages and runs
+the sibling template checkout's own typecheck and tests against the tarballs (`HF_TEMPLATE_DIR`
+to point it elsewhere, `--full` to add its lint and `next build`). CI runs it as `downstream`.
+
 ## Roadmap
 
 | Phase | Scope | Status |
