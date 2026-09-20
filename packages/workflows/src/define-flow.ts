@@ -49,6 +49,9 @@ export const SUPERSEDED_MARKER = "hf-run: superseded attempt, the flow was not r
 
 const flows = new Map<string, Flow<never, unknown>>();
 
+/** Per name, what `fingerprint` made of the definition that got in first. */
+const fingerprints = new Map<string, string>();
+
 /** The one source of a queue name for an enqueue, and of a flow name for `runs.start`. */
 export function definedFlows(): ReadonlyMap<string, Flow<never, unknown>> {
   return flows;
@@ -67,7 +70,17 @@ export function defineFlow<I, O>(
   fn: (input: I, run: RunContext) => Promise<O>,
   options: DefineFlowOptions,
 ): Flow<I, O> {
-  if (flows.has(name)) throw new DuplicateFlow(name);
+  // A second call with the *same* definition is one definition reaching here twice, not two
+  // flows fighting over a name: Next instantiates the app's `src/flows/*.ts` once per module
+  // layer — the rsc page layer and the server-action layer of one authenticated request — while
+  // this package stays external and singular, so the registry sees both. That is the first
+  // instance's flow, already registered with DBOS if this is a worker; hand it back rather than
+  // registering it again. Two different definitions of one name are still a collision.
+  const existing = flows.get(name);
+  if (existing !== undefined) {
+    if (fingerprints.get(name) !== fingerprint(fn, options)) throw new DuplicateFlow(name);
+    return existing as unknown as Flow<I, O>;
+  }
   if (!QUEUES.some((queue) => queue.name === options.queue)) {
     throw new UnknownQueue(name, options.queue);
   }
@@ -113,7 +126,30 @@ export function defineFlow<I, O>(
 
   const flow: Flow<I, O> = { name, queue: options.queue, workflow };
   flows.set(name, flow as unknown as Flow<never, unknown>);
+  fingerprints.set(name, fingerprint(fn, options));
   return flow;
+}
+
+/**
+ * What makes two definitions of a name the same definition. Two module copies of one app file
+ * produce distinct function objects with identical source, so identity is useless here and the
+ * text is what there is; a closed-over value that differs between the copies is invisible to it,
+ * which is the known limit of the check.
+ */
+function fingerprint(fn: (...args: never[]) => unknown, options: DefineFlowOptions): string {
+  // Length-prefixed, because a function's source can contain whatever a separator would be.
+  const json = stableJson(options);
+  return `${json.length}:${json}${fn.toString()}`;
+}
+
+/** `JSON.stringify` with object keys sorted, so key order is not part of the comparison. */
+function stableJson(value: unknown): string {
+  if (typeof value !== "object" || value === null) return JSON.stringify(value) ?? "undefined";
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) =>
+    a < b ? -1 : a > b ? 1 : 0,
+  );
+  return `{${entries.map(([key, inner]) => `${JSON.stringify(key)}:${stableJson(inner)}`).join(",")}}`;
 }
 
 function messageOf(error: unknown): string {
