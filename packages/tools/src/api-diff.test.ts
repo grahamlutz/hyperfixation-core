@@ -6,6 +6,7 @@ import {
   apiChanges,
   changesetBump,
   checkApiDiff,
+  formatFindings,
   nextMinor,
   normalizeSignature,
   parseApiReport,
@@ -320,6 +321,86 @@ export type Verdict = "approved" | "rejected";
     );
     expect(apiChanges(pair(inserted))).toEqual([
       expect.objectContaining({ symbol: "flowOriginRef", kind: "retyped" }),
+    ]);
+  });
+});
+
+describe("a const holding a set of string literals", () => {
+  /** How `packages/cli/etc/cli.api.md` prints `hf`'s command list and the usage text beside it. */
+  const commands = (tuple: string, usage: string): string =>
+    report(`// @public
+export const COMMANDS: readonly ${tuple};
+
+// @public
+export const USAGE = "${usage}";
+`);
+
+  const BEFORE = commands(
+    '["new", "migrate", "deploy"]',
+    "hf new <name>\\n  hf migrate\\n  hf deploy <name>\\n",
+  );
+
+  const cli = (head: string): ReportPair => ({
+    package: "@hyperfixation/cli",
+    version: "0.1.4",
+    file: "packages/cli/etc/cli.api.md",
+    baseline: BEFORE,
+    head,
+  });
+
+  const ADDED = commands(
+    '["new", "migrate", "deploy", "doctor"]',
+    "hf new <name>\\n  hf migrate\\n  hf deploy <name>\\n  hf doctor\\n",
+  );
+  const REORDERED = commands(
+    '["deploy", "new", "migrate"]',
+    "hf deploy <name>\\n  hf new <name>\\n  hf migrate\\n",
+  );
+  const DROPPED = commands(
+    '["new", "migrate"]',
+    "hf new <name>\\n  hf migrate\\n  hf deploy <name>\\n",
+  );
+
+  it("passes an added command, which is what #98 had to excuse", () => {
+    expect(apiChanges(cli(ADDED))).toEqual([]);
+    expect(checkApiDiff({ reports: [cli(ADDED)], deprecations: [], bump: "patch" })).toEqual([]);
+  });
+
+  it("passes a tuple whose members only moved", () => {
+    expect(apiChanges(cli(REORDERED))).toEqual([]);
+  });
+
+  it("fails a removed command, naming it", () => {
+    expect(apiChanges(cli(DROPPED))).toEqual([
+      expect.objectContaining({ symbol: "COMMANDS", literalMember: "deploy", kind: "removed" }),
+    ]);
+    const findings = checkApiDiff({ reports: [cli(DROPPED)], deprecations: [], bump: "patch" });
+    expect(findings).toHaveLength(1);
+    expect(formatFindings(findings)).toContain("COMMANDS.deploy removed");
+    expect(findings[0]?.problems.join("\n")).toContain(
+      "no deprecations.json entry for @hyperfixation/cli COMMANDS.deploy",
+    );
+    expect(findings[0]?.problems.join("\n")).toContain("needs a minor changeset");
+  });
+
+  it("passes a removed command announced as COMMANDS.<name>, with no tag to carry", () => {
+    const entry: Deprecation = {
+      package: "@hyperfixation/cli",
+      symbol: "COMMANDS.deploy",
+      since: "0.1.4",
+      removeIn: "0.2.0",
+    };
+    expect(checkApiDiff({ reports: [cli(DROPPED)], deprecations: [entry], bump: "minor" })).toEqual(
+      [],
+    );
+  });
+
+  it("keeps excusing the usage text on its own, and reports a tuple replaced wholesale", () => {
+    const usageOnly = commands('["new", "migrate", "deploy"]', "a rewritten usage screen\\n");
+    expect(apiChanges(cli(usageOnly))).toEqual([]);
+    const widened = commands("string[]", "hf new <name>\\n  hf migrate\\n  hf deploy <name>\\n");
+    expect(apiChanges(cli(widened))).toEqual([
+      expect.objectContaining({ symbol: "COMMANDS", kind: "retyped" }),
     ]);
   });
 });
