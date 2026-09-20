@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { parseDownstream } from "./downstream-matrix.js";
 import {
+  awaitInstallable,
   httpRegistryClient,
   NPMJS_REGISTRY,
   packPackages,
@@ -18,8 +19,8 @@ import {
   versionMismatches,
   workspaceRangeLeftovers,
   type Exec,
+  type PackumentRegistryClient,
   type PropagationWait,
-  type RegistryClient,
 } from "./registry.js";
 
 const CORE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -44,6 +45,9 @@ const BOT_EMAIL = "hyperfixation-bot@users.noreply.github.com";
 
 export class ReleaseError extends Error {}
 
+/** One downstream repo refusing its bump: the other repos are still processed. */
+export class BumpError extends ReleaseError {}
+
 export type ReleaseCIOptions = {
   readonly root: string;
   readonly registry: string;
@@ -52,7 +56,7 @@ export type ReleaseCIOptions = {
 
 export type ReleaseCIDeps = {
   readonly exec: Exec;
-  readonly registry: RegistryClient;
+  readonly registry: PackumentRegistryClient;
   readonly integrity: (tarball: string) => Promise<string>;
   readonly log: (line: string) => void;
   /** The bot App's installation token: clones, pushes and `gh` calls on the downstream repos. */
@@ -117,10 +121,46 @@ async function hyperfixationDependencies(checkout: string): Promise<string[]> {
     .sort();
 }
 
+const RANGE_PREFIX = /^[\^~=v><\s]*/u;
+
+/** Every `@hyperfixation/*` mention the lockfile carries, as `name@version`. */
+const LOCK_MENTION = /@hyperfixation\/(?<name>[a-z-]+)@(?<version>\d[^\s'":,()]*)/gu;
+
+/**
+ * What still names another version after the update — the check that would have caught the 0.1.8
+ * bump, whose `package.json` kept `admin`, `auth` and `cli` at `^0.1.7`. The app's own
+ * `core-version.test.ts` catches it too, but only after a broken PR has been opened.
+ */
+async function bumpLeftovers(checkout: string, version: string): Promise<string[]> {
+  const raw = JSON.parse(await readFile(join(checkout, "package.json"), "utf8")) as {
+    dependencies?: Record<string, string>;
+    devDependencies?: Record<string, string>;
+  };
+  const leftovers: string[] = [];
+  for (const field of ["dependencies", "devDependencies"] as const) {
+    for (const [name, spec] of Object.entries(raw[field] ?? {})) {
+      if (!name.startsWith("@hyperfixation/")) continue;
+      if (spec.replace(RANGE_PREFIX, "") !== version) {
+        leftovers.push(`package.json ${field}["${name}"] is ${spec}, not ${version}`);
+      }
+    }
+  }
+  const lockfile = join(checkout, "pnpm-lock.yaml");
+  if (existsSync(lockfile)) {
+    for (const match of (await readFile(lockfile, "utf8")).matchAll(LOCK_MENTION)) {
+      const { name, version: resolved } = match.groups as { name: string; version: string };
+      if (resolved !== version) {
+        leftovers.push(`pnpm-lock.yaml resolves @hyperfixation/${name} to ${resolved}`);
+      }
+    }
+  }
+  return [...new Set(leftovers)];
+}
+
 /**
  * One bump PR on one downstream repo, or nothing. Every `@hyperfixation/*` moves together —
  * a mixed set is a combination nothing was tested against — which is why the whole set goes to
- * `pnpm update --latest` and the branch is named for the release rather than for a package.
+ * one pinned `pnpm update` and the branch is named for the release rather than for a package.
  */
 async function bumpDownstream(
   repo: string,
@@ -153,10 +193,18 @@ async function bumpDownstream(
       return false;
     }
     must(deps.exec, checkout, "git", ["checkout", "-b", branch]);
-    // Moves the caret in package.json and the lockfile together. It resolves a version minutes
-    // old only because the app's `pnpm-workspace.yaml` keeps `@hyperfixation/*` in
-    // `minimumReleaseAgeExclude`; without it pnpm 12 refuses anything published under 24h ago.
-    must(deps.exec, checkout, "pnpm", ["update", "--latest", ...names]);
+    // Moves the caret in package.json and the lockfile together. Pinned to the exact version
+    // rather than `--latest`: an exact pin cannot quietly resolve the version the packument still
+    // names. It resolves a version minutes old only because the app's `pnpm-workspace.yaml` keeps
+    // `@hyperfixation/*` in `minimumReleaseAgeExclude`; without it pnpm 12 refuses anything
+    // published under 24h ago.
+    must(deps.exec, checkout, "pnpm", ["update", `@hyperfixation/*@${version}`]);
+    const leftovers = await bumpLeftovers(checkout, version);
+    if (leftovers.length > 0) {
+      throw new BumpError(
+        `${repo} is not wholly on ${version} after the update:\n    ${leftovers.join("\n    ")}`,
+      );
+    }
     if (capture(deps.exec, checkout, "git", ["status", "--porcelain"]).trim() === "") {
       deps.log(`bump      ${repo} is already at ${version}`);
       return false;
@@ -288,11 +336,39 @@ export async function releaseCI(
           "the hyperfixation-bot App's installation token, or the bump PRs cannot be opened.",
       );
     }
+    if (downstream.length > 0) {
+      const { misses, waitedMs } = await awaitInstallable(
+        deps.registry,
+        order,
+        version,
+        deps.wait ?? {},
+      );
+      if (misses.length > 0) {
+        throw new ReleaseError(
+          `The registry is still not serving ${version} to installers after ` +
+            `${Math.round(waitedMs / 1000)}s:\n  ${misses.map((miss) => miss.reason).join("\n  ")}\n` +
+            "A bump PR opened now would pin a mixed @hyperfixation/* set; re-run this job.",
+        );
+      }
+      deps.log(`\nAll ${order.length} abbreviated packuments serve ${version}.`);
+    }
+
     const bumped: string[] = [];
     const untouched: string[] = [];
+    const refused: string[] = [];
     for (const repo of downstream) {
-      if (await bumpDownstream(repo, version, deps, options.root)) bumped.push(repo);
-      else untouched.push(repo);
+      try {
+        if (await bumpDownstream(repo, version, deps, options.root)) bumped.push(repo);
+        else untouched.push(repo);
+      } catch (error) {
+        if (!(error instanceof BumpError)) throw error;
+        deps.log(`bump      ${error.message}`);
+        refused.push(error.message);
+      }
+    }
+    // Reported after the loop so one refusing repo does not cost the others their PR.
+    if (refused.length > 0) {
+      throw new ReleaseError(`No bump PR was opened on:\n  ${refused.join("\n  ")}`);
     }
 
     return { version, published, skipped, tagged: exists ? undefined : tag, bumped, untouched };

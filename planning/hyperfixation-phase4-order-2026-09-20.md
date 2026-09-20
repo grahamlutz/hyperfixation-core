@@ -105,6 +105,17 @@ No `NPM_TOKEN` anywhere; `release:publish` and `release:rehearse` stay until R2 
 **Done:** `publish-ci.test.ts` against a fake registry and exec — skips a 200 version, refuses a `workspace:` leftover,
 publishes in dependency order, dispatches once per line; the workflow's dry path (`--dry-run`) green on a branch push.
 
+> **Finding — a per-version `200` does not mean an installer can see the version.** Release `0.1.8` opened
+> `core-bump/0.1.8` on the template (#49) with `admin`, `auth` and `cli` still at `^0.1.7`: all nine per-version
+> documents were `200`, but the *abbreviated packument* — the `application/vnd.npm.install-v1+json` document pnpm
+> resolves a range from, served by a different npmjs cache — still named `0.1.7` for the three packages published last.
+> `demo-app`'s and `demo-two`'s bumps, a minute later, were complete; the template is simply first in `downstream.txt`.
+> The template's `core-version.test.ts` caught it (`@hyperfixation/core is installed at 0.1.7 and 0.1.8`) and #49 was
+> repaired by hand. `release:ci` now waits for the packument of all nine, with the same three-minute backoff, before
+> touching any downstream repo; pins the update (`pnpm update '@hyperfixation/*@<version>'`) so stale metadata cannot
+> resolve to it; and asserts the updated `package.json` and lockfile before committing, so the broken PR is never
+> opened rather than caught downstream.
+
 ## R2 — First OIDC release, `0.1.2` (manual observation; after R0, R1, A1) — ✅ Done
 
 Merge the `Version Packages` PR the action opens (its CI must run — that is concern 1's proof). Record here: the run
@@ -134,6 +145,12 @@ one dispatch per `downstream.txt` line. Then delete `publish.ts`/`rehearse.ts` a
 >
 > **Three more releases went the same way on 2026-09-20** — `0.1.3`, `0.1.5` and `0.1.6`, each from a merged
 > `Version Packages` PR, each attested and tagged by the workflow with nothing done by hand.
+
+> **Finding — the three-minute 404 backoff covers only the document `verify` reads.** The publish and verify steps ask
+> for per-version documents, which npmjs serves within about a minute; the bump step's `pnpm update` reads the
+> abbreviated packument, which at `0.1.8` was minutes staler still (R1's finding). Anything added here that depends on
+> what the registry *serves an installer* needs its own wait — `awaitInstallable` in `registry.ts`, beside
+> `awaitVersionDocument` — not this one.
 
 ## A1 — `api-diff` and `deprecations.json` (core; ∥ R1) — ✅ Done (core #79)
 

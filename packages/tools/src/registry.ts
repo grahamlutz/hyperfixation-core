@@ -33,9 +33,25 @@ export const spawnExec: Exec = (command, args, options) => {
 
 export type VersionDocument = { readonly status: number; readonly integrity?: string };
 
+/** What `Accept: application/vnd.npm.install-v1+json` serves: the document an installer resolves from. */
+export type AbbreviatedPackument = {
+  readonly status: number;
+  readonly versions?: readonly string[];
+  readonly latest?: string;
+};
+
 export interface RegistryClient {
   readonly url: string;
   versionDocument(name: string, version: string): Promise<VersionDocument>;
+}
+
+/**
+ * A client that can also read the abbreviated packument. A per-version document being a `200`
+ * does not mean an installer can see the version: npmjs serves the two from different caches,
+ * and the 0.1.8 release opened a bump PR in the minute the packument was still stale.
+ */
+export interface PackumentRegistryClient extends RegistryClient {
+  abbreviatedPackument(name: string): Promise<AbbreviatedPackument>;
 }
 
 /**
@@ -47,7 +63,11 @@ export function versionDocumentUrl(registry: string, name: string, version: stri
   return `${registry.replace(/\/+$/, "")}/${name.replace("/", "%2f")}/${version}`;
 }
 
-export function httpRegistryClient(url: string = NPMJS_REGISTRY): RegistryClient {
+export function abbreviatedPackumentUrl(registry: string, name: string): string {
+  return `${registry.replace(/\/+$/, "")}/${name.replace("/", "%2f")}`;
+}
+
+export function httpRegistryClient(url: string = NPMJS_REGISTRY): PackumentRegistryClient {
   return {
     url,
     async versionDocument(name, version) {
@@ -57,6 +77,21 @@ export function httpRegistryClient(url: string = NPMJS_REGISTRY): RegistryClient
       if (!response.ok) return { status: response.status };
       const document = (await response.json()) as { dist?: { integrity?: string } };
       return { status: response.status, integrity: document.dist?.integrity };
+    },
+    async abbreviatedPackument(name) {
+      const response = await fetch(abbreviatedPackumentUrl(url, name), {
+        headers: { accept: "application/vnd.npm.install-v1+json" },
+      });
+      if (!response.ok) return { status: response.status };
+      const document = (await response.json()) as {
+        versions?: Record<string, unknown>;
+        "dist-tags"?: Record<string, string>;
+      };
+      return {
+        status: response.status,
+        versions: Object.keys(document.versions ?? {}),
+        latest: document["dist-tags"]?.latest,
+      };
     },
   };
 }
@@ -100,6 +135,67 @@ export async function awaitVersionDocument(
     document = await registry.versionDocument(name, version);
   }
   return { document, waitedMs };
+}
+
+/** Why an installer cannot yet resolve `version` from this packument, or `undefined` when it can. */
+export function packumentMiss(
+  name: string,
+  version: string,
+  packument: AbbreviatedPackument,
+): string | undefined {
+  if (packument.status !== 200) return `${name} packument is HTTP ${packument.status}`;
+  if (!(packument.versions ?? []).includes(version)) {
+    return `${name} packument does not list ${version}`;
+  }
+  if (packument.latest !== version) {
+    return `${name} packument has dist-tags.latest ${packument.latest ?? "(absent)"}, not ${version}`;
+  }
+  return undefined;
+}
+
+export type PackumentMiss = { readonly name: string; readonly reason: string };
+
+async function packumentMisses(
+  registry: PackumentRegistryClient,
+  names: readonly string[],
+  version: string,
+): Promise<PackumentMiss[]> {
+  const misses: PackumentMiss[] = [];
+  for (const name of names) {
+    const reason = packumentMiss(name, version, await registry.abbreviatedPackument(name));
+    if (reason !== undefined) misses.push({ name, reason });
+  }
+  return misses;
+}
+
+/**
+ * Polls until every name's abbreviated packument serves `version`, with the same backoff and
+ * window as `awaitVersionDocument`. A `pnpm update` run before this holds resolves the version
+ * the packument still names, which is how release 0.1.8 pinned three packages a release behind.
+ */
+export async function awaitInstallable(
+  registry: PackumentRegistryClient,
+  names: readonly string[],
+  version: string,
+  wait: PropagationWait = {},
+): Promise<{ readonly misses: readonly PackumentMiss[]; readonly waitedMs: number }> {
+  const sleep = wait.sleep ?? realSleep;
+  const windowMs = wait.windowMs ?? PROPAGATION_WINDOW_MS;
+  let misses = await packumentMisses(registry, names, version);
+  let waitedMs = 0;
+  let delay = FIRST_RETRY_MS;
+  while (misses.length > 0 && waitedMs < windowMs) {
+    const next = Math.min(delay, windowMs - waitedMs);
+    await sleep(next);
+    waitedMs += next;
+    delay = Math.min(delay * 2, MAX_RETRY_MS);
+    misses = await packumentMisses(
+      registry,
+      misses.map((miss) => miss.name),
+      version,
+    );
+  }
+  return { misses, waitedMs };
 }
 
 function host(url: string): string {

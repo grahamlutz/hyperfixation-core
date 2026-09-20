@@ -7,11 +7,14 @@ import { releaseCI, type ReleaseCIDeps, type ReleaseCIOptions } from "./publish-
 import {
   NPMJS_REGISTRY,
   type Exec,
-  type RegistryClient,
+  type PackumentRegistryClient,
   type VersionDocument,
 } from "./registry.js";
 
 const GROUP = ["@hyperfixation/db", "@hyperfixation/core", "@hyperfixation/cli"];
+const VERSION = "1.0.0";
+/** More polls than the propagation window allows: the packument never arrives. */
+const NEVER = Number.MAX_SAFE_INTEGER;
 
 /** Mirrors the real dependency direction: db ← core ← cli. */
 const MANIFESTS: Record<string, Record<string, string>> = {
@@ -33,9 +36,15 @@ type Fake = {
   readonly remoteBranches: Map<string, string[]>;
   /** PR numbers `gh pr list --head` reports, per downstream repo. */
   readonly openPrs: Map<string, number[]>;
+  /** How many polls the abbreviated packument misses the version for, per package name. */
+  readonly packumentLag: Map<string, number>;
+  /** Packages the clone's `pnpm update` leaves at their old version, per downstream repo. */
+  readonly staleAfterUpdate: Map<string, string[]>;
+  /** Every backoff the propagation waits slept, in order. */
+  readonly sleeps: number[];
   /** `@hyperfixation/*` specs the cloned app's package.json carries. */
   appDependencies: Record<string, string>;
-  /** Whether `pnpm update --latest` leaves the clone dirty. */
+  /** Whether the pinned `pnpm update` leaves the clone dirty. */
   updateChanges: boolean;
 };
 
@@ -77,6 +86,12 @@ function fake(options: {
   const packedRanges = new Map<string, Record<string, string>>();
   const remoteBranches = new Map<string, string[]>();
   const openPrs = new Map<string, number[]>();
+  const packumentLag = new Map<string, number>();
+  const staleAfterUpdate = new Map<string, string[]>();
+  const sleeps: number[] = [];
+  const polls = new Map<string, number>();
+  /** Which downstream repo each clone directory holds, so `pnpm update` knows whose app it is. */
+  const clones = new Map<string, string>();
   const state = {
     appDependencies: Object.fromEntries(GROUP.map((name) => [name, "^0.9.0"])),
     updateChanges: true,
@@ -131,6 +146,7 @@ function fake(options: {
     }
     if (command === "git" && args[0] === "clone") {
       const destination = args[args.length - 1];
+      clones.set(destination, repoOf(args[args.length - 2]));
       mkdirSync(destination, { recursive: true });
       writeFileSync(
         join(destination, "package.json"),
@@ -138,16 +154,47 @@ function fake(options: {
       );
       return { status: 0, stdout: "" };
     }
+    // A real `pnpm update` rewrites both files; the stale names are the 0.1.8 failure.
+    if (command === "pnpm" && args[0] === "update") {
+      const stale = staleAfterUpdate.get(clones.get(execOptions.cwd) ?? "") ?? [];
+      const specs = Object.fromEntries(
+        Object.keys(state.appDependencies).map((name) => [
+          name,
+          stale.includes(name) ? "^0.9.0" : `^${VERSION}`,
+        ]),
+      );
+      writeFileSync(
+        join(execOptions.cwd, "package.json"),
+        JSON.stringify({ name: "app", dependencies: specs }),
+      );
+      writeFileSync(
+        join(execOptions.cwd, "pnpm-lock.yaml"),
+        Object.entries(specs)
+          .map(([name, spec]) => `  '${name}@${spec.slice(1)}': {}`)
+          .join("\n"),
+      );
+      return { status: 0, stdout: "" };
+    }
     if (command === "git" && joined === "status --porcelain") {
       return { status: 0, stdout: state.updateChanges ? " M package.json\n" : "" };
     }
-    void execOptions;
     return { status: 0, stdout: "" };
   };
 
-  const registry: RegistryClient = {
+  const registry: PackumentRegistryClient = {
     url: NPMJS_REGISTRY,
     versionDocument: async (name) => documents.get(name) ?? { status: 404 },
+    // The packument lags the per-version document: as npmjs does, it answers 200 with the
+    // release before until this package's polls run out.
+    abbreviatedPackument: async (name) => {
+      if (!documents.has(name)) return { status: 404 };
+      const seen = (polls.get(name) ?? 0) + 1;
+      polls.set(name, seen);
+      if (seen <= (packumentLag.get(name) ?? 0)) {
+        return { status: 200, versions: ["0.9.0"], latest: "0.9.0" };
+      }
+      return { status: 200, versions: ["0.9.0", VERSION], latest: VERSION };
+    },
   };
 
   for (const repo of options.downstream ?? []) remoteBranches.set(repo, []);
@@ -157,6 +204,9 @@ function fake(options: {
     packedRanges,
     remoteBranches,
     openPrs,
+    packumentLag,
+    staleAfterUpdate,
+    sleeps,
     get appDependencies() {
       return state.appDependencies;
     },
@@ -175,6 +225,11 @@ function fake(options: {
       integrity: options.integrity ?? (async (tarball) => `sha512-@hyperfixation/${nameOf(tarball)}`),
       log: () => {},
       token: options.token ?? "bot-token",
+      wait: {
+        sleep: async (ms) => {
+          sleeps.push(ms);
+        },
+      },
     },
   };
 }
@@ -298,11 +353,65 @@ describe("releaseCI", () => {
     expect(created).toHaveLength(2);
     expect(created[0].args).toContain("core-bump/1.0.0");
     expect(created[0].args).toContain("Bump @hyperfixation/* to 1.0.0");
+  });
+
+  // `--latest` resolves whatever the packument names, so it can silently pin the release before.
+  it("pins the update to the exact version", async () => {
+    const harness = fake({ downstream: [TEMPLATE] });
+    await withDownstream([TEMPLATE]);
+
+    await releaseCI(options(), harness.deps);
+
+    const updates = harness.calls.filter(
+      (call) => call.command === "pnpm" && call.args[0] === "update",
+    );
+    expect(updates).toHaveLength(1);
+    expect(updates[0].args).toEqual(["update", "@hyperfixation/*@1.0.0"]);
+  });
+
+  // The 0.1.8 release: the per-version documents were all 200 while the packument for the three
+  // packages published last still served 0.1.7, and the template's bump PR pinned a mixed set.
+  it("waits for the abbreviated packument to serve the version before bumping", async () => {
+    const harness = fake({ downstream: [TEMPLATE] });
+    await withDownstream([TEMPLATE]);
+    harness.packumentLag.set("@hyperfixation/cli", 3);
+
+    const result = await releaseCI(options(), harness.deps);
+
+    expect(result.bumped).toEqual([TEMPLATE]);
+    expect(harness.sleeps).toEqual([2_000, 4_000, 8_000]);
     expect(
-      harness.calls.some(
-        (call) => call.command === "pnpm" && call.args[0] === "update" && call.args[1] === "--latest",
-      ),
-    ).toBe(true);
+      harness.calls.filter((call) => call.command === "gh" && call.args[1] === "create"),
+    ).toHaveLength(1);
+  });
+
+  it("opens no bump PR when a packument never serves the version", async () => {
+    const harness = fake({ downstream: [TEMPLATE] });
+    await withDownstream([TEMPLATE]);
+    harness.packumentLag.set("@hyperfixation/cli", NEVER);
+
+    await expect(releaseCI(options(), harness.deps)).rejects.toThrow(
+      /@hyperfixation\/cli packument does not list 1\.0\.0/u,
+    );
+    expect(harness.calls.some((call) => call.command === "git" && call.args[0] === "clone")).toBe(
+      false,
+    );
+  });
+
+  it("refuses the one repo the update left behind and bumps the others", async () => {
+    const other = "grahamlutz/demo-app";
+    const harness = fake({ downstream: [TEMPLATE, other] });
+    await withDownstream([TEMPLATE, other]);
+    harness.staleAfterUpdate.set(TEMPLATE, ["@hyperfixation/cli"]);
+
+    await expect(releaseCI(options(), harness.deps)).rejects.toThrow(
+      /hyperfixation-template is not wholly on 1\.0\.0/u,
+    );
+    const created = harness.calls.filter(
+      (call) => call.command === "gh" && call.args[1] === "create",
+    );
+    expect(created).toHaveLength(1);
+    expect(created[0].args).toContain(other);
   });
 
   it("opens no bump PR when the branch is already there", async () => {

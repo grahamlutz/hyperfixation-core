@@ -122,8 +122,19 @@ pending, it runs `pnpm release:ci`, which:
    with the same three-minute 404 backoff. Here the byte comparison is still a gate rather than a
    warning, because the tarball it compares is the one this run just uploaded;
 6. pushes tag `v<version>`, unless it is already there;
-7. for every line of `downstream.txt`, clones with the App token, `pnpm update --latest` on that
-   repo's `@hyperfixation/*` set, and opens `core-bump/<version>`. An existing branch or an
+7. waits, with the same three-minute backoff, until the **abbreviated packument**
+   (`Accept: application/vnd.npm.install-v1+json`) lists `<version>` and carries it as
+   `dist-tags.latest` for all nine. That is the document an installer resolves from, and npmjs
+   serves it from a different cache than the per-version document: at `0.1.8` all nine per-version
+   documents were `200` while the packument for the three published last still named `0.1.7`, so
+   the template's bump PR pinned `admin`, `auth` and `cli` a release behind. A package still
+   missing when the window is spent fails the job by name, before any PR is opened;
+8. for every line of `downstream.txt`, clones with the App token, runs
+   `pnpm update '@hyperfixation/*@<version>'` — pinned, because `--latest` quietly resolves
+   whatever the packument names — and opens `core-bump/<version>`. Before committing it asserts
+   in-process that every `@hyperfixation/*` in the app's `dependencies` and `devDependencies` is on
+   `<version>` and that the lockfile resolves no other one; a repo that fails that gets no PR,
+   the rest are still processed, and the job fails at the end naming it. An existing branch or an
    existing PR for that version is left alone, so a re-run opens nothing. This replaces the
    `repository_dispatch` route: one App key, held only by core, instead of one per app.
 
