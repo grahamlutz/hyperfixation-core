@@ -21,7 +21,12 @@ import {
 import { createOpenApiHarness, type StubRoute } from "../test-support/openapi.js";
 import { findTemplateSource } from "../template-source.js";
 import type { CloudCommands, CloudStepContext } from "./context.js";
-import { EnvDrift, neededEnvNames } from "./coolify.js";
+import {
+  COMPOSE_DOMAIN_SERVICE,
+  COMPOSE_LOCATION,
+  EnvDrift,
+  neededEnvNames,
+} from "./coolify.js";
 import { CLOUD_STEPS } from "./index.js";
 
 const COOLIFY = "https://coolify.test";
@@ -536,6 +541,20 @@ describe("a cloud hf new, all ten steps", () => {
 
       // One forward for the whole run: `database` opens the cluster and `coolify` reuses it.
       expect(run.runner.tunnels).toEqual([5432]);
+
+      // Per service and never `domains`: a dockercompose application refuses the latter outright,
+      // which is how the first X1 run died at step 9 with an unreadable 422.
+      const created = harness.requests.find(
+        (request) => request.operationPath === "/applications/private-github-app",
+      )!.body as Record<string, unknown>;
+      expect(created).toMatchObject({
+        build_pack: "dockercompose",
+        docker_compose_location: COMPOSE_LOCATION,
+        docker_compose_domains: [
+          { name: COMPOSE_DOMAIN_SERVICE, domain: `https://${name}.${BASE_DOMAIN}` },
+        ],
+      });
+      expect(created.domains).toBeUndefined();
 
       expect(envBody().map((env) => env.key)).toEqual(EXPECTED_ENV_KEYS);
       expect(statusHosts).toEqual([`${name}.${BASE_DOMAIN}`]);

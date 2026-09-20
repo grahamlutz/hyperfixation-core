@@ -29,6 +29,7 @@ export class SentryClient {
       provider: "sentry",
       baseUrl: options.url ?? SENTRY_URL,
       headers: { authorization: `Bearer ${options.token}` },
+      secrets: [options.token],
       fetch: options.fetch,
     });
   }

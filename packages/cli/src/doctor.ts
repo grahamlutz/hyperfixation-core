@@ -73,7 +73,7 @@ export interface DoctorOptions {
  * whole point of this command is one screen that says whether anything needs attention.
  *
  * Nothing here prints a secret. The read token authorizes the status request and never appears
- * in a finding; a provider's response body is dropped for the same reason (`ProviderError`).
+ * in a finding, and a provider's refusal reaches a finding redacted (`ProviderError`).
  */
 export async function doctor(options: DoctorOptions = {}): Promise<DoctorResult> {
   const env = options.env ?? process.env;

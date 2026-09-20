@@ -78,6 +78,7 @@ export class GithubClient {
         accept: "application/vnd.github+json",
         "x-github-api-version": "2022-11-28",
       },
+      secrets: [options.token],
       fetch: options.fetch,
     });
   }

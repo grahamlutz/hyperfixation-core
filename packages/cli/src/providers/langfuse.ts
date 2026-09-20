@@ -39,6 +39,8 @@ export class LangfuseClient {
       headers: {
         authorization: `Basic ${Buffer.from(options.orgKey, "utf8").toString("base64")}`,
       },
+      // Both halves of the pair: an error message must not quote either one back.
+      secrets: options.orgKey.split(":"),
       fetch: options.fetch,
     });
   }
