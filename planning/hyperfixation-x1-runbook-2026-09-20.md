@@ -85,6 +85,11 @@ Tokens are pulled from the config with `jq` so none is typed or echoed.
 7. `SOURCE_COMMIT`: **already answered — nothing to check.** Coolify's docker-compose build pack passes no commit into the build (no `--build-arg`, nothing in the compose environment) and the build context has no `.git` even with `is_preserve_repository_enabled`, so the Dockerfile's `git rev-parse HEAD` fallback cannot run either. `hf` sets the application environment entry `SOURCE_COMMIT` itself before every deploy and disables Coolify's push auto-deploy, which is why step 10 prints it and why a merge to main publishes nothing until `hf deploy demo-app` runs. X1 question 5, closed.
 8. Langfuse: **already answered for this account — the org is on the Hobby plan and Organization settings has no API Keys page at all, so there is no org key to curl.** Leave `HF_LANGFUSE_ORG_KEY` unset and set `HF_LANGFUSE_PUBLIC_KEY`/`HF_LANGFUSE_SECRET_KEY` from the existing project instead; step 6 then makes no request and hands the pair straight to the app. On an account that does have the page, `curl -s -o /dev/null -w '%{http_code}' -u "<org key>" <url>/api/public/projects` → `200` is the check, and `401`/`403` means falling back to the pair.
 
+9. **Two things changed after this run** (core #115, template #47): `hf doctor` prints two more findings per app —
+   `connections` (box-wide against `max_connections`, and each app's role against 25) and `lock` (exactly one advisory
+   lock in the app's database) — and the deployed compose publishes **no host port at all**, so a second app on the box
+   can start and Coolify routes to the service's exposed port.
+
 ## 3. The run
 
 Names: given `demo-app` → app `demo_app`, database/app role `hf_demo_app`, migrator `hf_demo_app_migrator`, RO `hf_demo_app_ro`, FQDN
