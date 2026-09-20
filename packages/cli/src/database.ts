@@ -82,6 +82,13 @@ export interface OpenDatabaseOptions {
    * `psql` inside it. Omit to have neither, and the loopback is then the only route.
    */
   containers?: readonly string[];
+  /**
+   * One container, appended to `containers`.
+   *
+   * @deprecated Coolify's naming depends on how the database was created, so a caller that knows
+   * only the uuid has two names to try; pass `containers`. Removed in 0.2.0.
+   */
+  container?: string;
   /** Last resort when no address carries a query: `psql` inside the container. Default false. */
   dockerExec?: boolean;
 }
@@ -124,7 +131,10 @@ export async function openDatabase(
   const loopback = await tryTunnel(runner, options.admin, remotePort, TUNNEL_LOOPBACK);
   if ("database" in loopback) return loopback.database;
 
-  const candidates = options.containers ?? [];
+  const candidates = [
+    ...(options.containers ?? []),
+    ...(options.container === undefined ? [] : [options.container]),
+  ];
   if (candidates.length === 0) {
     throw new DatabaseTransportError(
       "tunnel",

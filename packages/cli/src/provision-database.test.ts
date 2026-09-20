@@ -348,8 +348,9 @@ describe("the cluster transports", () => {
       tunnel: forwarder({}, []),
     };
 
+    // Through the deprecated single-name option, which is appended to the candidates.
     await expect(
-      openDatabase(runner, { admin: clusterAdmin, containers: [CONTAINERS[0] ?? ""] }),
+      openDatabase(runner, { admin: clusterAdmin, container: CONTAINERS[0] }),
     ).rejects.toThrow(/no IPv4 address on any docker network/);
   }, 30_000);
 

@@ -222,6 +222,57 @@ export type Verdict = "approved" | "rejected";
     expect(findings[0]?.kind).toBe("retyped");
     expect(findings[0]?.problems.join("\n")).toContain("no deprecations.json entry");
   });
+
+  it("passes a signature that only gained a trailing optional parameter", () => {
+    const head = report(`// @public
+export const ACTIVITY_LIST_OPERATION = "activity.list";
+
+// @public @deprecated
+export function flowOriginRef(runId: string, key: string, attempt?: number): string;
+
+// @public @deprecated
+export interface TaskCreateOptions {
+    dueAt?: Date;
+    key?: string;
+    title: string;
+}
+
+// @public
+export type Verdict = "approved" | "rejected";
+`);
+    expect(apiChanges(pair(head))).toEqual([]);
+    expect(check(head, [], "patch")).toEqual([]);
+  });
+
+  it("reports a parameter made required, renamed or inserted before the existing ones", () => {
+    const required = report(`// @public
+export const ACTIVITY_LIST_OPERATION = "activity.list";
+
+// @public @deprecated
+export function flowOriginRef(runId: string, key: string, attempt: number): string;
+
+// @public @deprecated
+export interface TaskCreateOptions {
+    dueAt?: Date;
+    key?: string;
+    title: string;
+}
+
+// @public
+export type Verdict = "approved" | "rejected";
+`);
+    expect(apiChanges(pair(required))).toEqual([
+      expect.objectContaining({ symbol: "flowOriginRef", kind: "retyped" }),
+    ]);
+
+    const inserted = required.replace(
+      "runId: string, key: string, attempt: number",
+      "attempt?: number, runId: string, key: string",
+    );
+    expect(apiChanges(pair(inserted))).toEqual([
+      expect.objectContaining({ symbol: "flowOriginRef", kind: "retyped" }),
+    ]);
+  });
 });
 
 describe("changesetBump", () => {
