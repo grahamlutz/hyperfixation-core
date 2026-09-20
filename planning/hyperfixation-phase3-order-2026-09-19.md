@@ -29,19 +29,25 @@ Regenerate with `pnpm plan:sync --write`; the chunk markers on each heading belo
 | Chunk | PRs | Merged | Summary |
 |---|---|---|---|
 | 0 | [core #51](https://github.com/grahamlutz/hyperfixation-core/pull/51), [template #28](https://github.com/grahamlutz/hyperfixation-template/pull/28) | 2026-09-19 | Version the nine packages at 0.1.0 and make each one publishable |
+| A1 | [core #79](https://github.com/grahamlutz/hyperfixation-core/pull/79) | 2026-09-20 | Fail a PR that removes an exported member without the two-release deprecation |
+| B1 | [core #84](https://github.com/grahamlutz/hyperfixation-core/pull/84) | 2026-09-20 | Run template:check over every downstream.txt line, behind one aggregate check |
+| B2 | [template #35](https://github.com/grahamlutz/hyperfixation-template/pull/35) | 2026-09-20 | Hold the installed @hyperfixation/* set to one version, and stop opening bump PRs twice |
 | D1 | [template #30](https://github.com/grahamlutz/hyperfixation-template/pull/30) | 2026-09-20 | Build the image in CI and make it name its own commit (D1) |
 | D2 | [template #29](https://github.com/grahamlutz/hyperfixation-template/pull/29) | 2026-09-19 | Initialise Sentry in the web and the worker, errors only |
 | D3 | [template #31](https://github.com/grahamlutz/hyperfixation-template/pull/31) | 2026-09-20 | Bring the prod compose stack up in CI and assert it (D3) |
 | D4 | [template #32](https://github.com/grahamlutz/hyperfixation-template/pull/32) | 2026-09-20 | Assert a redeploy across a step change in CI (D4) |
+| docs | [core #76](https://github.com/grahamlutz/hyperfixation-core/pull/76), [core #77](https://github.com/grahamlutz/hyperfixation-core/pull/77) | 2026-09-20 | Record 0.1.1, the publishing lessons and the X1 fixes in the Phase 3 doc |
 | E1 | [core #52](https://github.com/grahamlutz/hyperfixation-core/pull/52) | 2026-09-19 | Give the cloud path its config, state cache and five validated clients |
 | E2 | [core #54](https://github.com/grahamlutz/hyperfixation-core/pull/54) | 2026-09-19 | Give the cloud path a runner, two database transports and its provisioning |
 | E3 | [core #58](https://github.com/grahamlutz/hyperfixation-core/pull/58), [core #61](https://github.com/grahamlutz/hyperfixation-core/pull/61), [core #62](https://github.com/grahamlutz/hyperfixation-core/pull/62) | 2026-09-20 | Give the cloud hf new its template fetch, env overlay and step runner |
 | E4 | [core #55](https://github.com/grahamlutz/hyperfixation-core/pull/55) | 2026-09-20 | Give the cloud path hf doctor, one line per finding |
 | E5 | [core #56](https://github.com/grahamlutz/hyperfixation-core/pull/56) | 2026-09-20 | Give hf a restore-check that proves a backup restores |
-| misc | [core #60](https://github.com/grahamlutz/hyperfixation-core/pull/60), [core #57](https://github.com/grahamlutz/hyperfixation-core/pull/57) | 2026-09-20 | Stop a child that exits before reading its stdin from failing the run with EPIPE |
+| misc | [core #60](https://github.com/grahamlutz/hyperfixation-core/pull/60), [core #57](https://github.com/grahamlutz/hyperfixation-core/pull/57), [core #75](https://github.com/grahamlutz/hyperfixation-core/pull/75), [core #78](https://github.com/grahamlutz/hyperfixation-core/pull/78), [template #36](https://github.com/grahamlutz/hyperfixation-template/pull/36), [core #85](https://github.com/grahamlutz/hyperfixation-core/pull/85), [core #92](https://github.com/grahamlutz/hyperfixation-core/pull/92), [core #96](https://github.com/grahamlutz/hyperfixation-core/pull/96), [template #38](https://github.com/grahamlutz/hyperfixation-template/pull/38), [core #103](https://github.com/grahamlutz/hyperfixation-core/pull/103), [template #42](https://github.com/grahamlutz/hyperfixation-template/pull/42), [core #105](https://github.com/grahamlutz/hyperfixation-core/pull/105) | 2026-09-20 | Stop a child that exits before reading its stdin from failing the run with EPIPE |
+| R1 | [core #80](https://github.com/grahamlutz/hyperfixation-core/pull/80), [core #81](https://github.com/grahamlutz/hyperfixation-core/pull/81), [core #82](https://github.com/grahamlutz/hyperfixation-core/pull/82) | 2026-09-20 | Release on a push to main: OIDC publish, our own tag, and the downstream bump PRs |
+| R2 | [core #90](https://github.com/grahamlutz/hyperfixation-core/pull/90) | 2026-09-20 | Verify a release against its provenance attestation, not a rebuild of it |
 | tooling | [core #68](https://github.com/grahamlutz/hyperfixation-core/pull/68), [core #71](https://github.com/grahamlutz/hyperfixation-core/pull/71) | 2026-09-20 | Generate the phase-order status table from merged PR bodies |
 | X1 | [core #73](https://github.com/grahamlutz/hyperfixation-core/pull/73) | 2026-09-20 | Add the X1 runbook for the first real-box deployment |
-| X1-fixes | [core #74](https://github.com/grahamlutz/hyperfixation-core/pull/74), [template #33](https://github.com/grahamlutz/hyperfixation-template/pull/33), [template #34](https://github.com/grahamlutz/hyperfixation-template/pull/34) | 2026-09-20 | Fix two X1 blockers: hf doctor on an older /api/status, and hf new's config check |
+| X1-fixes | [core #74](https://github.com/grahamlutz/hyperfixation-core/pull/74), [template #33](https://github.com/grahamlutz/hyperfixation-template/pull/33), [template #34](https://github.com/grahamlutz/hyperfixation-template/pull/34), [core #87](https://github.com/grahamlutz/hyperfixation-core/pull/87), [core #89](https://github.com/grahamlutz/hyperfixation-core/pull/89), [core #88](https://github.com/grahamlutz/hyperfixation-core/pull/88), [core #91](https://github.com/grahamlutz/hyperfixation-core/pull/91), [core #94](https://github.com/grahamlutz/hyperfixation-core/pull/94), [core #97](https://github.com/grahamlutz/hyperfixation-core/pull/97), [core #99](https://github.com/grahamlutz/hyperfixation-core/pull/99), [core #100](https://github.com/grahamlutz/hyperfixation-core/pull/100), [core #98](https://github.com/grahamlutz/hyperfixation-core/pull/98) | 2026-09-20 | Fix two X1 blockers: hf doctor on an older /api/status, and hf new's config check |
 <!-- plan-sync:end -->
 
 ## Where Phase 3 starts from
@@ -387,10 +393,52 @@ is gone afterwards.
 > verdict. `restoreCheckApp` takes the cluster admin password from `PGPASSWORD` until E3 records Coolify's.
 
 
-## Exit — X1, the real box (manual; records into this doc) — 🚧 Ready to run
+## Exit — X1, the real box (manual; records into this doc) — ✅ Done (deviated — see note)
 
 `hf new demo-app` from a laptop with only `~/.config/hf/config.json` populated. Then the manual list below, each with
 its evidence line pasted here.
+
+> **X1 evidence, 2026-09-20.** `demo-app` is deployed and running on the box. Four of the manual items are not done and
+> are named as such below; everything else is measured.
+>
+> | Item | Evidence |
+> |---|---|
+> | `hf new demo-app` | exit 0, after the fix cycles in the table below |
+> | `hf doctor` | every line OK except `llm` WARN (fixtures — expected, no provider keys set) |
+> | `/api/status` | 401 without the read token, 200 with it; `applicationVersion` equals the deployed commit; `coreVersion` `0.1.6`; `llm.mode` `fixtures` |
+> | Memory limits | web `536870912`, worker `805306368`, migrate `268435456`; usage web 115 MiB, worker 129 MiB |
+> | `hf restore-check demo-app` | 24 tables matched, against a dump taken immediately before the check |
+> | Backup off the box | the same dump uploaded to the Hetzner S3 bucket; verified by listing the bucket |
+> | Email sign-in | the code was delivered through the Cloudflare Email Sending REST API |
+> | Passkey | enrolled, and passkey sign-in works from the same browser |
+> | Demo loop | the draft flow started from the admin control; `hf_approval` 1 and 2 both `approved` and `decided` with one distinct `batch_id`, batch-approved from the browser; `hf_action_log` 2 rows, status `ok`; runs 44 done, 0 failed, 0 anomalies |
+> | Phone passkey enrolment | **not done** — same browser only, no phone proof yet |
+> | SIGTERM drain timing and `pg_locks` at exit | **not done** |
+> | First-of-month period row | **not done** — calendar, 2026-10-01 |
+> | 30-minute connection soak | soak: pending (running as this was written) |
+>
+> **`restore-check` must run right after a backup.** The first attempt used a 1.3-hour-old dump and mismatched 9 tables
+> purely from live churn — rows the app wrote after the dump. The 24-table match above is the same command against a
+> fresh dump. Follow-up filed: the verdict should tolerate append-only drift instead of counting it as a mismatch.
+>
+> **The chain of real-box findings and their fixes.** Each one aborted or corrupted a run before it was fixed.
+>
+> | Finding | Fix | PR |
+> |---|---|---|
+> | Coolify 422 — a `dockercompose` application refuses `domains` | `docker_compose_domains` per service, and a provider's refusal reaches the error | core #91 |
+> | `hf new` adopted a stale scaffold directory | adopt an existing app directory only on a resume, not on a first run | core #97 |
+> | Coolify publishes no port for its Postgres | discover the container's address and tunnel to that, box as the hop | core #88 |
+> | Langfuse organization keys need an Enterprise plan | fall back to a project-scoped key pair | core #89 |
+> | `GET /user/installations` is 403 for any personal token | warn and name the install URLs instead of aborting | core #87 |
+> | Coolify passes no `SOURCE_COMMIT` and leaves no `.git` in the build context | set the env entry per deploy, add `hf deploy`, turn push auto-deploy off | core #98 |
+> | `restore-check` ran `pg_restore` on the box host, which has no client tools | run it inside the Postgres container, dump on stdin | core #99 |
+> | The S3 backup schedule was registered without `s3_storage_uuid` | resolve a storage and send it; reconcile rather than double the schedule | core #100 |
+> | Hetzner blocks outbound port 465 and `smtp.mx.cloudflare.net` speaks only 465 | a `cloudflare-email://` transport over the REST API, and one shared sender | template #38, template #42 |
+> | `DuplicateFlow` after a server action | an identical re-definition is the flow it already defined | core #103 |
+> | `pg` pool teardown raced a force-drop (`57P01`) | drain the database's connections first (issue #101) | core #105 |
+> | A notifier crash echoed the `SMTP_URL` token into the log | sanitized errors; the token was rolled and the new one IP-restricted | template #42 |
+> | The api-diff gate did not cover the CLI's commands | gate them too — **removals of commands are still not caught** (open follow-up) | core #98 |
+> | `release:verify` false alarm on `0.1.1` | resolve the release commit from `origin/main` and its tags, and gate on the provenance attestation | core #92, core #90 |
 
 > **Prepared 2026-09-20.** [The runbook](hyperfixation-x1-runbook-2026-09-20.md) (core #73) has the prerequisites, the
 > config key table, read-only pre-flights, the run, verification, a checklist, manual teardown and ten gaps it found. Its
