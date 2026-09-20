@@ -1,0 +1,58 @@
+# Versioning policy
+
+**Date:** 2026-09-19. Topic 5 of [hyperfixation-tooling-plan-2026-09-19.md](hyperfixation-tooling-plan-2026-09-19.md),
+stated as policy. Applies to the nine published packages, which move as one fixed group in
+`.changeset/config.json`.
+
+## What breaks at 0.x
+
+Semver's "0.x may break anything" is not the rule here. A change is **breaking** when it is any
+of:
+
+- a diff to a committed `etc/*.api.md` that **removes or retypes** a member (adding one is not);
+- an `hf_*` schema change that version N-1 of the packages cannot run against;
+- any change to key derivation for `llm.run`, `actions.perform` or `waitForApproval` — the keys
+  are the fence, and rederiving them turns a resumed run into a double-send.
+
+Everything else is non-breaking.
+
+## Patch vs minor
+
+- **patch** — `etc/*.api.md` unchanged, or changed only additively; no breaking item above.
+- **minor** — any breaking item above. At 0.x the minor is the breaking release, so the
+  template's `^0.1.1` will not pick it up on its own.
+
+There is no major bump before 1.0.
+
+## 1.0
+
+Not before both: Phase 5's second app is live on the published packages, and the Phase 4
+`api-diff.test.ts` + `deprecations.json` gate exists. Time in service and a mechanical gate
+against accidental removals — neither alone is enough.
+
+## Deprecation: two releases
+
+An export leaves over two releases. In release N it is marked in `deprecations.json` with the
+version that will remove it; in release N+1's minor it is removed. A removal that never appeared
+in a `deprecations.json` is a bug in the release, not a fast path.
+
+## Migrations: additive against N-1
+
+A core migration must be additive against N-1's readers — no dropping or renaming a column N-1
+reads. `docker-compose.prod.yml` runs `migrate` before the new `web`/`worker`, so between those
+two steps the old code is live against the new schema. Splitting a rename across two releases
+(add, backfill, then drop in N+1) is the same two-release rule as deprecations.
+
+## The template's pin
+
+The template pins `^0.1.1`. At 0.x that caret does not cross a minor, so a breaking `0.2.0` is
+never picked up automatically; only `core-bump.yml`'s `pnpm update --latest` moves it, and the
+app's contract suite gates that PR. `minimumReleaseAgeExclude` stays as it is: the bump PR is
+supposed to see a version minutes after it publishes, which is exactly what the release-age
+delay would block.
+
+## Enforcement
+
+`.github/scripts/changeset-check.mjs` (the `changeset` CI job) fails a PR that changes a
+published package's `src` or a committed `etc/*.api.md` without adding a changeset. It does not
+judge patch vs minor — that is this document's job, and the reviewer's.
