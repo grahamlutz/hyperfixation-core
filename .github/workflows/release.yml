@@ -12,6 +12,10 @@ on:
         description: Build, pack and `npm publish --dry-run` — nothing published, no tag, no bump PRs
         type: boolean
         default: false
+      recover:
+        description: Finish a stranded release — tag main's version and open its bump PRs, publishing nothing
+        type: boolean
+        default: false
 
 # Two releases in flight would publish the same version twice and race on the tag. Never
 # cancelled: a half-published run has to finish or be re-run, not be killed.
@@ -26,7 +30,10 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
-    if: github.repository == 'grahamlutz/hyperfixation-core'
+    # main only, and not just for the push trigger: `workflow_dispatch` takes a ref, so without
+    # this a dispatch from any branch would run that branch's `release:ci` — its own publish and
+    # recover code — on a runner holding `id-token: write`.
+    if: github.repository == 'grahamlutz/hyperfixation-core' && github.ref == 'refs/heads/main'
     # On the job, not the workflow: `id-token` is the credential for the whole npm registry here,
     # so any job added later must ask for it on purpose.
     permissions:
@@ -75,7 +82,7 @@ jobs:
       # No NPM_TOKEN: `npm publish --provenance` inside `release:ci` mints an OIDC token per run
       # against the trusted publishers configured per package for this workflow file.
       - name: Version or publish
-        if: ${{ !inputs.dry_run }}
+        if: ${{ !inputs.dry_run && !inputs.recover }}
         uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
         with:
           github-token: ${{ steps.app-token.outputs.token }}
@@ -89,12 +96,24 @@ jobs:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
 
+      # No `changesets/action`, so nothing can open a `Version Packages` PR: the version in this
+      # checkout is already published and this run only finishes it. `--recover` publishes
+      # nothing — the already-on-npm check skips every package before a tarball is built.
+      - name: Recover a stranded release
+        if: ${{ inputs.recover && !inputs.dry_run }}
+        run: pnpm release:ci --recover --result ${{ runner.temp }}/release.json
+
       # The only channel between this job and the bump jobs. No file means `release:ci` never ran
       # — the versioning half of `changesets/action` opened a `Version Packages` PR instead — and
       # there is nothing to bump.
+      #
+      # `!cancelled()` rather than the default `success()`: `release:ci` writes this file before
+      # it decides its exit code, so a registry that has not caught up fails the step loudly
+      # while the tag it already pushed still reaches the bump jobs. That failure was what
+      # stranded 0.1.9.
       - name: Bump decision
         id: outcome
-        if: ${{ !inputs.dry_run }}
+        if: ${{ !cancelled() && !inputs.dry_run }}
         env:
           RESULT: ${{ runner.temp }}/release.json
         run: |
@@ -112,7 +131,10 @@ jobs:
   # `downstream` matrix from, so an app joins both at once and the two cannot drift.
   bump-list:
     needs: release
-    if: needs.release.outputs.bump == 'true'
+    # `!cancelled()` and not `success()`: `bump` is only ever `true` when `release:ci` confirmed
+    # every abbreviated packument serves the version, so a release job that went red on something
+    # after that — the registry-agreement wait — must not also swallow the bumps.
+    if: ${{ !cancelled() && needs.release.outputs.bump == 'true' }}
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
@@ -139,6 +161,7 @@ jobs:
   # that used to do it inside `release:ci` is now the matrix.
   bump:
     needs: [release, bump-list]
+    if: ${{ !cancelled() && needs.bump-list.result == 'success' }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.bump-list.outputs.matrix) }}

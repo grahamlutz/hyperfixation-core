@@ -98,9 +98,11 @@ export function httpRegistryClient(url: string = NPMJS_REGISTRY): PackumentRegis
 
 /**
  * How long a freshly published version document may keep 404ing. Observed on the 0.1.1 publish:
- * `npm view` answered immediately while the per-version document 404ed for about a minute.
+ * `npm view` answered immediately while the per-version document 404ed for about a minute — but
+ * on 0.1.9 `@hyperfixation/admin` spent the whole 180s window at 404 with the tarball already
+ * uploaded, so the old window was shorter than npmjs's worst case, not longer.
  */
-export const PROPAGATION_WINDOW_MS = 180_000;
+export const PROPAGATION_WINDOW_MS = 900_000;
 
 const FIRST_RETRY_MS = 2_000;
 const MAX_RETRY_MS = 30_000;
@@ -430,6 +432,39 @@ export async function registryProblems(
       (problem): problem is string => problem !== undefined,
     );
   });
+}
+
+/** A git command's trimmed stdout, or `undefined` when it fails or says nothing. */
+export function gitOutput(
+  exec: Exec,
+  root: string,
+  args: readonly string[],
+): string | undefined {
+  const result = exec("git", args, { cwd: root, capture: true });
+  const output = result.stdout.trim();
+  return result.status === 0 && output !== "" ? output : undefined;
+}
+
+/**
+ * The last commit on origin/main that introduced `"version": "<version>"` into a package
+ * manifest — the `Version Packages` squash that cut the release. Both the tag a recovery pushes
+ * and the commit `release:verify` rebuilds have to be this one and not a later tip: every commit
+ * after it carries the same version, so HEAD is only right until main moves.
+ */
+export function versionBumpCommit(
+  exec: Exec,
+  root: string,
+  version: string,
+): string | undefined {
+  return gitOutput(exec, root, [
+    "log",
+    "-1",
+    "--format=%H",
+    `-S"version": "${version}"`,
+    "origin/main",
+    "--",
+    "packages/*/package.json",
+  ]);
 }
 
 export function dispatchCommand(version: string): string {

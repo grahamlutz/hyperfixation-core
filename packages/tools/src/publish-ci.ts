@@ -17,6 +17,7 @@ import {
   spawnExec,
   tarballIntegrity,
   topologicalOrder,
+  versionBumpCommit,
   versionMismatches,
   workspaceRangeLeftovers,
   type Exec,
@@ -38,12 +39,19 @@ The downstream bump PRs are not opened here — \`release:bump\` opens them, one
 a token scoped to that repo alone, so a compromised app repo cannot reach this job's npm identity.
 
   --dry-run          \`npm publish --dry-run\`; no verification, no tag, no bump PRs
+  --recover          finish a release whose packages are already published: tag and bump, never
+                     publish. For a run that died after \`npm publish\` and before the tag
   --registry <url>   check this registry instead of ${NPMJS_REGISTRY}
   --root <dir>       the checkout to release (default: this one)
   --result <file>    write the outcome as JSON, for the workflow's bump jobs to read
 
 A push to main that carries no changesets re-runs this against a version the registry already
-has in full; it exits 0 having published, tagged and opened nothing.`;
+has in full; it exits 0 having published, tagged and opened nothing — unless the tag is missing,
+which is what a stranded release looks like, and then it finishes that release.
+
+The tag is pushed before the registry is verified, and \`--result\` is written even when the
+verification fails: on 0.1.9 a 404 that outlived the propagation window threw away the tag and
+the bump for nine packages that were already on npm.`;
 
 export class ReleaseError extends Error {}
 
@@ -51,6 +59,8 @@ export type ReleaseCIOptions = {
   readonly root: string;
   readonly registry: string;
   readonly dryRun: boolean;
+  /** Finish an already-published version: tag and bump without publishing. */
+  readonly recover: boolean;
 };
 
 export type ReleaseCIDeps = {
@@ -67,10 +77,16 @@ export type ReleaseCIResult = {
   readonly skipped: readonly string[];
   readonly tagged: string | undefined;
   /**
-   * Whether the workflow should now run the per-repo bump jobs: something was published, and the
-   * registry serves it to installers.
+   * Whether the workflow should now run the per-repo bump jobs: this run released the version,
+   * and the registry serves it to installers.
    */
   readonly bumpable: boolean;
+  /**
+   * Why the registry does not yet agree with what was published here. Non-empty makes the run
+   * fail, but only after the tag is pushed and this result is written: the packages are public
+   * from the moment `npm publish` returns, so losing the record of them helps nobody.
+   */
+  readonly problems: readonly string[];
 };
 
 /** The one place a failure message is built, so `redact` is the one place it is cleaned. */
@@ -100,6 +116,67 @@ export async function readDownstream(root: string): Promise<string[]> {
   return parseDownstream(await readFile(file, "utf8"));
 }
 
+/** `fetch-depth: 0` brings the tags, so the local ref is the answer for the remote too. */
+function tagExists(deps: ReleaseCIDeps, root: string, tag: string): boolean {
+  return (
+    deps.exec("git", ["rev-parse", "--verify", "--quiet", `refs/tags/${tag}^{commit}`], {
+      cwd: root,
+      capture: true,
+    }).status === 0
+  );
+}
+
+/** Creates and pushes `tag`, at `target` when one is given and at HEAD otherwise. */
+function pushTag(
+  deps: ReleaseCIDeps,
+  root: string,
+  tag: string,
+  target?: string,
+): string {
+  must(deps.exec, root, "git", ["tag", tag, ...(target === undefined ? [] : [target])]);
+  must(deps.exec, root, "git", ["push", "origin", tag]);
+  deps.log(`tag       ${tag} pushed${target === undefined ? "" : ` at ${target}`}`);
+  return tag;
+}
+
+/**
+ * Pushes `v<version>` at HEAD unless it is already there. Only for the publishing path, where
+ * HEAD *is* the release commit because `changesets/action` just versioned it.
+ */
+function ensureTagAtHead(
+  deps: ReleaseCIDeps,
+  root: string,
+  version: string,
+): string | undefined {
+  const tag = `v${version}`;
+  if (tagExists(deps, root, tag)) {
+    deps.log(`tag       ${tag} already exists`);
+    return undefined;
+  }
+  return pushTag(deps, root, tag);
+}
+
+/** Why a bump PR opened now would pin a mixed `@hyperfixation/*` set, or nothing when it would not. */
+async function installableProblems(
+  deps: ReleaseCIDeps,
+  order: readonly string[],
+  version: string,
+): Promise<string[]> {
+  const { misses, waitedMs } = await awaitInstallable(
+    deps.registry,
+    order,
+    version,
+    deps.wait ?? {},
+  );
+  if (misses.length === 0) {
+    deps.log(`\nAll ${order.length} abbreviated packuments serve ${version}.`);
+    return [];
+  }
+  return misses.map(
+    (miss) => `${miss.reason} (after ${Math.round(waitedMs / 1000)}s)`,
+  );
+}
+
 export async function releaseCI(
   options: ReleaseCIOptions,
   deps: ReleaseCIDeps,
@@ -123,9 +200,62 @@ export async function releaseCI(
   }
   // The no-changesets push: main moved, the group is still at a version the registry has in
   // full, and a release run must be a no-op rather than a re-tag and a second round of bump PRs.
+  //
+  // Unless there is no tag. A release that published all nine and then died leaves exactly this
+  // state, and the missing `v<version>` is the difference between "nothing to do" and "finish
+  // it" — so the next push to main recovers a stranded release on its own. `--recover` says the
+  // same thing explicitly, for when the tag has already been restored by hand.
   if (already.size === order.length) {
-    deps.log(`${version} is already on ${deps.registry.url} in full — nothing to do.`);
-    return { version, published: [], skipped: order, tagged: undefined, bumpable: false };
+    if (options.dryRun) {
+      deps.log(`${version} is already on ${deps.registry.url} in full — nothing to do.`);
+      return { version, published: [], skipped: order, tagged: undefined, bumpable: false, problems: [] };
+    }
+    const tag = `v${version}`;
+    const exists = tagExists(deps, options.root, tag);
+    if (exists && !options.recover) {
+      deps.log(`${version} is already on ${deps.registry.url} in full — nothing to do.`);
+      return { version, published: [], skipped: order, tagged: undefined, bumpable: false, problems: [] };
+    }
+    deps.log(`${version} is already on ${deps.registry.url} in full — finishing the release.`);
+    // Not HEAD. Every commit after the `Version Packages` squash carries this same version, so
+    // by the time a stranded release is noticed HEAD is usually a later docs or tooling commit —
+    // and a tag there would make `release:verify` rebuild the wrong tree and call all nine
+    // attestations wrong. Refusing beats guessing: the tag can then be placed by hand.
+    let tagged: string | undefined;
+    if (!exists) {
+      const target = versionBumpCommit(deps.exec, options.root, version);
+      if (target === undefined) {
+        throw new ReleaseError(
+          `${version} is fully published but has no ${tag}, and the commit that carries it ` +
+            "could not be resolved on origin/main.\n" +
+            `Tag the \`Version Packages\` commit for ${version} by hand, then re-run with --recover.`,
+        );
+      }
+      tagged = pushTag(deps, options.root, tag, target);
+    }
+    const downstream = await readDownstream(options.root);
+    const problems =
+      downstream.length > 0 ? await installableProblems(deps, order, version) : [];
+    return {
+      version,
+      published: [],
+      skipped: order,
+      tagged,
+      bumpable: downstream.length > 0 && problems.length === 0,
+      problems,
+    };
+  }
+
+  // Past here a tarball gets built and uploaded, which `--recover` promises it will never do. A
+  // half-published version is not the stranded case; an ordinary re-run finishes it, skipping
+  // whatever is already up.
+  if (options.recover) {
+    throw new ReleaseError(
+      `${version} is not fully published — ${order.length - already.size} of ${order.length} ` +
+        `packages are missing from ${deps.registry.url}.\n` +
+        "--recover only finishes a release that is already on the registry; re-run the release " +
+        "itself to publish the rest.",
+    );
   }
 
   const work = await mkdtemp(join(tmpdir(), "hf-release-ci-"));
@@ -162,8 +292,13 @@ export async function releaseCI(
 
     if (options.dryRun) {
       deps.log("\n--dry-run: not verifying, not tagging, opening no bump PRs.");
-      return { version, published, skipped, tagged: undefined, bumpable: false };
+      return { version, published, skipped, tagged: undefined, bumpable: false, problems: [] };
     }
+
+    // Before the verification, not after it. Everything above this line is already public and
+    // cannot be taken back, so the tag is a record of what happened rather than a reward for the
+    // registry answering promptly — which on 0.1.9 it did not.
+    const tagged = ensureTagAtHead(deps, options.root, version);
 
     const problems = await registryProblems(
       deps.registry,
@@ -172,49 +307,24 @@ export async function releaseCI(
       deps.integrity,
       deps.wait ?? {},
     );
-    if (problems.length > 0) {
-      throw new ReleaseError(`Published, but the registry does not agree:\n  ${problems.join("\n  ")}`);
-    }
-    deps.log(`\nAll ${tarballs.size} version documents match the tarballs packed from this commit.`);
-
-    // `fetch-depth: 0` brings the tags, so the local ref is the answer for the remote too.
-    const tag = `v${version}`;
-    const exists =
-      deps.exec("git", ["rev-parse", "--verify", "--quiet", `refs/tags/${tag}^{commit}`], {
-        cwd: options.root,
-        capture: true,
-      }).status === 0;
-    if (exists) deps.log(`tag       ${tag} already exists`);
-    else {
-      must(deps.exec, options.root, "git", ["tag", tag]);
-      must(deps.exec, options.root, "git", ["push", "origin", tag]);
-      deps.log(`tag       ${tag} pushed`);
+    if (problems.length === 0) {
+      deps.log(`\nAll ${tarballs.size} version documents match the tarballs packed from this commit.`);
     }
 
+    // Skipped when the documents already disagree: there is nothing a second long wait can tell
+    // us, and the bump is off either way.
     const downstream = await readDownstream(options.root);
-    if (downstream.length > 0) {
-      const { misses, waitedMs } = await awaitInstallable(
-        deps.registry,
-        order,
-        version,
-        deps.wait ?? {},
-      );
-      if (misses.length > 0) {
-        throw new ReleaseError(
-          `The registry is still not serving ${version} to installers after ` +
-            `${Math.round(waitedMs / 1000)}s:\n  ${misses.map((miss) => miss.reason).join("\n  ")}\n` +
-            "A bump PR opened now would pin a mixed @hyperfixation/* set; re-run this job.",
-        );
-      }
-      deps.log(`\nAll ${order.length} abbreviated packuments serve ${version}.`);
+    if (downstream.length > 0 && problems.length === 0) {
+      problems.push(...(await installableProblems(deps, order, version)));
     }
 
     return {
       version,
       published,
       skipped,
-      tagged: exists ? undefined : tag,
-      bumpable: downstream.length > 0 && published.length > 0,
+      tagged,
+      bumpable: downstream.length > 0 && problems.length === 0,
+      problems,
     };
   } finally {
     await rm(work, { recursive: true, force: true });
@@ -225,6 +335,7 @@ async function main(): Promise<number> {
   const { values } = parseArgs({
     options: {
       "dry-run": { type: "boolean", default: false },
+      recover: { type: "boolean", default: false },
       registry: { type: "string", default: NPMJS_REGISTRY },
       root: { type: "string", default: CORE_ROOT },
       result: { type: "string" },
@@ -240,6 +351,7 @@ async function main(): Promise<number> {
     root: resolve(values.root),
     registry: values.registry,
     dryRun: values["dry-run"],
+    recover: values.recover,
   };
   try {
     const result = await releaseCI(options, {
@@ -248,6 +360,9 @@ async function main(): Promise<number> {
       integrity: tarballIntegrity,
       log: (line) => console.log(line),
     });
+    // Written before the exit code is decided: the workflow's bump decision reads this file even
+    // when the verification below fails, which is what keeps a slow registry from stranding a
+    // release that is already on npm.
     if (values.result !== undefined) {
       await writeFile(resolve(values.result), JSON.stringify(result), "utf8");
     }
@@ -255,6 +370,16 @@ async function main(): Promise<number> {
       `\n${result.version}: published ${result.published.length}, skipped ${result.skipped.length}` +
         `, tag ${result.tagged ?? "(unchanged)"}, bump ${result.bumpable}`,
     );
+    if (result.problems.length > 0) {
+      console.error(
+        redact(
+          `\nPublished ${result.tagged === undefined ? "" : `and tagged ${result.tagged} `}` +
+            `— but the registry does not agree:\n  ${result.problems.join("\n  ")}\n` +
+            "Nothing was left half-published; re-run this workflow once npmjs has caught up.",
+        ),
+      );
+      return 1;
+    }
     return 0;
   } catch (error) {
     if (error instanceof ReleaseError) {

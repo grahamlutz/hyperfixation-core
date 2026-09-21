@@ -7,9 +7,17 @@ import { downstreamMatrix } from "./downstream-matrix.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 
-type Step = { uses?: string; run?: string; id?: string; with?: Record<string, unknown> };
+type Step = {
+  uses?: string;
+  run?: string;
+  id?: string;
+  name?: string;
+  if?: string;
+  with?: Record<string, unknown>;
+};
 type Permissions = Record<string, string> | string;
 type Job = {
+  if?: string;
   steps?: Step[];
   strategy?: { matrix?: unknown; "fail-fast"?: boolean };
   outputs?: Record<string, string>;
@@ -78,6 +86,46 @@ describe("release.yml's app tokens", () => {
     );
     const matrix = downstreamMatrix(readFileSync(path.join(ROOT, "downstream.txt"), "utf8"));
     expect(matrix.include.length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * The wiring that keeps a slow registry from stranding a release, as the workflow states it.
+ * 0.1.9 published all nine packages and then lost its tag and its three bump PRs because the
+ * publish step's failure skipped everything behind it.
+ */
+describe("release.yml's stranded-release wiring", () => {
+  const release = jobs("release.yml");
+
+  function step(job: Job | undefined, name: string): Step | undefined {
+    return (job?.steps ?? []).find((candidate) => candidate.name === name);
+  }
+
+  // `id-token: write` is the npm registry credential. `workflow_dispatch` takes a ref, so
+  // without this a dispatch from any branch would run that branch's publish code beside it.
+  it("runs only on main, in this repo", () => {
+    expect(release.release.if).toContain("github.ref == 'refs/heads/main'");
+    expect(release.release.if).toContain("github.repository == 'grahamlutz/hyperfixation-core'");
+  });
+
+  it("keeps changesets/action out of a recovery run", () => {
+    expect(step(release.release, "Version or publish")?.if).toContain("!inputs.recover");
+  });
+
+  it("gives recovery its own step, which publishes nothing", () => {
+    expect(step(release.release, "Recover a stranded release")?.run).toContain("--recover");
+  });
+
+  // The whole point: `release:ci` writes its result before it decides its exit code, so a
+  // verification that fails after the packages are public must not also skip the bump.
+  it("reads the bump decision even when the publish step failed", () => {
+    expect(step(release.release, "Bump decision")?.if).toContain("!cancelled()");
+  });
+
+  it("queues the bump jobs behind a failed release job, on its output alone", () => {
+    expect(release["bump-list"].if).toContain("!cancelled()");
+    expect(release["bump-list"].if).toContain("needs.release.outputs.bump == 'true'");
+    expect(release.bump.if).toContain("!cancelled()");
   });
 });
 

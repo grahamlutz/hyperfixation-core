@@ -274,7 +274,8 @@ describe("verify", () => {
     const { problems } = await verify(options(), harness.deps);
 
     expect(problems).toEqual([
-      `@hyperfixation/db@${VERSION} is not on ${NPMJS_REGISTRY} (HTTP 404 after 180s)`,
+      `@hyperfixation/db@${VERSION} is not on ${NPMJS_REGISTRY} (HTTP 404 after ` +
+        `${PROPAGATION_WINDOW_MS / 1000}s)`,
     ]);
     expect(harness.slept.reduce((total, ms) => total + ms, 0)).toBe(PROPAGATION_WINDOW_MS);
   });

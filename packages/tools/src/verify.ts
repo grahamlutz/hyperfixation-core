@@ -23,6 +23,7 @@ import {
   readGroupManifests,
   spawnExec,
   tarballIntegrity,
+  versionBumpCommit,
   versionMismatches,
   workspaceRangeLeftovers,
   type Exec,
@@ -106,15 +107,7 @@ export function resolveReleaseCommit(
     const sha = capture(exec, root, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]);
     if (sha !== undefined) return { sha, source: ref };
   }
-  const bump = capture(exec, root, [
-    "log",
-    "-1",
-    "--format=%H",
-    `-S"version": "${version}"`,
-    "origin/main",
-    "--",
-    "packages/*/package.json",
-  ]);
+  const bump = versionBumpCommit(exec, root, version);
   if (bump !== undefined) return { sha: bump, source: `the ${version} bump on origin/main` };
   const tip = capture(exec, root, ["rev-parse", "--verify", "origin/main"]);
   if (tip === undefined) {

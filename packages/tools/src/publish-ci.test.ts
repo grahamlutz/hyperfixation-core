@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { releaseCI, type ReleaseCIDeps, type ReleaseCIOptions } from "./publish-ci.js";
 import {
   NPMJS_REGISTRY,
+  PROPAGATION_WINDOW_MS,
   type Exec,
   type PackumentRegistryClient,
   type VersionDocument,
@@ -34,6 +35,8 @@ type Fake = {
   readonly packedRanges: Map<string, Record<string, string>>;
   /** How many polls the abbreviated packument misses the version for, per package name. */
   readonly packumentLag: Map<string, number>;
+  /** How many polls the per-version document 404s for after the publish, per package name. */
+  readonly documentLag: Map<string, number>;
   /** Every backoff the propagation waits slept, in order. */
   readonly sleeps: number[];
 };
@@ -64,17 +67,23 @@ async function writeCheckout(dir: string, versions: Record<string, string>): Pro
   }
 }
 
+const VERSION_COMMIT = "51d6f1125036309ac435a0cc8d442ff63ab425b3";
+
 function fake(options: {
   published?: readonly string[];
   tagExists?: boolean;
+  /** What `git log -S` resolves the version-carrying commit to; empty means it cannot. */
+  versionCommit?: string;
   integrity?: (tarball: string) => Promise<string>;
 }): Fake {
   const calls: Call[] = [];
   const documents = new Map<string, VersionDocument>();
   const packedRanges = new Map<string, Record<string, string>>();
   const packumentLag = new Map<string, number>();
+  const documentLag = new Map<string, number>();
   const sleeps: number[] = [];
   const polls = new Map<string, number>();
+  const documentPolls = new Map<string, number>();
 
   for (const name of options.published ?? []) {
     documents.set(name, { status: 200, integrity: `sha512-${name}` });
@@ -110,12 +119,25 @@ function fake(options: {
     if (command === "git" && joined.startsWith("rev-parse")) {
       return { status: options.tagExists === true ? 0 : 1, stdout: "" };
     }
+    // `git log -1 -S'"version": "<v>"' origin/main -- packages/*/package.json`: the commit that
+    // carries this version, which for a stranded release is well behind HEAD.
+    if (command === "git" && args[0] === "log") {
+      return { status: 0, stdout: `${options.versionCommit ?? ""}\n` };
+    }
     return { status: 0, stdout: "" };
   };
 
   const registry: PackumentRegistryClient = {
     url: NPMJS_REGISTRY,
-    versionDocument: async (name) => documents.get(name) ?? { status: 404 },
+    // The per-version document lags too, which is the 0.1.9 failure: `npm publish` had returned
+    // for all nine and `@hyperfixation/admin` still 404ed.
+    versionDocument: async (name) => {
+      const document = documents.get(name);
+      if (document === undefined) return { status: 404 };
+      const seen = (documentPolls.get(name) ?? 0) + 1;
+      documentPolls.set(name, seen);
+      return seen <= (documentLag.get(name) ?? 0) ? { status: 404 } : document;
+    },
     // The packument lags the per-version document: as npmjs does, it answers 200 with the
     // release before until this package's polls run out.
     abbreviatedPackument: async (name) => {
@@ -133,6 +155,7 @@ function fake(options: {
     calls,
     packedRanges,
     packumentLag,
+    documentLag,
     sleeps,
     deps: {
       exec,
@@ -165,7 +188,11 @@ async function withDownstream(repos: readonly string[]): Promise<void> {
 }
 
 function options(overrides: Partial<ReleaseCIOptions> = {}): ReleaseCIOptions {
-  return { root, registry: NPMJS_REGISTRY, dryRun: false, ...overrides };
+  return { root, registry: NPMJS_REGISTRY, dryRun: false, recover: false, ...overrides };
+}
+
+function tagCalls(calls: readonly Call[]): Call[] {
+  return calls.filter((call) => call.command === "git" && call.args[0] === "tag");
 }
 
 describe("releaseCI", () => {
@@ -197,9 +224,10 @@ describe("releaseCI", () => {
     expect(published(harness.calls)).toEqual(["@hyperfixation/core", "@hyperfixation/cli"]);
   });
 
-  // The no-changesets push to main: this is the whole adversary target (a).
-  it("does nothing when every version is already on the registry", async () => {
-    const harness = fake({ published: GROUP });
+  // The no-changesets push to main: this is the whole adversary target (a). The tag is what
+  // tells it apart from the stranded release below, so reading the tag is the one thing it does.
+  it("does nothing when every version is already on the registry and tagged", async () => {
+    const harness = fake({ published: GROUP, tagExists: true });
     await withDownstream([TEMPLATE]);
 
     const result = await releaseCI(options(), harness.deps);
@@ -210,8 +238,10 @@ describe("releaseCI", () => {
       skipped: ["@hyperfixation/db", "@hyperfixation/core", "@hyperfixation/cli"],
       tagged: undefined,
       bumpable: false,
+      problems: [],
     });
-    expect(harness.calls).toEqual([]);
+    expect(publishCalls(harness.calls)).toEqual([]);
+    expect(tagCalls(harness.calls)).toEqual([]);
   });
 
   it("refuses to publish when a packed manifest still carries a workspace: range", async () => {
@@ -233,10 +263,15 @@ describe("releaseCI", () => {
     await expect(releaseCI(options(), harness.deps)).rejects.toThrow(/does not agree/u);
   });
 
-  it("fails the verification when the registry's integrity differs", async () => {
+  it("reports a registry whose integrity differs, and opens no bump", async () => {
     const harness = fake({ integrity: async () => "sha512-something-else" });
+    await withDownstream([TEMPLATE]);
 
-    await expect(releaseCI(options(), harness.deps)).rejects.toThrow(/integrity is/u);
+    const result = await releaseCI(options(), harness.deps);
+
+    expect(result.problems).toHaveLength(GROUP.length);
+    expect(result.problems[0]).toMatch(/integrity is/u);
+    expect(result.bumpable).toBe(false);
   });
 
   it("leaves an existing tag alone", async () => {
@@ -266,9 +301,14 @@ describe("releaseCI", () => {
     await withDownstream([TEMPLATE]);
     harness.packumentLag.set("@hyperfixation/cli", NEVER);
 
-    await expect(releaseCI(options(), harness.deps)).rejects.toThrow(
-      /@hyperfixation\/cli packument does not list 1\.0\.0/u,
-    );
+    const result = await releaseCI(options(), harness.deps);
+
+    expect(result.problems).toEqual([
+      expect.stringMatching(/@hyperfixation\/cli packument does not list 1\.0\.0/u),
+    ]);
+    expect(result.bumpable).toBe(false);
+    // Published and recorded all the same: a bump PR is the only thing withheld.
+    expect(result.tagged).toBe("v1.0.0");
   });
 
   // `downstream.txt` is read here only to decide whether the workflow runs its bump matrix at
@@ -279,6 +319,130 @@ describe("releaseCI", () => {
     const result = await releaseCI(options(), harness.deps);
 
     expect(result.bumpable).toBe(false);
+  });
+
+  // The 0.1.9 release. `@hyperfixation/admin` was on npm — `npm publish` had printed it with
+  // provenance — and its version document 404ed for the whole 180s window, which threw before
+  // the tag and took the tag, the result file and three bump PRs down with it.
+  describe("a version document that lags the publish", () => {
+    it("waits it out and releases normally", async () => {
+      const harness = fake({});
+      await withDownstream([TEMPLATE]);
+      harness.documentLag.set("@hyperfixation/cli", 4);
+
+      const result = await releaseCI(options(), harness.deps);
+
+      expect(result.problems).toEqual([]);
+      expect(result.tagged).toBe("v1.0.0");
+      expect(result.bumpable).toBe(true);
+      expect(harness.sleeps.slice(0, 4)).toEqual([2_000, 4_000, 8_000, 16_000]);
+    });
+
+    it("still tags what it published when the document never arrives", async () => {
+      const harness = fake({});
+      await withDownstream([TEMPLATE]);
+      harness.documentLag.set("@hyperfixation/cli", NEVER);
+
+      const result = await releaseCI(options(), harness.deps);
+
+      // The run fails — but on the artefacts that matter it is indistinguishable from a success.
+      expect(result.problems).toEqual([
+        expect.stringMatching(/@hyperfixation\/cli@1\.0\.0 is not on/u),
+      ]);
+      expect(result.published).toHaveLength(GROUP.length);
+      expect(result.tagged).toBe("v1.0.0");
+      expect(tagCalls(harness.calls)).toHaveLength(1);
+      expect(
+        harness.calls.some((call) => call.command === "git" && call.args[0] === "push"),
+      ).toBe(true);
+    });
+
+    it("waits far longer than the 180s the release lost", () => {
+      expect(PROPAGATION_WINDOW_MS).toBeGreaterThanOrEqual(900_000);
+    });
+  });
+
+  // Recovering that release: everything is on npm, so the re-run must finish it rather than
+  // either republish or shrug. Without this the second release run said "nothing to do".
+  describe("a stranded release", () => {
+    it("tags and bumps an already-published version, publishing nothing", async () => {
+      const harness = fake({ published: GROUP, versionCommit: VERSION_COMMIT });
+      await withDownstream([TEMPLATE]);
+
+      const result = await releaseCI(options(), harness.deps);
+
+      expect(published(harness.calls)).toEqual([]);
+      expect(result.tagged).toBe("v1.0.0");
+      expect(result.bumpable).toBe(true);
+      expect(result.problems).toEqual([]);
+    });
+
+    // A stranded release is noticed after main has moved on, so HEAD carries the same version
+    // but is not the commit that was published. A tag there makes `release:verify` rebuild the
+    // wrong tree and call all nine attestations wrong.
+    it("tags the commit that carries the version, not HEAD", async () => {
+      const harness = fake({ published: GROUP, versionCommit: VERSION_COMMIT });
+      await withDownstream([TEMPLATE]);
+
+      await releaseCI(options(), harness.deps);
+
+      expect(tagCalls(harness.calls)).toEqual([
+        { command: "git", args: ["tag", "v1.0.0", VERSION_COMMIT] },
+      ]);
+    });
+
+    it("refuses to tag when that commit cannot be resolved", async () => {
+      const harness = fake({ published: GROUP, versionCommit: "" });
+      await withDownstream([TEMPLATE]);
+
+      await expect(releaseCI(options(), harness.deps)).rejects.toThrow(
+        /could not be resolved on origin\/main/u,
+      );
+      expect(tagCalls(harness.calls)).toEqual([]);
+    });
+
+    // The publishing path is the one place HEAD is right: `changesets/action` versioned it in
+    // this same run, so there is no later commit to confuse it with.
+    it("still tags HEAD on the publishing path", async () => {
+      const harness = fake({ versionCommit: VERSION_COMMIT });
+
+      await releaseCI(options(), harness.deps);
+
+      expect(tagCalls(harness.calls)).toEqual([{ command: "git", args: ["tag", "v1.0.0"] }]);
+    });
+
+    it("bumps on --recover even once the tag has been restored by hand", async () => {
+      const harness = fake({ published: GROUP, tagExists: true });
+      await withDownstream([TEMPLATE]);
+
+      const result = await releaseCI(options({ recover: true }), harness.deps);
+
+      expect(published(harness.calls)).toEqual([]);
+      expect(tagCalls(harness.calls)).toEqual([]);
+      expect(result.tagged).toBeUndefined();
+      expect(result.bumpable).toBe(true);
+    });
+
+    it("refuses --recover for a half-published version rather than publishing the rest", async () => {
+      const harness = fake({ published: ["@hyperfixation/db"] });
+      await withDownstream([TEMPLATE]);
+
+      await expect(releaseCI(options({ recover: true }), harness.deps)).rejects.toThrow(
+        /is not fully published/u,
+      );
+      expect(published(harness.calls)).toEqual([]);
+    });
+
+    it("withholds the bump when the packument does not yet serve the version", async () => {
+      const harness = fake({ published: GROUP, versionCommit: VERSION_COMMIT });
+      await withDownstream([TEMPLATE]);
+      harness.packumentLag.set("@hyperfixation/cli", NEVER);
+
+      const result = await releaseCI(options({ recover: true }), harness.deps);
+
+      expect(result.bumpable).toBe(false);
+      expect(result.problems).toHaveLength(1);
+    });
   });
 
   it("does nothing external in a dry run", async () => {
