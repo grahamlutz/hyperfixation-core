@@ -17,6 +17,7 @@ import {
   spawnExec,
   tarballIntegrity,
   topologicalOrder,
+  versionBumpCommit,
   versionMismatches,
   workspaceRangeLeftovers,
   type Exec,
@@ -115,25 +116,44 @@ export async function readDownstream(root: string): Promise<string[]> {
   return parseDownstream(await readFile(file, "utf8"));
 }
 
-/**
- * Pushes `v<version>` unless it is already there, and reports whether this call created it.
- * `fetch-depth: 0` brings the tags, so the local ref is the answer for the remote too.
- */
-function ensureTag(deps: ReleaseCIDeps, root: string, version: string): string | undefined {
-  const tag = `v${version}`;
-  const exists =
+/** `fetch-depth: 0` brings the tags, so the local ref is the answer for the remote too. */
+function tagExists(deps: ReleaseCIDeps, root: string, tag: string): boolean {
+  return (
     deps.exec("git", ["rev-parse", "--verify", "--quiet", `refs/tags/${tag}^{commit}`], {
       cwd: root,
       capture: true,
-    }).status === 0;
-  if (exists) {
+    }).status === 0
+  );
+}
+
+/** Creates and pushes `tag`, at `target` when one is given and at HEAD otherwise. */
+function pushTag(
+  deps: ReleaseCIDeps,
+  root: string,
+  tag: string,
+  target?: string,
+): string {
+  must(deps.exec, root, "git", ["tag", tag, ...(target === undefined ? [] : [target])]);
+  must(deps.exec, root, "git", ["push", "origin", tag]);
+  deps.log(`tag       ${tag} pushed${target === undefined ? "" : ` at ${target}`}`);
+  return tag;
+}
+
+/**
+ * Pushes `v<version>` at HEAD unless it is already there. Only for the publishing path, where
+ * HEAD *is* the release commit because `changesets/action` just versioned it.
+ */
+function ensureTagAtHead(
+  deps: ReleaseCIDeps,
+  root: string,
+  version: string,
+): string | undefined {
+  const tag = `v${version}`;
+  if (tagExists(deps, root, tag)) {
     deps.log(`tag       ${tag} already exists`);
     return undefined;
   }
-  must(deps.exec, root, "git", ["tag", tag]);
-  must(deps.exec, root, "git", ["push", "origin", tag]);
-  deps.log(`tag       ${tag} pushed`);
-  return tag;
+  return pushTag(deps, root, tag);
 }
 
 /** Why a bump PR opened now would pin a mixed `@hyperfixation/*` set, or nothing when it would not. */
@@ -190,12 +210,29 @@ export async function releaseCI(
       deps.log(`${version} is already on ${deps.registry.url} in full — nothing to do.`);
       return { version, published: [], skipped: order, tagged: undefined, bumpable: false, problems: [] };
     }
-    const tagged = ensureTag(deps, options.root, version);
-    if (tagged === undefined && !options.recover) {
+    const tag = `v${version}`;
+    const exists = tagExists(deps, options.root, tag);
+    if (exists && !options.recover) {
       deps.log(`${version} is already on ${deps.registry.url} in full — nothing to do.`);
       return { version, published: [], skipped: order, tagged: undefined, bumpable: false, problems: [] };
     }
     deps.log(`${version} is already on ${deps.registry.url} in full — finishing the release.`);
+    // Not HEAD. Every commit after the `Version Packages` squash carries this same version, so
+    // by the time a stranded release is noticed HEAD is usually a later docs or tooling commit —
+    // and a tag there would make `release:verify` rebuild the wrong tree and call all nine
+    // attestations wrong. Refusing beats guessing: the tag can then be placed by hand.
+    let tagged: string | undefined;
+    if (!exists) {
+      const target = versionBumpCommit(deps.exec, options.root, version);
+      if (target === undefined) {
+        throw new ReleaseError(
+          `${version} is fully published but has no ${tag}, and the commit that carries it ` +
+            "could not be resolved on origin/main.\n" +
+            `Tag the \`Version Packages\` commit for ${version} by hand, then re-run with --recover.`,
+        );
+      }
+      tagged = pushTag(deps, options.root, tag, target);
+    }
     const downstream = await readDownstream(options.root);
     const problems =
       downstream.length > 0 ? await installableProblems(deps, order, version) : [];
@@ -261,7 +298,7 @@ export async function releaseCI(
     // Before the verification, not after it. Everything above this line is already public and
     // cannot be taken back, so the tag is a record of what happened rather than a reward for the
     // registry answering promptly — which on 0.1.9 it did not.
-    const tagged = ensureTag(deps, options.root, version);
+    const tagged = ensureTagAtHead(deps, options.root, version);
 
     const problems = await registryProblems(
       deps.registry,

@@ -30,7 +30,10 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
-    if: github.repository == 'grahamlutz/hyperfixation-core'
+    # main only, and not just for the push trigger: `workflow_dispatch` takes a ref, so without
+    # this a dispatch from any branch would run that branch's `release:ci` — its own publish and
+    # recover code — on a runner holding `id-token: write`.
+    if: github.repository == 'grahamlutz/hyperfixation-core' && github.ref == 'refs/heads/main'
     # On the job, not the workflow: `id-token` is the credential for the whole npm registry here,
     # so any job added later must ask for it on purpose.
     permissions:

@@ -434,6 +434,39 @@ export async function registryProblems(
   });
 }
 
+/** A git command's trimmed stdout, or `undefined` when it fails or says nothing. */
+export function gitOutput(
+  exec: Exec,
+  root: string,
+  args: readonly string[],
+): string | undefined {
+  const result = exec("git", args, { cwd: root, capture: true });
+  const output = result.stdout.trim();
+  return result.status === 0 && output !== "" ? output : undefined;
+}
+
+/**
+ * The last commit on origin/main that introduced `"version": "<version>"` into a package
+ * manifest — the `Version Packages` squash that cut the release. Both the tag a recovery pushes
+ * and the commit `release:verify` rebuilds have to be this one and not a later tip: every commit
+ * after it carries the same version, so HEAD is only right until main moves.
+ */
+export function versionBumpCommit(
+  exec: Exec,
+  root: string,
+  version: string,
+): string | undefined {
+  return gitOutput(exec, root, [
+    "log",
+    "-1",
+    "--format=%H",
+    `-S"version": "${version}"`,
+    "origin/main",
+    "--",
+    "packages/*/package.json",
+  ]);
+}
+
 export function dispatchCommand(version: string): string {
   return [
     "gh api repos/grahamlutz/hyperfixation-template/dispatches",

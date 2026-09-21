@@ -67,9 +67,13 @@ async function writeCheckout(dir: string, versions: Record<string, string>): Pro
   }
 }
 
+const VERSION_COMMIT = "51d6f1125036309ac435a0cc8d442ff63ab425b3";
+
 function fake(options: {
   published?: readonly string[];
   tagExists?: boolean;
+  /** What `git log -S` resolves the version-carrying commit to; empty means it cannot. */
+  versionCommit?: string;
   integrity?: (tarball: string) => Promise<string>;
 }): Fake {
   const calls: Call[] = [];
@@ -114,6 +118,11 @@ function fake(options: {
     }
     if (command === "git" && joined.startsWith("rev-parse")) {
       return { status: options.tagExists === true ? 0 : 1, stdout: "" };
+    }
+    // `git log -1 -S'"version": "<v>"' origin/main -- packages/*/package.json`: the commit that
+    // carries this version, which for a stranded release is well behind HEAD.
+    if (command === "git" && args[0] === "log") {
+      return { status: 0, stdout: `${options.versionCommit ?? ""}\n` };
     }
     return { status: 0, stdout: "" };
   };
@@ -357,7 +366,7 @@ describe("releaseCI", () => {
   // either republish or shrug. Without this the second release run said "nothing to do".
   describe("a stranded release", () => {
     it("tags and bumps an already-published version, publishing nothing", async () => {
-      const harness = fake({ published: GROUP });
+      const harness = fake({ published: GROUP, versionCommit: VERSION_COMMIT });
       await withDownstream([TEMPLATE]);
 
       const result = await releaseCI(options(), harness.deps);
@@ -366,6 +375,40 @@ describe("releaseCI", () => {
       expect(result.tagged).toBe("v1.0.0");
       expect(result.bumpable).toBe(true);
       expect(result.problems).toEqual([]);
+    });
+
+    // A stranded release is noticed after main has moved on, so HEAD carries the same version
+    // but is not the commit that was published. A tag there makes `release:verify` rebuild the
+    // wrong tree and call all nine attestations wrong.
+    it("tags the commit that carries the version, not HEAD", async () => {
+      const harness = fake({ published: GROUP, versionCommit: VERSION_COMMIT });
+      await withDownstream([TEMPLATE]);
+
+      await releaseCI(options(), harness.deps);
+
+      expect(tagCalls(harness.calls)).toEqual([
+        { command: "git", args: ["tag", "v1.0.0", VERSION_COMMIT] },
+      ]);
+    });
+
+    it("refuses to tag when that commit cannot be resolved", async () => {
+      const harness = fake({ published: GROUP, versionCommit: "" });
+      await withDownstream([TEMPLATE]);
+
+      await expect(releaseCI(options(), harness.deps)).rejects.toThrow(
+        /could not be resolved on origin\/main/u,
+      );
+      expect(tagCalls(harness.calls)).toEqual([]);
+    });
+
+    // The publishing path is the one place HEAD is right: `changesets/action` versioned it in
+    // this same run, so there is no later commit to confuse it with.
+    it("still tags HEAD on the publishing path", async () => {
+      const harness = fake({ versionCommit: VERSION_COMMIT });
+
+      await releaseCI(options(), harness.deps);
+
+      expect(tagCalls(harness.calls)).toEqual([{ command: "git", args: ["tag", "v1.0.0"] }]);
     });
 
     it("bumps on --recover even once the tag has been restored by hand", async () => {
@@ -391,7 +434,7 @@ describe("releaseCI", () => {
     });
 
     it("withholds the bump when the packument does not yet serve the version", async () => {
-      const harness = fake({ published: GROUP });
+      const harness = fake({ published: GROUP, versionCommit: VERSION_COMMIT });
       await withDownstream([TEMPLATE]);
       harness.packumentLag.set("@hyperfixation/cli", NEVER);
 
