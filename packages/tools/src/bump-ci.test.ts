@@ -1,4 +1,5 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -24,6 +25,8 @@ type Fake = {
   readonly staleAfterUpdate: string[];
   /** `@hyperfixation/*` specs the cloned app's package.json carries. */
   appDependencies: Record<string, string>;
+  /** Extra files the clone materialises, by path relative to the checkout. */
+  readonly appFiles: Record<string, string>;
   /** Whether the pinned `pnpm update` leaves the clone dirty. */
   updateChanges: boolean;
 };
@@ -43,6 +46,7 @@ function fake(options: { token?: string; cloneFails?: boolean } = {}): Fake {
   const remoteBranches: string[] = [];
   const openPrs: number[] = [];
   const staleAfterUpdate: string[] = [];
+  const appFiles: Record<string, string> = {};
   const state = {
     appDependencies: Object.fromEntries(GROUP.map((name) => [name, "^0.9.0"])),
     updateChanges: true,
@@ -69,10 +73,20 @@ function fake(options: { token?: string; cloneFails?: boolean } = {}): Fake {
         join(destination, "package.json"),
         JSON.stringify({ name: "app", dependencies: state.appDependencies }),
       );
+      for (const [name, body] of Object.entries(appFiles)) {
+        writeFileSync(join(destination, name), body);
+      }
       return { status: 0, stdout: "" };
     }
     // A real `pnpm update` rewrites both files; the stale names are the 0.1.8 failure.
     if (command === "pnpm" && args[0] === "update") {
+      // Unconditionally, though the real one is passed `--ignore-pnpmfile`: what the pnpmfile test
+      // below asserts is that this stage is never reached at all, so a pnpm that dropped or
+      // renamed that flag would still have nothing to run.
+      for (const name of [".pnpmfile.cjs", ".pnpmfile.mjs"]) {
+        const file = join(execOptions.cwd, name);
+        if (existsSync(file)) spawnSync(process.execPath, [file], { cwd: execOptions.cwd });
+      }
       const specs = Object.fromEntries(
         Object.keys(state.appDependencies).map((name) => [
           name,
@@ -102,6 +116,7 @@ function fake(options: { token?: string; cloneFails?: boolean } = {}): Fake {
     remoteBranches,
     openPrs,
     staleAfterUpdate,
+    appFiles,
     get appDependencies() {
       return state.appDependencies;
     },
@@ -120,6 +135,11 @@ function fake(options: { token?: string; cloneFails?: boolean } = {}): Fake {
 
 function bump(harness: Fake, repo = TEMPLATE): Promise<boolean> {
   return bumpDownstream({ repo, version: VERSION, root }, harness.deps);
+}
+
+/** A pnpmfile whose only effect is evidence that something ran it. */
+function pnpmfileWriting(marker: string): string {
+  return `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "1");\nmodule.exports = { hooks: {} };\n`;
 }
 
 function created(calls: readonly Call[]): Call[] {
@@ -201,6 +221,51 @@ describe("bumpDownstream", () => {
 
     await expect(bump(harness)).rejects.toThrow(/hyperfixation-template is not wholly on 1\.0\.0/u);
     expect(created(harness.calls)).toHaveLength(0);
+  });
+
+  // The R1 latent break. `--ignore-pnpmfile` deletes the lockfile's `pnpmfileChecksum`, so the
+  // app's own `pnpm install --frozen-lockfile` hard-fails and the bump PR opens red and stays red;
+  // dropping the flag runs that repo's code here instead. `pnpm-guards.test.ts` measures both
+  // against the real pnpm. No downstream repo has a pnpmfile today, which is why this is asserted
+  // rather than assumed: nothing else would notice until a release had already opened the PR.
+  it("refuses a repo with a .pnpmfile.cjs, naming it, without ever running it", async () => {
+    const harness = fake();
+    const marker = join(root, "pnpmfile-ran");
+    harness.appFiles[".pnpmfile.cjs"] = pnpmfileWriting(marker);
+
+    await expect(bump(harness)).rejects.toThrow(
+      /hyperfixation-template has a \.pnpmfile\.cjs.*pnpmfileChecksum/su,
+    );
+    expect(existsSync(marker)).toBe(false);
+    expect(harness.calls.some((call) => call.command === "pnpm")).toBe(false);
+    expect(created(harness.calls)).toHaveLength(0);
+  });
+
+  it("refuses a .pnpmfile.mjs as well — pnpm 12 loads that one too", async () => {
+    const harness = fake();
+    harness.appFiles[".pnpmfile.mjs"] = "export default { hooks: {} };\n";
+
+    await expect(bump(harness)).rejects.toThrow(/has a \.pnpmfile\.mjs/u);
+  });
+
+  // A default name is not the whole surface: `pnpm-workspace.yaml`'s `pnpmfile:` setting points at
+  // any path, and pnpm 12 runs it and checksums it exactly the same.
+  it("refuses the pnpmfile pnpm-workspace.yaml points at, under whatever name", async () => {
+    const harness = fake();
+    const marker = join(root, "configured-pnpmfile-ran");
+    harness.appFiles["pnpm-workspace.yaml"] = "pnpmfile: ./hooks.cjs\n";
+    harness.appFiles["hooks.cjs"] = pnpmfileWriting(marker);
+
+    await expect(bump(harness)).rejects.toThrow(/has a \.\/hooks\.cjs/u);
+    expect(existsSync(marker)).toBe(false);
+    expect(created(harness.calls)).toHaveLength(0);
+  });
+
+  it("bumps a repo whose pnpm-workspace.yaml names no pnpmfile", async () => {
+    const harness = fake();
+    harness.appFiles["pnpm-workspace.yaml"] = "minimumReleaseAgeExclude:\n  - '@hyperfixation/*'\n";
+
+    expect(await bump(harness)).toBe(true);
   });
 
   it("opens no bump PR when the branch is already there", async () => {

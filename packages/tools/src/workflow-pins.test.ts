@@ -1,37 +1,13 @@
-import { readdirSync, readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-
-const WORKFLOWS = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "../../../.github/workflows",
-);
-
-/** A `uses:` line, wherever in the file it sits. */
-const USES = /^\s*(?:-\s*)?uses:\s*(?<ref>\S+)(?<rest>.*)$/gmu;
-
-const PINNED = /@[0-9a-f]{40}$/u;
-const VERSION_COMMENT = /^\s*#\s*v\d+\.\d+\.\d+/u;
-
-type Use = { readonly file: string; readonly ref: string; readonly rest: string };
-
-function uses(): Use[] {
-  const found: Use[] = [];
-  for (const file of readdirSync(WORKFLOWS).filter((name) => name.endsWith(".yml"))) {
-    const text = readFileSync(path.join(WORKFLOWS, file), "utf8");
-    for (const match of text.matchAll(USES)) {
-      const { ref, rest } = match.groups as { ref: string; rest: string };
-      found.push({ file, ref, rest });
-    }
-  }
-  return found;
-}
-
-/** A local action is this repo's own code at this repo's own commit; there is nothing to pin. */
-function thirdParty(use: Use): boolean {
-  return !use.ref.startsWith("./");
-}
+import {
+  actionRepo,
+  commentVersion,
+  PINNED,
+  pinnedSha,
+  pinTable,
+  thirdParty,
+  uses,
+} from "./workflow-pins.js";
 
 describe("the actions the workflows run", () => {
   it("has some to check", () => {
@@ -53,9 +29,44 @@ describe("the actions the workflows run", () => {
   it("says which version each SHA is", () => {
     const unlabelled = uses()
       .filter(thirdParty)
-      .filter((use) => !VERSION_COMMENT.test(use.rest))
+      .filter((use) => commentVersion(use) === undefined)
       .map((use) => `${use.file}: ${use.ref}`);
 
     expect(unlabelled).toEqual([]);
+  });
+
+  // The checks above both pass for a wrong SHA wearing a right-looking `# v4.4.0`: nothing in the
+  // repo related the two. `workflow-pins.json` is that relation, written down once and asserted
+  // everywhere the pin appears — and `pnpm pins:verify` is what resolves it against GitHub.
+  it("names every pin in workflow-pins.json, at the same version", () => {
+    const table = pinTable();
+    const disagreements = uses()
+      .filter(thirdParty)
+      .flatMap((use) => {
+        const labelled = commentVersion(use);
+        const recorded = table[actionRepo(use.ref)]?.[pinnedSha(use) ?? ""];
+        if (recorded !== undefined && recorded === labelled) return [];
+        return [
+          `${use.file}: ${use.ref} is labelled ${labelled ?? "nothing"}, the table says ${recorded ?? "nothing"}`,
+        ];
+      });
+
+    expect(disagreements).toEqual([]);
+  });
+
+  // Otherwise the table keeps pins no workflow uses, and stops being a list anyone trusts.
+  it("carries no entry the workflows have stopped using", () => {
+    const pinned = new Set(
+      uses()
+        .filter(thirdParty)
+        .map((use) => `${actionRepo(use.ref)}@${pinnedSha(use)}`),
+    );
+    const stale = Object.entries(pinTable()).flatMap(([repo, shas]) =>
+      Object.keys(shas)
+        .map((sha) => `${repo}@${sha}`)
+        .filter((entry) => !pinned.has(entry)),
+    );
+
+    expect(stale).toEqual([]);
   });
 });

@@ -156,6 +156,16 @@ Three things about that job are the point rather than an accident, and each has 
 - **`--ignore-scripts --ignore-pnpmfile`.** Without them that repo's `.pnpmfile.cjs` and every
   dependency build script run here, holding the token. `pnpm-guards.test.ts` runs the real pnpm
   against a fixture that writes a marker file from both.
+- **A downstream repo with a pnpmfile is refused, not updated.** `--ignore-pnpmfile` also *deletes*
+  the lockfile's `pnpmfileChecksum`, and the app's own `pnpm install --frozen-lockfile` then fails
+  with `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH` — so the bump PR would open red and stay red, while
+  dropping the flag is the hole above. Neither is acceptable, so the bump fails that one repo by
+  name, before the update, and says why; `fail-fast: false` leaves the rest to open theirs. Checked
+  for are the two names pnpm 12.4.2 actually loads — `.pnpmfile.cjs` and `.pnpmfile.mjs`, not
+  `pnpmfile.js` — and whatever `pnpm-workspace.yaml`'s `pnpmfile:` setting points at, which pnpm
+  runs and checksums just the same. No downstream repo has one today, which is why it is asserted:
+  nothing else would notice until a release had already opened the PR. `pnpm-guards.test.ts`
+  measures the checksum round-trip against the real pnpm, offline.
 - **No credential in the URL or in `.git/config`.** Every git call goes through
   `git -c http.extraheader='AUTHORIZATION: basic …'` *before* the subcommand, which is
   process-scoped; `git clone -c` would write it into the clone. `redact()` strips it, and any
@@ -163,6 +173,36 @@ Three things about that job are the point rather than an accident, and each has 
 
 A repo that refuses its bump fails its own matrix job; `fail-fast: false` leaves the others to
 open theirs.
+
+## Action pins
+
+Every third-party `uses:` is pinned to a commit SHA with a `# vX.Y.Z` comment, because a tag is a
+pointer its owner can repoint at any commit. `workflow-pins.test.ts` scans `.yml` **and** `.yaml`
+under `.github/workflows`, plus every `.github/actions/**/action.y*ml` — a composite action runs
+with the privileges of the job that calls it — and fails a `uses:` that is not 40 hex characters or
+carries no version comment.
+
+The comment alone proves nothing: a wrong SHA wearing a right-looking `# v4.4.0` passed all of
+that, because nothing related the two. `src/workflow-pins.json` is that relation, written down
+once:
+
+```json
+{ "actions/checkout": { "11d5960a326750d5838078e36cf38b85af677262": "v4.4.0" } }
+```
+
+The test asserts every pin appears in the table at the same version, and that the table keeps no
+entry the workflows have stopped using — so bumping a pin means editing both, and a mismatched
+pairing fails CI. Add the new SHA to the table in the same commit as the workflow.
+
+```sh
+pnpm pins:verify
+```
+
+Resolves each table entry's tag through `gh api repos/<owner>/<repo>/commits/<tag> --jq .sha` and
+reports anything that no longer matches. It needs the network and an authenticated `gh`, so no CI
+job runs it: the table is the offline check, this is the one against the world. Run it when bumping
+a pin. A moved tag is not by itself a compromise — an owner may have re-tagged — but the pin is then
+no longer the commit anyone reviewed, so re-read the diff before following it.
 
 `release:publish` and `release:rehearse` stay until the first OIDC release has actually gone
 through this path; then they go and `release:verify` remains, because it is the check that does not

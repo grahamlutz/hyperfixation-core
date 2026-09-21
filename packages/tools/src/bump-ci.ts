@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
+import { parse } from "yaml";
 import { CORE_ROOT } from "./proc.js";
 import { capture, must, ReleaseError } from "./publish-ci.js";
 import { redact } from "./redact.js";
@@ -107,6 +108,28 @@ async function bumpLeftovers(checkout: string, version: string): Promise<string[
 }
 
 /**
+ * The pnpmfile names pnpm 12.4.2 actually loads, probed against it: `.pnpmfile.js`, `pnpmfile.js`
+ * and `pnpmfile.cjs` are read by no version this repo pins, so looking for them would only produce
+ * refusals nothing asked for.
+ */
+const PNPMFILE_NAMES = [".pnpmfile.cjs", ".pnpmfile.mjs"] as const;
+
+/**
+ * The file pnpm would load as this checkout's pnpmfile, if it has one. `pnpm-workspace.yaml`'s
+ * `pnpmfile:` setting points at any path and pnpm 12 honours it — the `.npmrc` spelling it no
+ * longer does — so the two default names are not the whole surface.
+ */
+async function checkoutPnpmfile(checkout: string): Promise<string | undefined> {
+  const workspace = join(checkout, "pnpm-workspace.yaml");
+  if (existsSync(workspace)) {
+    const configured = (parse(await readFile(workspace, "utf8")) as { pnpmfile?: unknown } | null)
+      ?.pnpmfile;
+    if (typeof configured === "string" && existsSync(join(checkout, configured))) return configured;
+  }
+  return PNPMFILE_NAMES.find((name) => existsSync(join(checkout, name)));
+}
+
+/**
  * One bump PR on one downstream repo, or nothing. Every `@hyperfixation/*` moves together —
  * a mixed set is a combination nothing was tested against — which is why the whole set goes to
  * one pinned `pnpm update` and the branch is named for the release rather than for a package.
@@ -147,6 +170,21 @@ export async function bumpDownstream(
       deps.log(`bump      ${repo} depends on no @hyperfixation/* package`);
       return false;
     }
+    // Before the update, because the update is what it would change the meaning of. Asserted
+    // rather than assumed: no repo has one today, so nothing else would notice until a bump PR
+    // opened red.
+    const pnpmfile = await checkoutPnpmfile(checkout);
+    if (pnpmfile !== undefined) {
+      throw new ReleaseError(
+        `${repo} has a ${pnpmfile}, and this bump has no safe way to run \`pnpm update\` there:\n` +
+          "    without `--ignore-pnpmfile` that file runs here holding this job's token, which is\n" +
+          "    the hole the flag closes; with it, the update skipped hooks that shape resolution,\n" +
+          "    and for a `.pnpmfile.cjs` pnpm 12 also drops the lockfile's `pnpmfileChecksum`, so\n" +
+          "    the app's own `pnpm install --frozen-lockfile` fails with\n" +
+          "    ERR_PNPM_LOCKFILE_CONFIG_MISMATCH and the bump PR opens red and stays red.\n" +
+          `    Bump ${repo} to ${version} by hand, or drop ${pnpmfile}.`,
+      );
+    }
     must(deps.exec, checkout, "git", ["checkout", "-b", branch]);
     // Moves the caret in package.json and the lockfile together. Pinned to the exact version
     // rather than `--latest`: an exact pin cannot quietly resolve the version the packument still
@@ -157,7 +195,8 @@ export async function bumpDownstream(
     // `--ignore-scripts --ignore-pnpmfile`: this is the app's code, and the update is the only
     // thing wanted from it. Without them, `.pnpmfile.cjs` and every dependency build script in
     // that repo run here, holding this job's token. `pnpm-guards.test.ts` pins both flags to the
-    // pnpm in `packageManager`.
+    // pnpm in `packageManager`, and measures what `--ignore-pnpmfile` does to the lockfile — which
+    // is why a checkout that has a pnpmfile at all is refused above instead of updated.
     must(deps.exec, checkout, "pnpm", [
       "update",
       `@hyperfixation/*@${version}`,
