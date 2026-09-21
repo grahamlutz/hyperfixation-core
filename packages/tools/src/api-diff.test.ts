@@ -415,6 +415,75 @@ export const STALE_DUMP_HOURS = 24;
   });
 });
 
+describe("a drizzle table that gained a column", () => {
+  /** How `packages/db/etc/db.api.md` prints one, cut down to the shape that matters. */
+  const table = (columns: string): string =>
+    report(`// @public
+export const hfSession: PgTableWithColumns<{
+    name: "hf_session";
+    schema: undefined;
+    columns: {
+${columns}    };
+    dialect: "pg";
+}>;
+`);
+
+  const ID = `        id: PgColumn<{
+            name: "id";
+            notNull: true;
+        }, {}, {}>;
+`;
+  const FACTOR = `        factor: PgColumn<{
+            name: "factor";
+            notNull: true;
+        }, {}, {}>;
+`;
+  const ENROLLED = `        passkeyEnrolledAt: PgColumn<{
+            name: "passkey_enrolled_at";
+            notNull: false;
+        }, {}, {}>;
+`;
+
+  const db = (head: string): ReportPair => ({
+    package: "@hyperfixation/db",
+    version: "0.1.8",
+    file: "packages/db/etc/db.api.md",
+    baseline: table(ID + FACTOR),
+    head,
+  });
+
+  it("excuses an added column — a consumer on N-1 still finds every one it knew", () => {
+    expect(apiChanges(db(table(ID + FACTOR + ENROLLED)))).toEqual([]);
+  });
+
+  it("still reports a dropped column", () => {
+    expect(apiChanges(db(table(ID)))).toEqual([
+      expect.objectContaining({ symbol: "hfSession", member: "columns", kind: "retyped" }),
+    ]);
+  });
+
+  it("still reports a column whose own type changed", () => {
+    const widened = FACTOR.replace('notNull: true;', 'notNull: false;');
+    expect(apiChanges(db(table(ID + widened)))).toEqual([
+      expect.objectContaining({ symbol: "hfSession", member: "columns", kind: "retyped" }),
+    ]);
+  });
+
+  it("still reports a rename, which is a drop and an add at once", () => {
+    const renamed = FACTOR.replace("factor:", "secondFactor:");
+    expect(apiChanges(db(table(ID + renamed)))).toEqual([
+      expect.objectContaining({ symbol: "hfSession", member: "columns", kind: "retyped" }),
+    ]);
+  });
+
+  it("does not excuse a change outside the columns", () => {
+    const retyped = table(ID + FACTOR).replace('name: "hf_session"', 'name: "hf_sessions"');
+    expect(apiChanges(db(retyped))).toEqual([
+      expect.objectContaining({ symbol: "hfSession", member: "name", kind: "retyped" }),
+    ]);
+  });
+});
+
 describe("changesetBump", () => {
   it("takes the largest bump across the PR's changesets", () => {
     const patch = '---\n"@hyperfixation/core": patch\n---\n\nA fix.\n';

@@ -35,8 +35,20 @@ Two things had to be shut, and the first attempt at each was wrong:
 deletes the passkeys and every session with them.
 
 New exports: `mayEnrolPasskey`, `isGuardedPasskeyPath`, `PASSKEY_REGISTRATION_OPTIONS_PATH`,
-`PASSKEY_REGISTRATION_PATHS`, `PASSKEY_AUTHENTICATION_OPTIONS_PATH`, `PASSKEY_SIGN_IN_PATHS`.
-Patch, not minor, on both counts the policy names: `etc/*.api.md` changes only additively, and core
-migration `0010_session_passkey_enrolled_at` adds a nullable column, which N-1's readers do not
-read and cannot trip over. Existing code sessions carry `NULL` and simply cannot promote until a
-fresh enrolment; no backfill.
+`PASSKEY_REGISTRATION_PATHS`, `PASSKEY_AUTHENTICATION_OPTIONS_PATH`, `PASSKEY_SIGN_IN_PATHS` —
+every one of them additive.
+
+**Patch on both counts the policy names.** Core migration `0010_session_passkey_enrolled_at` adds
+one nullable column, which is additive against N-1's readers, and `migration-additivity.test.ts`
+passes. The report changes only additively too — but `api-diff` could not see that: a drizzle table
+gaining a column reprints the whole of `hfSession`'s `columns` member and, through `AUTH_SCHEMA`,
+of `AUTH_SCHEMA.session`, and the gate had no rule for an object type that only *grew*, so it read
+an additive migration as two retyped members and demanded a two-release deprecation of something
+nothing was deprecating. This is the first column added to an existing table since that gate
+landed in #79. `onlyAddsProperties` closes it, beside the `onlyAddsOptionalParameters` and
+const-literal excuses already there and argued the same way: a property removed, renamed or
+retyped is still reported.
+
+Existing code sessions in a live database carry `passkey_enrolled_at IS NULL` and simply cannot
+promote until a fresh enrolment, which is the intended reading and needs no backfill. A session
+minted by passkey sign-in already holds `factor = 'passkey'` and never consults the column.

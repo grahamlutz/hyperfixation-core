@@ -275,7 +275,10 @@ export function apiChanges(pair: ReportPair): Change[] {
               literalMember: value,
             });
           }
-        } else if (!onlyAddsOptionalParameters(member.signature, replacement.signature)) {
+        } else if (
+          !onlyAddsOptionalParameters(member.signature, replacement.signature) &&
+          !onlyAddsProperties(member.signature, replacement.signature)
+        ) {
           changes.push({
             package: pair.package,
             file: pair.file,
@@ -360,6 +363,67 @@ function split(text: string, separator: string): string[] {
   }
   arms.push(text.slice(from));
   return arms.map((arm) => arm.trim()).filter((arm) => arm !== "");
+}
+
+/**
+ * True when `after` is `before` with properties added to its object types and nothing else —
+ * no property removed, none retyped, and the same text around the braces.
+ *
+ * "Adding one is not [breaking]" reaches inside a printed object type as well as into a list of
+ * exports. A `drizzle` table is the case that forced it: `hf_session` gaining a nullable column
+ * reprints the whole of `hfSession`'s `columns` member and, through `AUTH_SCHEMA`, of
+ * `AUTH_SCHEMA.session`, so an additive core migration read as two retyped members and asked for a
+ * two-release deprecation of something nothing was deprecating. A consumer on N-1 still finds
+ * every column it knew, which is the test the policy actually states.
+ *
+ * Recursive because the addition is usually nested — a column inside `columns` inside the table's
+ * type argument. A pair this does not understand as an object is reported, the safe direction.
+ */
+export function onlyAddsProperties(before: string, after: string): boolean {
+  if (before === after) return true;
+  const one = bracedSpan(before);
+  const two = bracedSpan(after);
+  if (one === undefined || two === undefined) return false;
+  if (one.head !== two.head || one.tail !== two.tail) return false;
+
+  const added = objectEntries(two.body);
+  if (added === undefined) return false;
+  const existing = objectEntries(one.body);
+  if (existing === undefined) return false;
+
+  for (const [key, value] of existing) {
+    const replacement = added.get(key);
+    if (replacement === undefined) return false;
+    if (replacement !== value && !onlyAddsProperties(value, replacement)) return false;
+  }
+  return true;
+}
+
+/** A signature split around its outermost `{ … }`, or `undefined` when it has none. */
+function bracedSpan(signature: string): { head: string; body: string; tail: string } | undefined {
+  const open = signature.indexOf("{");
+  const close = signature.lastIndexOf("}");
+  if (open === -1 || close < open) return undefined;
+  return {
+    head: signature.slice(0, open),
+    body: signature.slice(open + 1, close),
+    tail: signature.slice(close + 1),
+  };
+}
+
+/**
+ * A printed object body as `name → type`, cut at its top-level `;`. `undefined` when an entry
+ * carries no top-level `:` to key it by — a mapped type, an index signature's shorthand, anything
+ * this should not pretend to have understood.
+ */
+function objectEntries(body: string): Map<string, string> | undefined {
+  const entries = new Map<string, string>();
+  for (const entry of split(body, ";")) {
+    const at = topLevel(entry, ":")[0];
+    if (at === undefined) return undefined;
+    entries.set(entry.slice(0, at).trim(), entry.slice(at + 1).trim());
+  }
+  return entries;
 }
 
 /**

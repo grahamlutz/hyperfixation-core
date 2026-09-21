@@ -485,6 +485,23 @@ export const AUTH_SCHEMA: {
     identity: undefined;
     generated: undefined;
     }, {}, {}>;
+    passkeyEnrolledAt: PgColumn<    {
+    name: "passkey_enrolled_at";
+    tableName: "hf_session";
+    dataType: "date";
+    columnType: "PgTimestamp";
+    data: Date;
+    driverParam: string;
+    notNull: false;
+    hasDefault: false;
+    isPrimaryKey: false;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: undefined;
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+    }, {}, {}>;
     };
     dialect: "pg";
     }>;
@@ -1427,6 +1444,7 @@ defaultValue: string;
 };
 hooks: {
 before: Middleware<MiddlewareOptions, (inputContext: MiddlewareInputContext<MiddlewareOptions>) => Promise<void>>;
+after: Middleware<MiddlewareOptions, (inputContext: MiddlewareInputContext<MiddlewareOptions>) => Promise<void>>;
 };
 databaseHooks: {
 session: {
@@ -3517,7 +3535,13 @@ export function hasRole(user: SessionUser | null | undefined, role: string): boo
 export type HyperfixationAuth = ReturnType<typeof createAuth>;
 
 // @public
+export function isGuardedPasskeyPath(path: string | null | undefined): boolean;
+
+// @public
 export function mayEnrolPasskey(pool: Pool, sessionToken: string): Promise<boolean>;
+
+// @public
+export const PASSKEY_AUTHENTICATION_OPTIONS_PATH = "/passkey/generate-authenticate-options";
 
 // @public
 export const PASSKEY_AUTHENTICATION_PATH = "/passkey/verify-authentication";
@@ -3530,6 +3554,9 @@ export const PASSKEY_REGISTRATION_PATH = "/passkey/verify-registration";
 
 // @public
 export const PASSKEY_REGISTRATION_PATHS: readonly string[];
+
+// @public
+export const PASSKEY_SIGN_IN_PATHS: readonly string[];
 
 // @public (undocumented)
 export type RequireSession = (options?: RequireSessionOptions) => Promise<AuthSession>;
