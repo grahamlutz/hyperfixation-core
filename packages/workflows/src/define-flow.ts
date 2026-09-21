@@ -1,4 +1,5 @@
 import { DBOS } from "@dbos-inc/dbos-sdk";
+import { flowFingerprint } from "./flow-fingerprint.js";
 import { OutsideRun, withRunContext, type RunContext } from "./run-context.js";
 import { claimRun, concludeRun } from "./run-status.js";
 import { QUEUES, WORKER_PROCESS, type QueueName } from "./start-worker.js";
@@ -25,6 +26,13 @@ export interface Flow<I = unknown, O = unknown> {
 
 export interface DefineFlowOptions {
   queue: QueueName;
+  /**
+   * Which definition of this name this is, for the rare case where the bundler defeats
+   * `flowFingerprint`'s reading of the body — see its comment for the two shapes that do. Set it
+   * and the body is not compared at all: every copy of this definition matches, and a different
+   * definition of the same name must carry a different `version` to be told apart from it.
+   */
+  version?: string;
 }
 
 export class DuplicateFlow extends Error {
@@ -49,7 +57,7 @@ export const SUPERSEDED_MARKER = "hf-run: superseded attempt, the flow was not r
 
 const flows = new Map<string, Flow<never, unknown>>();
 
-/** Per name, what `fingerprint` made of the definition that got in first. */
+/** Per name, what `flowFingerprint` made of the definition that got in first. */
 const fingerprints = new Map<string, string>();
 
 /** The one source of a queue name for an enqueue, and of a flow name for `runs.start`. */
@@ -76,9 +84,13 @@ export function defineFlow<I, O>(
   // this package stays external and singular, so the registry sees both. That is the first
   // instance's flow, already registered with DBOS if this is a worker; hand it back rather than
   // registering it again. Two different definitions of one name are still a collision.
+  //
+  // "The same definition" is `flowFingerprint`'s reading of it, and not the same source text: each
+  // layer is minified with its own name budget, so the two copies never match character for
+  // character. See that function for what the comparison keeps and what it cannot see.
   const existing = flows.get(name);
   if (existing !== undefined) {
-    if (fingerprints.get(name) !== fingerprint(fn, options)) throw new DuplicateFlow(name);
+    if (fingerprints.get(name) !== flowFingerprint(fn, options)) throw new DuplicateFlow(name);
     return existing as unknown as Flow<I, O>;
   }
   if (!QUEUES.some((queue) => queue.name === options.queue)) {
@@ -126,30 +138,8 @@ export function defineFlow<I, O>(
 
   const flow: Flow<I, O> = { name, queue: options.queue, workflow };
   flows.set(name, flow as unknown as Flow<never, unknown>);
-  fingerprints.set(name, fingerprint(fn, options));
+  fingerprints.set(name, flowFingerprint(fn, options));
   return flow;
-}
-
-/**
- * What makes two definitions of a name the same definition. Two module copies of one app file
- * produce distinct function objects with identical source, so identity is useless here and the
- * text is what there is; a closed-over value that differs between the copies is invisible to it,
- * which is the known limit of the check.
- */
-function fingerprint(fn: (...args: never[]) => unknown, options: DefineFlowOptions): string {
-  // Length-prefixed, because a function's source can contain whatever a separator would be.
-  const json = stableJson(options);
-  return `${json.length}:${json}${fn.toString()}`;
-}
-
-/** `JSON.stringify` with object keys sorted, so key order is not part of the comparison. */
-function stableJson(value: unknown): string {
-  if (typeof value !== "object" || value === null) return JSON.stringify(value) ?? "undefined";
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
-  const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) =>
-    a < b ? -1 : a > b ? 1 : 0,
-  );
-  return `{${entries.map(([key, inner]) => `${JSON.stringify(key)}:${stableJson(inner)}`).join(",")}}`;
 }
 
 function messageOf(error: unknown): string {

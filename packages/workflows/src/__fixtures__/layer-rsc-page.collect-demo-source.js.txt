@@ -1,0 +1,1 @@
+async a=>{await (0,g.step)("load",async b=>{let{app:d}=await Promise.resolve().then(c.bind(c,79792)),g=d.sources.require(a.source);await b.tx(async a=>{await (0,f.loadSource)(a,g.name,g.fetch())})},{key:"load"})}

@@ -286,6 +286,7 @@ export function defineFlow<I, O>(name: string, fn: (input: I, run: RunContext) =
 export interface DefineFlowOptions {
     // (undocumented)
     queue: QueueName;
+    version?: string;
 }
 
 // @public
