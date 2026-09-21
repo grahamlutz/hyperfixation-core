@@ -83,6 +83,46 @@ describe("defineFlow", () => {
     expect(evaluateAppModule).not.toThrow();
   });
 
+  it("returns the first flow when the two copies differ only in what the bundler renamed", async () => {
+    const { defineFlow } = await import("./define-flow.js");
+
+    // The production shape, which the test above does not reach: the two layers' copies of one
+    // source are *not* textually identical, because each is minified with its own name budget.
+    // `src/__fixtures__/` holds the real pair out of `next build --webpack`, and
+    // `flow-fingerprint.test.ts` pins them; these two are the same renaming by hand, so that the
+    // registry's own guard is what is under test here.
+    const pageLayer = async (a: { source: string }) => {
+      const g = await Promise.resolve(a.source);
+      return g.toUpperCase();
+    };
+    const actionLayer = async (b: { source: string }) => {
+      const f = await Promise.resolve(b.source);
+      return f.toUpperCase();
+    };
+
+    const first = defineFlow("layers-renamed", pageLayer, { queue: "resolve" });
+
+    expect(defineFlow("layers-renamed", actionLayer, { queue: "resolve" })).toBe(first);
+  });
+
+  it("takes a stated version as the answer rather than reading the bodies", async () => {
+    const { defineFlow } = await import("./define-flow.js");
+    const first = defineFlow("versioned", async () => "first", {
+      queue: "resolve",
+      version: "1",
+    });
+
+    // The escape hatch for a build this cannot see through — a minifier that mangles property
+    // access, say. The bodies are not compared, so an unrelated one is still this flow.
+    expect(defineFlow("versioned", async () => "unrelated", { queue: "resolve", version: "1" })).toBe(
+      first,
+    );
+    // And it does not weaken the guard: a second version of one name is still a collision.
+    expect(() =>
+      defineFlow("versioned", async () => "first", { queue: "resolve", version: "2" }),
+    ).toThrow(/^DuplicateFlow:/);
+  });
+
   it("refuses a queue no worker registers", async () => {
     const { defineFlow } = await import("./define-flow.js");
 
