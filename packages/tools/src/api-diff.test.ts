@@ -484,6 +484,61 @@ ${columns}    };
   });
 });
 
+describe("an object a caller has to supply", () => {
+  const auth = (baseline: string, head: string): ReportPair => ({
+    package: "@hyperfixation/auth",
+    version: "0.1.8",
+    file: "packages/auth/etc/auth.api.md",
+    baseline: report(`// @public\n${baseline}\n`),
+    head: report(`// @public\n${head}\n`),
+  });
+
+  const OPTIONS = "export function createAuth(options: { pool: Pool; secret?: string; }): Auth;";
+
+  it("excuses an optional property added to an options object", () => {
+    const grown = OPTIONS.replace("secret?: string;", "rpID?: string; secret?: string;");
+    expect(apiChanges(auth(OPTIONS, grown))).toEqual([]);
+  });
+
+  it("reports a required property added to an options object", () => {
+    const grown = OPTIONS.replace("secret?: string;", "rpID: string; secret?: string;");
+    expect(apiChanges(auth(OPTIONS, grown))).toEqual([
+      expect.objectContaining({ symbol: "createAuth", kind: "retyped" }),
+    ]);
+  });
+
+  it("reports a property of an options object made required", () => {
+    const required = OPTIONS.replace("secret?: string;", "secret: string;");
+    expect(apiChanges(auth(OPTIONS, required))).toEqual([
+      expect.objectContaining({ symbol: "createAuth", kind: "retyped" }),
+    ]);
+  });
+
+  it("reports a required property added to a callback's event object", () => {
+    const channel = (event: string): string =>
+      `export interface ActionChannel {\n    notify: (event: { ${event} }) => void;\n}`;
+    expect(apiChanges(auth(channel("kind: string;"), channel("at: Date; kind: string;")))).toEqual([
+      expect.objectContaining({ symbol: "ActionChannel", member: "notify", kind: "retyped" }),
+    ]);
+  });
+
+  const TWO = "export function run(a: { x: string; }, b: { y: string; }): void;";
+
+  it("reports a property removed from the first of two parameter objects", () => {
+    const moved = "export function run(a: { }, b: { y: string; x: string; }): void;";
+    expect(apiChanges(auth(TWO, moved))).toEqual([
+      expect.objectContaining({ symbol: "run", kind: "retyped" }),
+    ]);
+  });
+
+  it("reports any change to a signature holding more than one object, optional or not", () => {
+    const grown = TWO.replace("x: string;", "x: string; z?: string;");
+    expect(apiChanges(auth(TWO, grown))).toEqual([
+      expect.objectContaining({ symbol: "run", kind: "retyped" }),
+    ]);
+  });
+});
+
 describe("changesetBump", () => {
   it("takes the largest bump across the PR's changesets", () => {
     const patch = '---\n"@hyperfixation/core": patch\n---\n\nA fix.\n';

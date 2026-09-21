@@ -378,8 +378,18 @@ function split(text: string, separator: string): string[] {
  *
  * Recursive because the addition is usually nested — a column inside `columns` inside the table's
  * type argument. A pair this does not understand as an object is reported, the safe direction.
+ *
+ * An object the *caller* supplies is the exception: a required property added to an options
+ * parameter fails every existing call, so inside a parameter list only an optional addition is
+ * excused. A property of a printed type nobody writes by hand — a drizzle column — is read, not
+ * constructed, and still is.
  */
 export function onlyAddsProperties(before: string, after: string): boolean {
+  return addsProperties(before, after, parameterSpan(before) !== undefined);
+}
+
+/** `supplied`: the signature is a call, so its objects are ones a caller has to write. */
+function addsProperties(before: string, after: string, supplied: boolean): boolean {
   if (before === after) return true;
   const one = bracedSpan(before);
   const two = bracedSpan(after);
@@ -391,37 +401,83 @@ export function onlyAddsProperties(before: string, after: string): boolean {
   const existing = objectEntries(one.body);
   if (existing === undefined) return false;
 
-  for (const [key, value] of existing) {
+  for (const [key, entry] of existing) {
     const replacement = added.get(key);
     if (replacement === undefined) return false;
-    if (replacement !== value && !onlyAddsProperties(value, replacement)) return false;
+    if (replacement.optional !== entry.optional) return false;
+    if (replacement.type !== entry.type && !addsProperties(entry.type, replacement.type, supplied)) {
+      return false;
+    }
+  }
+  if (supplied) {
+    for (const [key, entry] of added) {
+      if (!existing.has(key) && !entry.optional) return false;
+    }
   }
   return true;
 }
 
-/** A signature split around its outermost `{ … }`, or `undefined` when it has none. */
+/**
+ * A signature split around its outermost `{ … }`, or `undefined` when it has none — or when that
+ * `{` is not matched by the signature's last `}`, which means the signature holds more than one
+ * object. `run(a: { x: string; }, b: { y: string; })` is why: taking the first `{` to the last `}`
+ * flattened both bodies into one namespace, so `x` moving from `a` to `b` left the key set
+ * identical and read as no change at all. A signature this cannot split into one object is
+ * reported.
+ */
 function bracedSpan(signature: string): { head: string; body: string; tail: string } | undefined {
-  const open = signature.indexOf("{");
-  const close = signature.lastIndexOf("}");
-  if (open === -1 || close < open) return undefined;
-  return {
-    head: signature.slice(0, open),
-    body: signature.slice(open + 1, close),
-    tail: signature.slice(close + 1),
-  };
+  const last = signature.lastIndexOf("}");
+  let open: number | undefined;
+  let depth = 0;
+  let quote = "";
+  for (let i = 0; i < signature.length; i += 1) {
+    const char = signature[i] ?? "";
+    if (quote !== "") {
+      if (char === quote && signature[i - 1] !== "\\") quote = "";
+      continue;
+    }
+    if (char === '"' || char === "'" || char === "`") quote = char;
+    else if (char === "{") {
+      if (open === undefined) open = i;
+      depth += 1;
+    } else if (char === "}") {
+      depth -= 1;
+      if (depth !== 0 || open === undefined) continue;
+      if (i !== last) return undefined;
+      return {
+        head: signature.slice(0, open),
+        body: signature.slice(open + 1, i),
+        tail: signature.slice(i + 1),
+      };
+    }
+  }
+  return undefined;
+}
+
+/** A printed object property: its type, and whether the key carried a `?`. */
+interface ObjectEntry {
+  readonly type: string;
+  readonly optional: boolean;
 }
 
 /**
- * A printed object body as `name → type`, cut at its top-level `;`. `undefined` when an entry
- * carries no top-level `:` to key it by — a mapped type, an index signature's shorthand, anything
- * this should not pretend to have understood.
+ * A printed object body as `name → entry`, cut at its top-level `;`. A trailing `?` leaves the key
+ * and becomes the entry's optionality, so `b?: number` → `b: number` compares as the same property
+ * made required rather than as one dropped and another added. `undefined` when an entry carries no
+ * top-level `:` to key it by — a mapped type, an index signature's shorthand, anything this should
+ * not pretend to have understood.
  */
-function objectEntries(body: string): Map<string, string> | undefined {
-  const entries = new Map<string, string>();
+function objectEntries(body: string): Map<string, ObjectEntry> | undefined {
+  const entries = new Map<string, ObjectEntry>();
   for (const entry of split(body, ";")) {
     const at = topLevel(entry, ":")[0];
     if (at === undefined) return undefined;
-    entries.set(entry.slice(0, at).trim(), entry.slice(at + 1).trim());
+    const name = entry.slice(0, at).trim();
+    const optional = name.endsWith("?");
+    entries.set(optional ? name.slice(0, -1).trim() : name, {
+      type: entry.slice(at + 1).trim(),
+      optional,
+    });
   }
   return entries;
 }
