@@ -49,15 +49,15 @@ async function rowsOf(runId: string): Promise<Record<string, unknown>[]> {
 }
 
 describe("activity.record", () => {
-  // First in the file on purpose: E002 is asked against an **empty** registry, which only a
-  // database whose machinery rows all carry NULL can pass. The rows below carry a record type.
   it("writes NULL for a row about no record, which E002 ignores", async () => {
     await recordActivity(await context("activity-no-record", "gate"), { kind: "gate.opened" });
 
     const rows = await rowsOf("activity-no-record");
     expect(rows[0]).toMatchObject({ record_type: null, record_id: null });
     // The reason a pseudo record type is never written: E002 refuses the next boot over one.
-    await expect(checkE002(pool, [])).resolves.toBeUndefined();
+    // Asked against this file's own registry rather than an empty one, which would only pass
+    // while no other case here had written a `record_type` yet — declaration order, not a claim.
+    await expect(checkE002(pool, REGISTERED)).resolves.toBeUndefined();
   });
 
   it("writes one row per (run, key) however many attempts run the step", async () => {

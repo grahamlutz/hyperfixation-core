@@ -2,8 +2,13 @@ import type { DBOSClient } from "@dbos-inc/dbos-sdk";
 import type { StepDatabase } from "@hyperfixation/db";
 import type { Flow } from "@hyperfixation/workflows";
 import type { Pool } from "pg";
-import { describe, expect, it, vi } from "vitest";
-import { AppNotAttached, defineApp, NoApplicationVersion } from "./define-app.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  AppNotAttached,
+  defineApp,
+  NoApplicationVersion,
+  resetAttachedControlPlanes,
+} from "./define-app.js";
 import { DuplicateRegistration, InvalidDefinition, UnknownRegistration } from "./registry.js";
 import { defineResolver, type ResolverDefinition } from "./resolvers.js";
 import { defineSchedule } from "./schedules.js";
@@ -55,6 +60,13 @@ function fakeScorer(name: string): ScorerDefinition<Filing, { minMargin: number 
 const HANDLES = { pool: {} as Pool, client: {} as DBOSClient };
 
 describe("defineApp", () => {
+  // Every case below is free to attach and none of them has to remember to undo it: the control
+  // plane is on the process, so a leftover attachment is a leftover for the whole file — and for
+  // any file this vitest worker runs next.
+  afterEach(() => {
+    resetAttachedControlPlanes();
+  });
+
   it("registers everything it is given and refuses a duplicate name in any registry", () => {
     const app = defineApp({
       name: "demo",

@@ -29,14 +29,17 @@ afterAll(async () => {
 });
 
 describe("registerLangfuse beside a Sentry that skips the OpenTelemetry setup", () => {
-  // First, while the keys are still unset and the global still unregistered: a process without a
-  // Langfuse destination creates no exporter and posts nothing anywhere.
+  // A process without a Langfuse destination creates no exporter and posts nothing anywhere.
+  // Counted against what is already there rather than against an empty list: this case used to
+  // rely on running before the one below, which posts a request of its own.
   it("exports nothing when the keys are absent", () => {
+    const before = otlp.requests.length;
+
     expect(registerLangfuse({})).toBeUndefined();
 
     endGenAiSpan();
 
-    expect(otlp.requests).toEqual([]);
+    expect(otlp.requests).toHaveLength(before);
   });
 
   it("exports a gen_ai span when the flush runs", async () => {

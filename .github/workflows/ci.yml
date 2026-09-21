@@ -71,6 +71,25 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm turbo typecheck lint test
+      # `core` in a shuffled order, because its process globals make declaration order a real
+      # dependency: `defineApp`'s control plane is keyed by app name on the process (#123), so a
+      # test that attaches and never detaches decided a later test's answer, and the suite passed
+      # only in the order it happens to be written in. Fixed seeds rather than vitest's random
+      # one — a job that fails on a different order each run is a flake, and the point is a bug
+      # that reproduces. `core` only, at ~5s a seed; `workflows` and `ai` are minutes each because
+      # of the real workers. Both were run by hand on these seeds: `ai` is clean, and `workflows`
+      # is clean under `--sequence.shuffle.files` but not under the full shuffle, which reorders
+      # the cases inside a file too — `run-flow-sync.test.ts` and `redeploy-case-10-launch.test.ts`
+      # share one spawned worker across their cases and read what an earlier case assigned. That is
+      # coupling inside a file rather than the process-global leak this step guards, and #132 has it.
+      - name: core, shuffled
+        run: |
+          for seed in 1 3 7 11 42; do
+            echo "::group::core --sequence.seed=$seed"
+            pnpm vitest run --project core --sequence.shuffle --sequence.seed="$seed" \
+              || { echo "::error::core failed with --sequence.seed=$seed"; exit 1; }
+            echo "::endgroup::"
+          done
       # Not folded into the line above: `api-extractor` compares each package's build against
       # its committed `etc/*.api.md` and fails on any difference, so its failure means
       # "the public API changed" rather than "the code is broken".
