@@ -11,7 +11,7 @@ import {
   type SpawnedWorker,
   type TestDatabase,
 } from "@hyperfixation/testing";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getClient, resetClient } from "./client.js";
 import { createControlPool, type ControlPool } from "./control-pool.js";
 import type { Flow } from "./define-flow.js";
@@ -60,6 +60,11 @@ describe("runFlowSync", () => {
     await control?.end();
     await worker?.kill().catch(() => undefined);
     await database?.drop();
+  });
+
+  // `result.counts` is an absolute `count(*)` and three cases write these tables.
+  beforeEach(async () => {
+    await control.pool.query(`DELETE FROM test_counter; DELETE FROM ${INSERT_TABLE}`);
   });
 
   /**

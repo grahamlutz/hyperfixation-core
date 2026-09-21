@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import type { DBOSClient } from "@dbos-inc/dbos-sdk";
 import { bumpAttempt, controlPlaneTx } from "@hyperfixation/db";
 import {
   asRole,
@@ -9,7 +8,7 @@ import {
   type TestDatabase,
 } from "@hyperfixation/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { getClient } from "./client.js";
+import { getClient, resetClient } from "./client.js";
 import { createControlPool, type ControlPool } from "./control-pool.js";
 import { LAUNCHED_MARKER } from "./start-worker.js";
 import { WORKER_FIXTURE_MODULE } from "./test-support/fixture-module.js";
@@ -29,7 +28,6 @@ describe("redeploy case 10 — the launch half", () => {
   let database: TestDatabase;
   let worker: SpawnedWorker;
   let control: ControlPool;
-  let client: DBOSClient;
 
   beforeAll(async () => {
     database = await createTestDatabase();
@@ -47,10 +45,12 @@ describe("redeploy case 10 — the launch half", () => {
       databaseUrl: database.applicationUrl,
     });
     await worker.ready();
+
+    control = createControlPool({ connectionString: database.applicationUrl });
   }, 180_000);
 
   afterAll(async () => {
-    await client?.destroy();
+    await resetClient();
     await control?.end();
     await worker?.kill();
     await database?.drop();
@@ -77,7 +77,10 @@ describe("redeploy case 10 — the launch half", () => {
   });
 
   it("returns one DBOSClient to the web process, after the boot checks", async () => {
-    client = await getClient({ appName: database.appName, databaseUrl: database.applicationUrl });
+    const client = await getClient({
+      appName: database.appName,
+      databaseUrl: database.applicationUrl,
+    });
     const again = await getClient({
       appName: database.appName,
       databaseUrl: database.applicationUrl,
@@ -87,7 +90,10 @@ describe("redeploy case 10 — the launch half", () => {
   }, 60_000);
 
   it("enqueues a bumped attempt into dbos.workflow_status in one transaction", async () => {
-    control = createControlPool({ connectionString: database.applicationUrl });
+    const client = await getClient({
+      appName: database.appName,
+      databaseUrl: database.applicationUrl,
+    });
 
     const bumped = await controlPlaneTx(control.pool, { operation: "case10-enqueue" }, async (pg) => {
       const attempt = await bumpAttempt(pg, RUN_ID);
@@ -116,6 +122,31 @@ describe("redeploy case 10 — the launch half", () => {
 
     expect(row).toEqual({ name: "case10Probe", queue_name: QUEUE });
   }, 60_000);
+
+});
+
+/**
+ * Its own worker, because a shutdown ends the process the launch cases above read from: sharing
+ * one made "still running" true only if this case happened to run last.
+ */
+describe("redeploy case 10 — the shutdown half", () => {
+  let database: TestDatabase;
+  let worker: SpawnedWorker;
+
+  beforeAll(async () => {
+    database = await createTestDatabase();
+    worker = spawnWorker({
+      module: WORKER_FIXTURE_MODULE,
+      appName: database.appName,
+      databaseUrl: database.applicationUrl,
+    });
+    await worker.ready();
+  }, 180_000);
+
+  afterAll(async () => {
+    await worker?.kill();
+    await database?.drop();
+  });
 
   it("shuts the worker down cleanly", async () => {
     const exit = await worker.shutdown();
