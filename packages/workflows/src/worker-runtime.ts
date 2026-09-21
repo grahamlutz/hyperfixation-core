@@ -1,6 +1,7 @@
 import type { StepPool } from "@hyperfixation/db";
 import type { ApprovalNotifier } from "./approvals.js";
 import type { ControlPool } from "./control-pool.js";
+import { processGlobal } from "./process-global.js";
 
 /** What a running flow needs from the worker that launched it. */
 export interface WorkerRuntime {
@@ -26,14 +27,21 @@ export class WorkerNotStarted extends Error {
  * Process-wide because `DBOS.launch()` is: one worker per process is already enforced by the
  * advisory lock, and a flow function reached by DBOS recovery is handed nothing but its own
  * arguments — there is no call site to thread the pools through.
+ *
+ * On the process global for the same reason the run context is: a flow body reads both on
+ * adjacent lines, and a second copy of this module holding its own `undefined` would answer
+ * `WorkerNotStarted` for a worker that started.
  */
-let current: WorkerRuntime | undefined;
+const holder = processGlobal<{ current?: WorkerRuntime }>(
+  "@hyperfixation/workflows#workerRuntime",
+  () => ({}),
+);
 
 export function setWorkerRuntime(runtime: WorkerRuntime): void {
-  current = runtime;
+  holder.current = runtime;
 }
 
 export function workerRuntime(operation: string): WorkerRuntime {
-  if (current === undefined) throw new WorkerNotStarted(operation);
-  return current;
+  if (holder.current === undefined) throw new WorkerNotStarted(operation);
+  return holder.current;
 }

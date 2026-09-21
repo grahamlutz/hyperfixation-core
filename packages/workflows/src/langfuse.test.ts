@@ -1,7 +1,12 @@
 import { trace, type TracerProvider } from "@opentelemetry/api";
 import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
-import { afterEach, describe, expect, it } from "vitest";
-import { LANGFUSE_ENV, registerLangfuse, type LangfuseRegistration } from "./langfuse.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  LANGFUSE_ENV,
+  LangfuseConflict,
+  registerLangfuse,
+  type LangfuseRegistration,
+} from "./langfuse.js";
 
 const FAKE_KEYS = {
   LANGFUSE_PUBLIC_KEY: "pk-lf-fake",
@@ -40,6 +45,53 @@ describe("registerLangfuse", () => {
     registration = registerLangfuse();
 
     expect(registration).toBeDefined();
+    expect(delegateOf(trace.getTracerProvider())).toBeInstanceOf(NodeTracerProvider);
+  });
+
+  it("hands the first registration back to a second identical call", () => {
+    Object.assign(process.env, FAKE_KEYS);
+
+    registration = registerLangfuse();
+
+    // A second provider would be a second `LangfuseSpanProcessor` exporting the same spans,
+    // behind a `shutdown()` for a provider OTel kept nothing pointed at.
+    expect(registerLangfuse()).toBe(registration);
+  });
+
+  it("is idempotent across two copies of this module", async () => {
+    Object.assign(process.env, FAKE_KEYS);
+    const first = await import("./langfuse.js");
+    registration = first.registerLangfuse();
+
+    vi.resetModules();
+    const second = await import("./langfuse.js");
+    expect(second.registerLangfuse).not.toBe(first.registerLangfuse);
+
+    expect(second.registerLangfuse()).toBe(registration);
+    vi.resetModules();
+  });
+
+  it("refuses a second call that names a different Langfuse project", () => {
+    Object.assign(process.env, FAKE_KEYS);
+    registration = registerLangfuse();
+
+    const other = { ...FAKE_KEYS, LANGFUSE_BASE_URL: "http://other.invalid" };
+    expect(() => registerLangfuse(other)).toThrow(LangfuseConflict);
+    // Both are named, so the message says which two configurations are fighting.
+    expect(() => registerLangfuse(other)).toThrow(/langfuse\.invalid.*other\.invalid/s);
+    // And the secret never reaches the message.
+    expect(() => registerLangfuse(other)).not.toThrow(/sk-lf-fake/);
+  });
+
+  it("registers again after a shutdown", async () => {
+    Object.assign(process.env, FAKE_KEYS);
+    const first = registerLangfuse();
+    await first?.shutdown();
+    trace.disable();
+
+    registration = registerLangfuse();
+
+    expect(registration).not.toBe(first);
     expect(delegateOf(trace.getTracerProvider())).toBeInstanceOf(NodeTracerProvider);
   });
 });

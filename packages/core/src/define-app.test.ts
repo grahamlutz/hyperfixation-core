@@ -2,7 +2,7 @@ import type { DBOSClient } from "@dbos-inc/dbos-sdk";
 import type { StepDatabase } from "@hyperfixation/db";
 import type { Flow } from "@hyperfixation/workflows";
 import type { Pool } from "pg";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { AppNotAttached, defineApp, NoApplicationVersion } from "./define-app.js";
 import { DuplicateRegistration, InvalidDefinition, UnknownRegistration } from "./registry.js";
 import { defineResolver, type ResolverDefinition } from "./resolvers.js";
@@ -180,6 +180,40 @@ describe("defineApp", () => {
 
     app.detach();
     expect(() => app.controlPlane()).toThrow(AppNotAttached);
+  });
+
+  it("attaches the app, not the instance of it that took the call", () => {
+    // What two module layers of one app do: `src/hyperfixation.ts` is evaluated twice, so there
+    // are two `App` objects, and only one of them is the one `worker.ts` or `instrumentation.ts`
+    // reached. A server action running in the other layer used to get `AppNotAttached`.
+    const evaluateAppModule = () => defineApp({ name: "two-layers", applicationVersion: "abc1234" });
+    const rsc = evaluateAppModule();
+    const action = evaluateAppModule();
+    expect(action).not.toBe(rsc);
+
+    rsc.attach(HANDLES);
+    expect(action.controlPlane()).toBe(HANDLES);
+
+    // And a detach is the whole app's, for the same reason: one pool is being torn down.
+    action.detach();
+    expect(() => rsc.controlPlane()).toThrow(AppNotAttached);
+  });
+
+  it("attaches across two copies of this package", async () => {
+    const first = await import("./define-app.js");
+    const attached = first.defineApp({ name: "two-copies", applicationVersion: "abc1234" });
+    attached.attach(HANDLES);
+
+    vi.resetModules();
+    const second = await import("./define-app.js");
+    const other = second.defineApp({ name: "two-copies", applicationVersion: "abc1234" });
+
+    try {
+      expect(other.controlPlane()).toBe(HANDLES);
+    } finally {
+      other.detach();
+      vi.resetModules();
+    }
   });
 
   it("names the operation that had no control plane", () => {

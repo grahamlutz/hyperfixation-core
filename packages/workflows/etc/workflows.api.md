@@ -357,6 +357,11 @@ export function idempotencyKey(runId: string, key: string): string;
 export const LANGFUSE_ENV: readonly ["LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_BASE_URL"];
 
 // @public (undocumented)
+export class LangfuseConflict extends Error {
+    constructor(first: string, second: string);
+}
+
+// @public (undocumented)
 export interface LangfuseRegistration {
     shutdown(): Promise<void>;
 }
