@@ -10,6 +10,7 @@ pnpm release:rehearse 0.1.1     # the whole path against a throwaway Verdaccio
 pnpm release:publish  0.1.2     # the manual one, in a visible terminal
 pnpm release:verify   0.1.2     # what was published is what main says
 pnpm release:ci                 # what .github/workflows/release.yml runs; not for a laptop
+pnpm release:bump               # one downstream bump PR, one token; the same
 ```
 
 `release:publish` publishes the fixed group from a **fresh clone of origin/main** — never this
@@ -129,20 +130,39 @@ pending, it runs `pnpm release:ci`, which:
    documents were `200` while the packument for the three published last still named `0.1.7`, so
    the template's bump PR pinned `admin`, `auth` and `cli` a release behind. A package still
    missing when the window is spent fails the job by name, before any PR is opened;
-8. for every line of `downstream.txt`, clones with the App token, runs
-   `pnpm update '@hyperfixation/*@<version>'` — pinned, because `--latest` quietly resolves
-   whatever the packument names — and opens `core-bump/<version>`. Before committing it asserts
-   in-process that every `@hyperfixation/*` in the app's `dependencies` and `devDependencies` is on
-   `<version>` and that the lockfile resolves no other one; a repo that fails that gets no PR,
-   the rest are still processed, and the job fails at the end naming it. An existing branch or an
-   existing PR for that version is left alone, so a re-run opens nothing. This replaces the
-   `repository_dispatch` route: one App key, held only by core, instead of one per app.
+8. writes `--result` and stops. The bump PRs are opened by `release:bump`, below.
 
 `--dry-run` (the `dry_run` input on `workflow_dispatch`) takes it as far as
 `npm publish --dry-run`: no verification, no tag, no bump PRs.
 
-Adding a downstream repo means two files: `downstream.txt` and the `repositories:` list the App
-token step passes.
+## `release:bump` — one downstream repo, one token
+
+`release.yml`'s `bump` job is a matrix over `downstream.txt` — the same `downstream:matrix` reader
+`ci.yml` uses, so adding a repo is one file. Each entry gets its own job, its own
+`create-github-app-token` scoped to that one repository, and one `pnpm release:bump --repo
+<owner/repo> --version <version>`, which clones with that token, runs
+`pnpm update '@hyperfixation/*@<version>' --ignore-scripts --ignore-pnpmfile` and opens
+`core-bump/<version>`. Pinned, because `--latest` quietly resolves whatever the packument names.
+Before committing it asserts in-process that every `@hyperfixation/*` in the app's `dependencies`
+and `devDependencies` is on `<version>` and that the lockfile resolves no other one. An existing
+branch or an existing PR for that version is left alone, so a re-run opens nothing.
+
+Three things about that job are the point rather than an accident, and each has a test:
+
+- **One repo per token.** The job runs `pnpm update` inside someone else's checkout. A token that
+  also reached core would let any app repo push to core's main and have the next release publish
+  from it. The publishing job's token is scoped to `hyperfixation-core` alone, and it never shares
+  a job with a downstream one — which is why the bump is a job of its own and not a step.
+- **`--ignore-scripts --ignore-pnpmfile`.** Without them that repo's `.pnpmfile.cjs` and every
+  dependency build script run here, holding the token. `pnpm-guards.test.ts` runs the real pnpm
+  against a fixture that writes a marker file from both.
+- **No credential in the URL or in `.git/config`.** Every git call goes through
+  `git -c http.extraheader='AUTHORIZATION: basic …'` *before* the subcommand, which is
+  process-scoped; `git clone -c` would write it into the clone. `redact()` strips it, and any
+  known secret environment value, out of every error message and log line.
+
+A repo that refuses its bump fails its own matrix job; `fail-fast: false` leaves the others to
+open theirs.
 
 `release:publish` and `release:rehearse` stay until the first OIDC release has actually gone
 through this path; then they go and `release:verify` remains, because it is the check that does not

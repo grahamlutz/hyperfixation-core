@@ -19,6 +19,7 @@
     "release:publish": "pnpm --filter @hyperfixation/tools run release-publish",
     "release:rehearse": "pnpm --filter @hyperfixation/tools run release-rehearse",
     "release:ci": "pnpm --filter @hyperfixation/tools run release-ci",
+    "release:bump": "pnpm --filter @hyperfixation/tools run release-bump",
     "//release:version": "`changesets/action` spawns its version-script directly, with no shell, so a `&&` there arrives as an argument to `changeset version`. Two commands have to be one script.",
     "release:version": "changeset version && pnpm install --lockfile-only --ignore-scripts",
     "release:verify": "pnpm --filter @hyperfixation/tools run release-verify",
