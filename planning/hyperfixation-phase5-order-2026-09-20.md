@@ -301,18 +301,21 @@ otherwise it stays covered by core's redeploy cases and is said so. Calendar: 20
 > sign-in paths (`generate-authenticate-options`, `verify-authentication`) is answered for by factor, so an endpoint a
 > plugin upgrade adds is refused before anyone reads its release notes. A `factor = 'code'` session may reach only
 > `generate-register-options` and `verify-registration`, and only while its user holds **zero** passkeys; everything
-> else 404s. A `factor = 'passkey'` session may drive all of them. *(B)* A new nullable
-> `hf_session.passkey_enrolled_at` (core migration `0010`, additive), stamped by a `hooks.after` on
-> `/passkey/verify-registration` on **the calling session** and only when the plugin returned a verified
-> registration — better-auth runs after-hooks over a thrown `APIError` too, so the success check is the difference
-> between a ceremony and a POST of junk. The promotion is then one statement:
+> else 404s. A `factor = 'passkey'` session may drive all of them. *(B)* A row in the new
+> `hf_session_passkey_enrolment` table (core migration `0010`, a `CREATE TABLE` and nothing else; `session_id` primary
+> key, cascading from `hf_session`), written by a `hooks.after` on `/passkey/verify-registration` for **the calling
+> session** and only when the plugin returned a verified registration — better-auth runs after-hooks over a thrown
+> `APIError` too, so the success check is the difference between a ceremony and a POST of junk. A table rather than a
+> column on `hf_session` because `hfSession`'s printed type is public API and a column reads as a *retyped* member to
+> `api-diff`, where a new table is an added export (#131). The promotion is then one statement:
 > `UPDATE hf_session SET factor = 'passkey', updated_at = now() WHERE token = $1 AND factor = 'code' AND expires_at >
-> now() AND passkey_enrolled_at IS NOT NULL AND EXISTS (SELECT 1 FROM hf_passkey p WHERE p.user_id =
-> hf_session.user_id)` — no timestamp comparison anywhere, the `EXISTS` time-free belt and braces.
+> now() AND EXISTS (SELECT 1 FROM hf_session_passkey_enrolment e WHERE e.session_id = hf_session.id) AND EXISTS
+> (SELECT 1 FROM hf_passkey p WHERE p.user_id = hf_session.user_id)` — no timestamp comparison anywhere, both
+> `EXISTS` clauses time-free.
 >
 > The code factor stays the bootstrap for a *first* passkey, which is what keeps X4's enrolment and the admin
 > `resetSecondFactor` recovery path working. **Upgrade safety:** a session minted by passkey sign-in needs no stamp
-> (it is already `passkey`), and every code session already in a live database has `passkey_enrolled_at IS NULL` — it
+> (it is already `passkey`), and every code session already in a live database has no enrolment row — it
 > simply cannot promote until a fresh enrolment, which is the right answer and needs no backfill. The X4 reading is
 > unchanged — `hf_passkey` = 1 after a real phone enrolment — but it now proves something it did not before.
 
