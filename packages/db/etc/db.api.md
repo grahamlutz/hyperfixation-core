@@ -3478,6 +3478,49 @@ generated: undefined;
 dialect: "pg";
 }>;
 
+// @public
+export const hfSessionPasskeyEnrolment: PgTableWithColumns<    {
+name: "hf_session_passkey_enrolment";
+schema: undefined;
+columns: {
+sessionId: PgColumn<    {
+name: "session_id";
+tableName: "hf_session_passkey_enrolment";
+dataType: "string";
+columnType: "PgText";
+data: string;
+driverParam: string;
+notNull: true;
+hasDefault: false;
+isPrimaryKey: true;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: [string, ...string[]];
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+enrolledAt: PgColumn<    {
+name: "enrolled_at";
+tableName: "hf_session_passkey_enrolment";
+dataType: "date";
+columnType: "PgTimestamp";
+data: Date;
+driverParam: string;
+notNull: true;
+hasDefault: true;
+isPrimaryKey: false;
+isAutoincrement: false;
+hasRuntimeDefault: false;
+enumValues: undefined;
+baseColumn: never;
+identity: undefined;
+generated: undefined;
+}, {}, {}>;
+};
+dialect: "pg";
+}>;
+
 // @public (undocumented)
 export const hfSourceRecord: PgTableWithColumns<    {
 name: "hf_source_record";

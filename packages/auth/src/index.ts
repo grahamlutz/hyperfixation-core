@@ -1,5 +1,6 @@
 export {
   createAuth,
+  mayEnrolPasskey,
   upgradeSessionFactor,
   AUTH_SCHEMA,
   type CreateAuthOptions,
@@ -7,11 +8,16 @@ export {
 } from "./factory.js";
 export {
   hasRole,
+  isGuardedPasskeyPath,
   sessionFactorForPath,
   sessionFactors,
   EMAIL_OTP_SIGN_IN_PATH,
+  PASSKEY_AUTHENTICATION_OPTIONS_PATH,
   PASSKEY_AUTHENTICATION_PATH,
+  PASSKEY_REGISTRATION_OPTIONS_PATH,
   PASSKEY_REGISTRATION_PATH,
+  PASSKEY_REGISTRATION_PATHS,
+  PASSKEY_SIGN_IN_PATHS,
   type AuthSession,
   type SessionFactor,
   type SessionUser,

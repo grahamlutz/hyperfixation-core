@@ -71,6 +71,13 @@
       "when": 1789940268670,
       "tag": "0009_budget_spent_scale",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1789960837635,
+      "tag": "0010_session_passkey_enrolment",
+      "breakpoints": true
     }
   ]
 }

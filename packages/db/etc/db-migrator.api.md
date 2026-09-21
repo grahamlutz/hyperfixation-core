@@ -39,7 +39,7 @@ export interface DeleteGuardResult {
 }
 
 // @public
-export const GRANT_RO_EXCLUDED_TABLES: readonly ["hf_user", "hf_session", "hf_account", "hf_verification", "hf_passkey"];
+export const GRANT_RO_EXCLUDED_TABLES: readonly ["hf_user", "hf_session", "hf_account", "hf_verification", "hf_passkey", "hf_session_passkey_enrolment"];
 
 // @public
 export function grantReadOnly(client: Client, readonlyRole: string): Promise<GrantRoResult>;

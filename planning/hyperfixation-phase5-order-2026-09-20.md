@@ -278,6 +278,47 @@ otherwise it stays covered by core's redeploy cases and is said so. Calendar: 20
 > **Unchanged, waiting on X3** — but two of its readings are now commands rather than `psql`: D1's `lock` and
 > `connections` lines (core #115) and C2's drift tolerance (core #114).
 
+> **Finding, 2026-09-20 — the phone passkey enrolment above was reachable without a phone (HIGH).** A security
+> review of the enrolment flow found that `upgradeSessionFactor` promoted on `token = $1 AND factor = 'code'` and
+> nothing else. The WebAuthn ceremony is entirely client-side, so the template's `promoteSession()` server action —
+> guarded only by `requireSession({ factor: 'code' })` — could be invoked directly by anyone holding a code-factor
+> session: read an admin's inbox, sign in with the emailed code, call the action, hold `factor = 'passkey'` and the
+> whole of `/admin/*`. The second half was that a code session could *enrol* on an account that already had a
+> passkey, so the attacker could register their own authenticator and then promote legitimately.
+>
+> **The first fix was itself broken, two ways, both proved with runnable code against a real Postgres.**
+> *(1, CRITICAL)* Its `before` hook matched only the two registration paths, but the plugin also exposes
+> `/passkey/list-user-passkeys`, `/passkey/delete-passkey` and `/passkey/update-passkey`, each guarded on a session
+> and — on two of them — ownership, never a factor. So the chain was: code session → list the victim's passkey ids →
+> delete them → the enrolment gate now reads "this user has none, let them bootstrap" → enrol the attacker's own
+> authenticator → promote → `/admin/*`. The gate undone by the endpoint next to it. *(2, HIGH)* Its promotion
+> predicate, `EXISTS (… p.created_at >= hf_session.created_at)`, bound the promotion to a **time** rather than to a
+> session: the victim holds an old authenticator, the attacker's inbox-only session sits idle, and an hour later the
+> victim legitimately adds a second device from their own passkey session — at which point a passkey newer than the
+> attacker's session exists and the untouched session promotes itself.
+>
+> **The design that replaced it.** *(A)* An **inversion**: every `/passkey/*` endpoint except the two unauthenticated
+> sign-in paths (`generate-authenticate-options`, `verify-authentication`) is answered for by factor, so an endpoint a
+> plugin upgrade adds is refused before anyone reads its release notes. A `factor = 'code'` session may reach only
+> `generate-register-options` and `verify-registration`, and only while its user holds **zero** passkeys; everything
+> else 404s. A `factor = 'passkey'` session may drive all of them. *(B)* A row in the new
+> `hf_session_passkey_enrolment` table (core migration `0010`, a `CREATE TABLE` and nothing else; `session_id` primary
+> key, cascading from `hf_session`), written by a `hooks.after` on `/passkey/verify-registration` for **the calling
+> session** and only when the plugin returned a verified registration — better-auth runs after-hooks over a thrown
+> `APIError` too, so the success check is the difference between a ceremony and a POST of junk. A table rather than a
+> column on `hf_session` because `hfSession`'s printed type is public API and a column reads as a *retyped* member to
+> `api-diff`, where a new table is an added export (#131). The promotion is then one statement:
+> `UPDATE hf_session SET factor = 'passkey', updated_at = now() WHERE token = $1 AND factor = 'code' AND expires_at >
+> now() AND EXISTS (SELECT 1 FROM hf_session_passkey_enrolment e WHERE e.session_id = hf_session.id) AND EXISTS
+> (SELECT 1 FROM hf_passkey p WHERE p.user_id = hf_session.user_id)` — no timestamp comparison anywhere, both
+> `EXISTS` clauses time-free.
+>
+> The code factor stays the bootstrap for a *first* passkey, which is what keeps X4's enrolment and the admin
+> `resetSecondFactor` recovery path working. **Upgrade safety:** a session minted by passkey sign-in needs no stamp
+> (it is already `passkey`), and every code session already in a live database has no enrolment row — it
+> simply cannot promote until a fresh enrolment, which is the right answer and needs no backfill. The X4 reading is
+> unchanged — `hf_passkey` = 1 after a real phone enrolment — but it now proves something it did not before.
+
 ## X5 — A release reaches both apps (user; after W2; the next `Version Packages` PR) — 🚧 In progress
 
 Merge it. Evidence: three `core-bump/<v>` PRs (template, `demo-app`, `demo-two`), each CI green, each merged; `hf deploy`
