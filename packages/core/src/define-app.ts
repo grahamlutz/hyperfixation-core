@@ -40,6 +40,7 @@ import {
 } from "./outcomes.js";
 import type { PageDefinition } from "./pages.js";
 import { pauseApp, resumeApp, type PauseOptions, type PauseResult, type ResumeResult } from "./pause.js";
+import { processGlobal } from "./process-global.js";
 import {
   archiveRecord,
   assertRecordStages,
@@ -95,6 +96,20 @@ import {
  * contravariant, so every `Flow<I, O>` is one of these.
  */
 export type AnyFlow = Flow<never, unknown>;
+
+/**
+ * The attached control plane, keyed by app name and held on the process rather than in the
+ * closure of one `defineApp()` call. `src/hyperfixation.ts` is evaluated once per module layer
+ * (#103), so one app is two `App` objects in one process, and `attach()` is made from the
+ * entrypoint — `worker.ts` or `instrumentation.ts` — which reaches exactly one of them. The
+ * other would then throw `AppNotAttached` for every `ctx`-dependent helper a server action
+ * calls. Two `App`s of one name in one process are the same app twice, so sharing is the
+ * correct answer rather than a convenience.
+ */
+const attachedPlanes = processGlobal<Map<string, ControlPlane>>(
+  "@hyperfixation/core#attachedControlPlanes",
+  () => new Map(),
+);
 
 export interface ApprovalTypeDefinition {
   readonly name: string;
@@ -319,8 +334,8 @@ export function defineApp(options: DefineAppOptions): App {
     }
   }
 
-  let attached: ControlPlane | undefined;
   const controlPlane = (operation = "this operation"): ControlPlane => {
+    const attached = attachedPlanes.get(options.name);
     if (attached === undefined) throw new AppNotAttached(operation);
     return attached;
   };
@@ -438,10 +453,10 @@ export function defineApp(options: DefineAppOptions): App {
     },
 
     attach(next) {
-      attached = next;
+      attachedPlanes.set(options.name, next);
     },
     detach() {
-      attached = undefined;
+      attachedPlanes.delete(options.name);
     },
     controlPlane,
 
