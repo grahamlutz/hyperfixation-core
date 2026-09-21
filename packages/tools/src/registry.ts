@@ -98,9 +98,11 @@ export function httpRegistryClient(url: string = NPMJS_REGISTRY): PackumentRegis
 
 /**
  * How long a freshly published version document may keep 404ing. Observed on the 0.1.1 publish:
- * `npm view` answered immediately while the per-version document 404ed for about a minute.
+ * `npm view` answered immediately while the per-version document 404ed for about a minute — but
+ * on 0.1.9 `@hyperfixation/admin` spent the whole 180s window at 404 with the tarball already
+ * uploaded, so the old window was shorter than npmjs's worst case, not longer.
  */
-export const PROPAGATION_WINDOW_MS = 180_000;
+export const PROPAGATION_WINDOW_MS = 900_000;
 
 const FIRST_RETRY_MS = 2_000;
 const MAX_RETRY_MS = 30_000;
