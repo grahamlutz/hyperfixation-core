@@ -1,5 +1,12 @@
 # @hyperfixation/testing
 
+## 0.1.9
+
+### Patch Changes
+
+- Updated dependencies [5662f8d]
+  - @hyperfixation/db@0.1.9
+
 ## 0.1.8
 
 ### Patch Changes
