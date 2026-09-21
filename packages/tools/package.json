@@ -18,6 +18,7 @@
     "release-bump": "tsx src/bump-ci.ts",
     "release-verify": "tsx src/verify.ts",
     "plan-sync": "tsx src/plan-sync.ts",
+    "pins-verify": "tsx src/workflow-pins-verify.ts",
     "dev-doctor": "tsx src/dev-doctor.ts",
     "dev-clean": "tsx src/dev-clean.ts",
     "worktrees-clean": "tsx src/worktrees-clean.ts",

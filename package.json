@@ -24,6 +24,8 @@
     "release:version": "changeset version && pnpm install --lockfile-only --ignore-scripts",
     "release:verify": "pnpm --filter @hyperfixation/tools run release-verify",
     "plan:sync": "pnpm --filter @hyperfixation/tools run plan-sync",
+    "//pins:verify": "Needs the network, so no CI job runs it; `workflow-pins.test.ts` is the offline half.",
+    "pins:verify": "pnpm --filter @hyperfixation/tools run pins-verify",
     "dev:doctor": "pnpm --filter @hyperfixation/tools run dev-doctor",
     "dev:clean": "pnpm --filter @hyperfixation/tools run dev-clean",
     "worktrees:clean": "pnpm --filter @hyperfixation/tools run worktrees-clean",

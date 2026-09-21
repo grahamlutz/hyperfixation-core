@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -63,8 +63,23 @@ function update(flags: readonly string[]): number {
   return result.status ?? 1;
 }
 
+function install(flags: readonly string[]): number {
+  const result = spawnSync("pnpm", ["install", "--offline", "--ignore-scripts", ...flags], {
+    cwd: fixture,
+    encoding: "utf8",
+  });
+  return result.status ?? 1;
+}
+
 function ran(marker: string): boolean {
   return existsSync(join(fixture, marker));
+}
+
+/** The lockfile's own record of the pnpmfile — the key `--ignore-pnpmfile` turns out to delete. */
+const CHECKSUM = /^\s*pnpmfileChecksum:/mu;
+
+function lockfile(): string {
+  return readFileSync(join(fixture, "pnpm-lock.yaml"), "utf8");
 }
 
 describe("the flags `release:bump` passes pnpm update", () => {
@@ -81,5 +96,30 @@ describe("the flags `release:bump` passes pnpm update", () => {
     update([]);
 
     expect(ran(PNPMFILE_MARKER)).toBe(true);
+  });
+});
+
+/**
+ * The other half of the same flags, and the one nothing measured before: what they leave behind in
+ * the lockfile the bump PR commits. `bump-ci.ts` refuses a checkout with a pnpmfile because of the
+ * first test here — the app's own CI could never merge what the bump would push.
+ */
+describe("what those flags leave in the lockfile", () => {
+  it("drops `pnpmfileChecksum`, so the app's own frozen install refuses the result", () => {
+    expect(install([])).toBe(0);
+    expect(CHECKSUM.test(lockfile())).toBe(true);
+
+    expect(update(GUARDS)).toBe(0);
+
+    expect(CHECKSUM.test(lockfile())).toBe(false);
+    expect(install(["--frozen-lockfile"])).not.toBe(0);
+  });
+
+  it("round-trips an app with no pnpmfile — which is every downstream repo today", async () => {
+    await rm(join(fixture, ".pnpmfile.cjs"));
+
+    expect(install([])).toBe(0);
+    expect(update(GUARDS)).toBe(0);
+    expect(install(["--frozen-lockfile"])).toBe(0);
   });
 });
