@@ -33,8 +33,11 @@ running the suite: "Done" means built with its gate case committed, not observed
 | `redeploy.test.ts` | ✅ Done — all twelve cases (case 5 at 51bc37e; case 7 with three deviations — see chunk 14 in the ordering doc) |
 | `fence.test.ts` | ✅ Done (deviated — case (vii)'s `records.archive()` half is in `@hyperfixation/core`'s tests, because `db` cannot import `core`) |
 | Phase 2 | ✅ Complete (2026-09-19) — every chunk landed and the exit bar runs as an e2e test; small follow-ups are listed at the end of the Exit section; per-chunk status in [hyperfixation-phase2-order-2026-09-18.md](hyperfixation-phase2-order-2026-09-18.md) |
-| Phase 3 | 🚧 In progress — everything but X1 (the manual real-box run) has landed — chunk 0 (published `0.1.0`, MIT), D1–D4, E1–E5; a `0.1.1` publish and the template's `reportProvidersMode` wiring are next; ordered in [hyperfixation-phase3-order-2026-09-19.md](hyperfixation-phase3-order-2026-09-19.md) (chunk 0 first publish; tracks D template deploy shape and E the `hf` cloud path; all six open questions decided; chunk 0 and E1 are unblocked) |
-| Phases 4–7 | ⬜ Not started |
+| Phase 3 | ✅ Complete (2026-09-20) — chunk 0 (published `0.1.0`, MIT), D1–D4, E1–E5 and X1, the first real-box run: `demo-app` is live at `https://demo-app.hyperfixation.ai`. Per-chunk status in [hyperfixation-phase3-order-2026-09-19.md](hyperfixation-phase3-order-2026-09-19.md); X1's leftovers are listed at the end of the Phase 4 doc |
+| Phase 4 | ✅ Complete (2026-09-20) — R0–R2, A1, B1, B2 and X2: merging `Version Packages` publishes all nine with OIDC, tags the release and opens the downstream bump PRs. Ordered in [hyperfixation-phase4-order-2026-09-20.md](hyperfixation-phase4-order-2026-09-20.md) |
+| Phase 5 | 🚧 In progress — every core and template chunk has landed (W1, W2, C1–C3, D1, S1, M1, T1) and `demo-two` is live on real provider keys; `0.1.7` and `0.1.8` are published, `0.1.9` is releasing. What is left is the operator's: X3's console reconciliation, the X4 isolation exit and X5. Ordered in [hyperfixation-phase5-order-2026-09-20.md](hyperfixation-phase5-order-2026-09-20.md) |
+| Phase 6 | ⬜ Ordered, not started — [hyperfixation-phase6-order-2026-09-20.md](hyperfixation-phase6-order-2026-09-20.md); nothing begins before X4 has its numbers |
+| Phase 7 | ⬜ Not started |
 
 ## Adversary findings: disposition
 
