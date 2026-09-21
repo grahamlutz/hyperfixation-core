@@ -67,8 +67,6 @@ async function activityRows(taskId: number): Promise<Record<string, unknown>[]> 
 }
 
 describe("tasks.create", () => {
-  // First in the file: E002 is asked against an empty registry, which only passes while every
-  // machinery row still carries NULL.
   it("writes NULL target columns for a task about no record", async () => {
     const created = await createTask(await context("task-no-record", "sweep"), records, {
       title: "look at the queue",
@@ -80,7 +78,9 @@ describe("tasks.create", () => {
       origin: "flow",
     });
     expect((await activityRows(created.id))[0]).toMatchObject({ record_type: null });
-    await expect(checkE002(pool, [])).resolves.toBeUndefined();
+    // Asked against this file's own registry rather than an empty one, which would only pass
+    // while no other case here had written a `record_type` yet — declaration order, not a claim.
+    await expect(checkE002(pool, REGISTERED)).resolves.toBeUndefined();
   });
 
   it("opens one task per (run, key) however many attempts run the step", async () => {

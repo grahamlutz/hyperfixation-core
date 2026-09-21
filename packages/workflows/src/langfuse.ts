@@ -51,7 +51,9 @@ export class LangfuseConflict extends Error {
  * Idempotent process-wide, not per module copy: a second call for the same three values is one
  * registration reaching here twice and gets the first one's handle back. A second provider would
  * mean a second `LangfuseSpanProcessor` — two exporters on the same spans — behind a `shutdown()`
- * that flushes a provider no span ever went through.
+ * that flushes a provider no span ever went through. It is also why `shutdown()` hands the tracer
+ * provider back (`releaseGlobals`): first-one-wins means registering after a shutdown only works if
+ * the global is free to take.
  *
  * Undefined, and loud, when the global was another SDK's before this: first-one-wins holds against
  * us too, so that provider keeps every span this process creates and the processor built here would
@@ -94,7 +96,13 @@ export function registerLangfuse(
       if (handle.done) return;
       handle.done = true;
       if (state.registered?.handle === handle) state.registered = undefined;
+
+      // Flush, then shut down, then release the global — in that order. `flushThenExit()` in
+      // `start-worker.ts` reaches here on SIGTERM with a batch the process is about to lose, and
+      // `shutdown()` on a processor is not itself the guarantee that the batch left.
+      await provider.forceFlush();
       await provider.shutdown();
+      releaseGlobals(provider);
     },
     done: false,
   };
@@ -105,6 +113,30 @@ export function registerLangfuse(
 
 interface Registration extends LangfuseRegistration {
   done: boolean;
+}
+
+/**
+ * Hands the tracer-provider global back, which is what makes "a process that registers after a
+ * shutdown registers for real" true rather than a hope. `setGlobalTracerProvider` is first-one-wins
+ * — it logs through `diag` and returns false when a provider is already set — so without this a
+ * later `registerLangfuse()` builds a provider and a span processor `register()` silently drops,
+ * and every span keeps going to the provider this call just shut down.
+ *
+ * Only when the global is still ours, so that a provider registered over ours between the two
+ * calls is not taken down by our shutdown. `registerLangfuse` refuses rather than returning a
+ * handle when the global was already another SDK's, so reaching here with someone else's is the
+ * narrow remainder rather than the `LANGFUSE_GLOBAL_TAKEN_MARKER` case.
+ *
+ * That global only. `register()` also installs a context manager and a propagator, but those are
+ * process-wide plumbing rather than ours to take down: the app's own `installSentryContextManager()`
+ * replaces the context manager after we register, and `context.disable()` here left Sentry with no
+ * async-context strategy for the rest of the process, so every forked request scope fell through to
+ * the process-global default and one request's tags rode out on the next. Leaving it installed costs
+ * nothing either, because a later `register()` would only install the same manager again.
+ */
+function releaseGlobals(provider: NodeTracerProvider): void {
+  if (registeredProvider() !== provider) return;
+  trace.disable();
 }
 
 function configOf(env: NodeJS.ProcessEnv): LangfuseConfig {

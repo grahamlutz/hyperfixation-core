@@ -111,6 +111,21 @@ const attachedPlanes = processGlobal<Map<string, ControlPlane>>(
   () => new Map(),
 );
 
+/**
+ * Empties the control plane, whatever app names it holds. Test-only, and deliberately not
+ * exported from `index.ts`: `detach()` is the supported way for a process to give its handles
+ * up, one app at a time, and a published "forget every app" would only be a way for app code to
+ * break itself.
+ *
+ * A test needs it because the map is the realm's and not the test's: `Symbol.for`'s registry
+ * outlives a `vi.resetModules()`, a `describe` and a file, so an `attach()` a case never undid
+ * decided a later case's answer — `define-app.test.ts` left an app named "demo" attached, and the
+ * two cases asserting `AppNotAttached` for "demo" passed on declaration order alone.
+ */
+export function resetAttachedControlPlanes(): void {
+  attachedPlanes.clear();
+}
+
 export interface ApprovalTypeDefinition {
   readonly name: string;
   /** The Zod schema an edited draft is parsed against; a type without one refuses every edit. */

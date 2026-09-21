@@ -66,6 +66,9 @@ describe("redeploy case 4 — pause and resume across a redeploy", () => {
   }, 60_000);
 
   afterAll(async () => {
+    // The control plane is on the process, not on this file: the probe below is about to be
+    // closed, and an attachment left behind is one the next file in this worker would find.
+    app?.detach();
     await resetClient();
     await probe?.close();
     await database?.drop();

@@ -30,6 +30,9 @@ describe("the status endpoint", () => {
   }, 120_000);
 
   afterAll(async () => {
+    // The control plane is on the process, not on this file: the pool below is about to be
+    // ended, and an attachment left behind is one the next file in this worker would find.
+    app?.detach();
     await resetClient();
     await pool?.end();
     await database?.drop();
