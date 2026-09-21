@@ -1,4 +1,5 @@
 import { LangfuseSpanProcessor } from "@langfuse/otel";
+import { trace, type TracerProvider } from "@opentelemetry/api";
 import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
 import { processGlobal } from "./process-global.js";
 
@@ -10,6 +11,15 @@ export const LANGFUSE_ENV = [
 ] as const;
 
 type LangfuseConfig = Record<(typeof LANGFUSE_ENV)[number], string>;
+
+/**
+ * Logged when the trace global already belongs to another SDK's provider — not a second call to
+ * this function, which is `LangfuseConflict`. `setGlobalTracerProvider` answers false rather than
+ * throwing and the diag logger that would have said so is off, so a process in this state exported
+ * nothing and said nothing: how demo-two ran two live calls into an empty Langfuse.
+ */
+export const LANGFUSE_GLOBAL_TAKEN_MARKER =
+  "hf-langfuse: another OpenTelemetry tracer provider owns the global, so nothing exports to Langfuse; initialise Sentry with `skipOpenTelemetrySetup: true`, or call registerLangfuse() in a process that has no other provider";
 
 export interface LangfuseRegistration {
   /** Flushes the batch. Called from the SIGTERM handler before the process exits. */
@@ -42,6 +52,11 @@ export class LangfuseConflict extends Error {
  * registration reaching here twice and gets the first one's handle back. A second provider would
  * mean a second `LangfuseSpanProcessor` — two exporters on the same spans — behind a `shutdown()`
  * that flushes a provider no span ever went through.
+ *
+ * Undefined, and loud, when the global was another SDK's before this: first-one-wins holds against
+ * us too, so that provider keeps every span this process creates and the processor built here would
+ * never see one. Returning a registration anyway is what made that invisible — it also told
+ * `startWorker()` to turn DBOS's tracing on for spans with nowhere to go.
  */
 export function registerLangfuse(
   env: NodeJS.ProcessEnv = process.env,
@@ -64,6 +79,12 @@ export function registerLangfuse(
 
   const provider = new NodeTracerProvider({ spanProcessors: [new LangfuseSpanProcessor()] });
   provider.register();
+  if (registeredProvider() !== provider) {
+    console.error(LANGFUSE_GLOBAL_TAKEN_MARKER);
+    // The processor goes with it: it holds a flush timer, and nothing will ever hand it a span.
+    void provider.shutdown().catch(() => undefined);
+    return undefined;
+  }
 
   const handle: Registration = {
     async shutdown() {
@@ -105,4 +126,14 @@ function describeConfig(config: LangfuseConfig): string {
     `LANGFUSE_PUBLIC_KEY=${JSON.stringify(config.LANGFUSE_PUBLIC_KEY)}, ` +
     `LANGFUSE_SECRET_KEY=<${String(config.LANGFUSE_SECRET_KEY.length)} chars>`
   );
+}
+
+/**
+ * What `trace.getTracer()` resolves through. The global is always the proxy; its delegate is what
+ * registration sets, and on an unregistered proxy that is the noop provider rather than ours.
+ */
+function registeredProvider(): TracerProvider {
+  const provider = trace.getTracerProvider();
+  const proxy = provider as TracerProvider & { getDelegate?: () => TracerProvider };
+  return proxy.getDelegate?.() ?? provider;
 }

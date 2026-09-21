@@ -22,6 +22,7 @@ export {
 export {
   registerLangfuse,
   LANGFUSE_ENV,
+  LANGFUSE_GLOBAL_TAKEN_MARKER,
   LangfuseConflict,
   type LangfuseRegistration,
 } from "./langfuse.js";
