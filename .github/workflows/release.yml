@@ -19,6 +19,10 @@ concurrency:
   group: release
   cancel-in-progress: false
 
+# Every job asks for what it needs; nothing inherits write access it does not use.
+permissions:
+  contents: read
+
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -29,32 +33,37 @@ jobs:
       contents: write
       pull-requests: write
       id-token: write
+    outputs:
+      version: ${{ steps.outcome.outputs.version }}
+      bump: ${{ steps.outcome.outputs.bump }}
     steps:
       # Before the checkout, so `persist-credentials` stores the App's token: the tag push and the
       # `Version Packages` PR both need it. A PR opened with GITHUB_TOKEN triggers no workflows,
       # and this repo's ruleset requires `test`, `downstream` and `changeset` — so that PR could
-      # never merge. `repositories` must list core plus every line of `downstream.txt`.
-      - uses: actions/create-github-app-token@v2
+      # never merge.
+      #
+      # `repositories: hyperfixation-core` and nothing else. This token shares a job with
+      # `id-token: write`, which is the npm publishing identity; the downstream bump jobs below
+      # mint their own, one repo each, so no app repo's code ever runs where either can be read.
+      - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
         id: app-token
         with:
           app-id: ${{ secrets.HF_BOT_APP_ID }}
           private-key: ${{ secrets.HF_BOT_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
-          repositories: |
-            hyperfixation-core
-            hyperfixation-template
-            demo-app
-            demo-two
+          repositories: hyperfixation-core
+          permission-contents: write
+          permission-pull-requests: write
 
       # fetch-depth: 0 for the tags — `release:ci` skips a `v<version>` that already exists.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
           token: ${{ steps.app-token.outputs.token }}
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         with:
           version: 12.4.2
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: pnpm
@@ -67,11 +76,11 @@ jobs:
       # against the trusted publishers configured per package for this workflow file.
       - name: Version or publish
         if: ${{ !inputs.dry_run }}
-        uses: changesets/action@v2
+        uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
         with:
           github-token: ${{ steps.app-token.outputs.token }}
           version-script: pnpm release:version
-          publish-script: pnpm release:ci
+          publish-script: pnpm release:ci --result ${{ runner.temp }}/release.json
           # `release:ci` tags and reports for itself; the action cannot see what a custom
           # publish script published, so leaving these on would mean no tags at all.
           push-git-tags: false
@@ -80,6 +89,89 @@ jobs:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
 
+      # The only channel between this job and the bump jobs. No file means `release:ci` never ran
+      # — the versioning half of `changesets/action` opened a `Version Packages` PR instead — and
+      # there is nothing to bump.
+      - name: Bump decision
+        id: outcome
+        if: ${{ !inputs.dry_run }}
+        env:
+          RESULT: ${{ runner.temp }}/release.json
+        run: |
+          if [ ! -f "$RESULT" ]; then echo "bump=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+          {
+            echo "version=$(node -p "require(process.env.RESULT).version")"
+            echo "bump=$(node -p "require(process.env.RESULT).bumpable")"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Dry run
         if: ${{ inputs.dry_run }}
         run: pnpm release:ci --dry-run
+
+  # `downstream.txt`, as one matrix entry per `owner/repo` — the same reader `ci.yml` builds its
+  # `downstream` matrix from, so an app joins both at once and the two cannot drift.
+  bump-list:
+    needs: release
+    if: needs.release.outputs.bump == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          version: 12.4.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - id: matrix
+        run: pnpm downstream:matrix
+
+  # One job, one repo, one token. `release:bump` clones that repo and runs `pnpm update` in it —
+  # someone else's checkout — so the credential in this job must be worth nothing anywhere else.
+  # No `id-token`, no write access to core: a compromised app repo gets a token for itself.
+  #
+  # `fail-fast: false` is what keeps "one repo refuses, the others still get their PR": the loop
+  # that used to do it inside `release:ci` is now the matrix.
+  bump:
+    needs: [release, bump-list]
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.bump-list.outputs.matrix) }}
+    name: bump (${{ matrix.repo }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      # `persist-credentials: false`: `release:bump` authenticates every git call itself, with the
+      # per-repo token below and as a transient header, so no credential is left in a `.git/config`
+      # the downstream checkout's own tooling could read.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          version: 12.4.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+        id: app-token
+        with:
+          app-id: ${{ secrets.HF_BOT_APP_ID }}
+          private-key: ${{ secrets.HF_BOT_APP_PRIVATE_KEY }}
+          owner: ${{ matrix.owner }}
+          repositories: ${{ matrix.name }}
+          permission-contents: write
+          permission-pull-requests: write
+      - run: pnpm release:bump --repo "$REPO" --version "$VERSION"
+        env:
+          REPO: ${{ matrix.repo }}
+          VERSION: ${{ needs.release.outputs.version }}
+          HF_BUMP_TOKEN: ${{ steps.app-token.outputs.token }}
