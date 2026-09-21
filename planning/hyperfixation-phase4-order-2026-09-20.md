@@ -116,6 +116,20 @@ publishes in dependency order, dispatches once per line; the workflow's dry path
 > resolve to it; and asserts the updated `package.json` and lockfile before committing, so the broken PR is never
 > opened rather than caught downstream.
 
+> **Finding — the release job held one token for core *and* every app, and ran app code with it.** A security
+> review of this chunk found four supply-chain issues, all fixed in one PR. The first was the real one: the App
+> token minted here listed core plus all three downstream repos, and `release:ci` used it to clone each app and
+> run `pnpm update` there — which executes that repo's `.pnpmfile.cjs` and its dependency build scripts. A
+> compromise of any app repo therefore yielded `contents: write` on hyperfixation-core, and a push to core's main
+> is a release that publishes to npm under the job's OIDC identity. The bump is now a `bump` matrix job per repo,
+> each with its own token scoped to that repository and no `id-token`, so the publishing credential and an app's
+> code are never on the same runner; `pnpm update` runs `--ignore-scripts --ignore-pnpmfile`; the token goes to
+> git as a transient `http.extraheader` rather than in the clone URL; and `redact()` strips credentials out of
+> every message. The rest: `ci.yml` had no `permissions:` block and left the per-repo token in
+> `downstream/.git/config` while that repo's own tooling ran; every action was pinned to a moving tag.
+> `workflow-pins.test.ts`, `release-repositories.test.ts` and `pnpm-guards.test.ts` hold each of these. What only
+> a real release can prove is listed in that PR's `## Built`.
+
 ## R2 — First OIDC release, `0.1.2` (manual observation; after R0, R1, A1) — ✅ Done
 
 Merge the `Version Packages` PR the action opens (its CI must run — that is concern 1's proof). Record here: the run

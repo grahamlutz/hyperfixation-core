@@ -286,6 +286,7 @@ export function defineFlow<I, O>(name: string, fn: (input: I, run: RunContext) =
 export interface DefineFlowOptions {
     // (undocumented)
     queue: QueueName;
+    version?: string;
 }
 
 // @public
@@ -355,6 +356,14 @@ export function idempotencyKey(runId: string, key: string): string;
 
 // @public
 export const LANGFUSE_ENV: readonly ["LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_BASE_URL"];
+
+// @public
+export const LANGFUSE_GLOBAL_TAKEN_MARKER = "hf-langfuse: another OpenTelemetry tracer provider owns the global, so nothing exports to Langfuse; initialise Sentry with `skipOpenTelemetrySetup: true`, or call registerLangfuse() in a process that has no other provider";
+
+// @public (undocumented)
+export class LangfuseConflict extends Error {
+    constructor(first: string, second: string);
+}
 
 // @public (undocumented)
 export interface LangfuseRegistration {

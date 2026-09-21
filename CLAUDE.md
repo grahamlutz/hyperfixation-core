@@ -24,8 +24,10 @@ maintainer tooling and never publishes. The app template is the separate
   with OIDC trusted publishing and tags the release.
 - A deploy is a command, not a merge. Coolify's push auto-deploy is off on every app `hf new` creates, so a
   merged bump reaches the box only through `hf deploy <name>`.
-- Before adding a repo to `downstream.txt`, check its own CI is green, and add it to `release.yml`'s repository
-  list too — a test fails when the two lists drift.
+- Before adding a repo to `downstream.txt`, check its own CI is green. That file is the only list: both
+  `ci.yml`'s `downstream` matrix and `release.yml`'s `bump` matrix are built from it, one job and one
+  repo-scoped App token each.
+- Pin every third-party action by commit SHA with a `# vX.Y.Z` comment — `workflow-pins.test.ts` fails a tag.
 - Mail goes through the template's one shared sender; nothing else sends.
 - A secret must never reach an error message or a log — an `SMTP_URL` token did, in X1 — and API tokens are
   IP-restricted.

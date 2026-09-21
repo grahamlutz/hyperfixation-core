@@ -1,10 +1,11 @@
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { parseDownstream } from "./downstream-matrix.js";
+import { redact } from "./redact.js";
 import {
   awaitInstallable,
   httpRegistryClient,
@@ -25,7 +26,7 @@ import {
 
 const CORE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 
-const USAGE = `Usage: pnpm release:ci [--dry-run] [--registry <url>] [--root <dir>]
+const USAGE = `Usage: pnpm release:ci [--dry-run] [--registry <url>] [--root <dir>] [--result <file>]
 
 The publish step of \`.github/workflows/release.yml\`, run by \`changesets/action\` once the
 \`Version Packages\` PR has merged. Unlike \`release:publish\` it takes no version and no
@@ -33,20 +34,18 @@ confirmation: the checkout it runs in *is* the release commit, and the version i
 fixed group's manifests say. The credential is the OIDC token \`npm publish --provenance\` mints
 per run, so there is no token to pass and none to leak.
 
+The downstream bump PRs are not opened here — \`release:bump\` opens them, one job per repo with
+a token scoped to that repo alone, so a compromised app repo cannot reach this job's npm identity.
+
   --dry-run          \`npm publish --dry-run\`; no verification, no tag, no bump PRs
   --registry <url>   check this registry instead of ${NPMJS_REGISTRY}
   --root <dir>       the checkout to release (default: this one)
+  --result <file>    write the outcome as JSON, for the workflow's bump jobs to read
 
 A push to main that carries no changesets re-runs this against a version the registry already
 has in full; it exits 0 having published, tagged and opened nothing.`;
 
-const BOT_NAME = "hyperfixation-bot";
-const BOT_EMAIL = "hyperfixation-bot@users.noreply.github.com";
-
 export class ReleaseError extends Error {}
-
-/** One downstream repo refusing its bump: the other repos are still processed. */
-export class BumpError extends ReleaseError {}
 
 export type ReleaseCIOptions = {
   readonly root: string;
@@ -59,8 +58,6 @@ export type ReleaseCIDeps = {
   readonly registry: PackumentRegistryClient;
   readonly integrity: (tarball: string) => Promise<string>;
   readonly log: (line: string) => void;
-  /** The bot App's installation token: clones, pushes and `gh` calls on the downstream repos. */
-  readonly token: string;
   readonly wait?: PropagationWait;
 };
 
@@ -69,34 +66,30 @@ export type ReleaseCIResult = {
   readonly published: readonly string[];
   readonly skipped: readonly string[];
   readonly tagged: string | undefined;
-  /** Downstream repos a `core-bump/<version>` PR was opened on. */
-  readonly bumped: readonly string[];
-  /** Downstream repos left alone — already bumped, or already carrying the branch or the PR. */
-  readonly untouched: readonly string[];
+  /**
+   * Whether the workflow should now run the per-repo bump jobs: something was published, and the
+   * registry serves it to installers.
+   */
+  readonly bumpable: boolean;
 };
 
-function must(exec: Exec, cwd: string, command: string, args: readonly string[]): void {
+/** The one place a failure message is built, so `redact` is the one place it is cleaned. */
+export function must(exec: Exec, cwd: string, command: string, args: readonly string[]): void {
   if (exec(command, args, { cwd }).status !== 0) {
-    throw new ReleaseError(`${command} ${args.join(" ")} failed in ${cwd}`);
+    throw new ReleaseError(redact(`${command} ${args.join(" ")} failed in ${cwd}`));
   }
 }
 
-function capture(exec: Exec, cwd: string, command: string, args: readonly string[]): string {
+export function capture(
+  exec: Exec,
+  cwd: string,
+  command: string,
+  args: readonly string[],
+): string {
   const result = exec(command, args, { cwd, capture: true });
   if (result.status !== 0) {
-    throw new ReleaseError(`${command} ${args.join(" ")} failed in ${cwd}`);
+    throw new ReleaseError(redact(`${command} ${args.join(" ")} failed in ${cwd}`));
   }
-  return result.stdout;
-}
-
-/** `gh` reads the bot token from the environment, never from a flag. */
-function gh(deps: ReleaseCIDeps, cwd: string, args: readonly string[]): string {
-  const result = deps.exec("gh", args, {
-    cwd,
-    capture: true,
-    env: { ...process.env, GH_TOKEN: deps.token },
-  });
-  if (result.status !== 0) throw new ReleaseError(`gh ${args.join(" ")} failed`);
   return result.stdout;
 }
 
@@ -105,137 +98,6 @@ export async function readDownstream(root: string): Promise<string[]> {
   const file = join(root, "downstream.txt");
   if (!existsSync(file)) return [];
   return parseDownstream(await readFile(file, "utf8"));
-}
-
-function cloneUrl(repo: string, token: string): string {
-  return `https://x-access-token:${token}@github.com/${repo}.git`;
-}
-
-async function hyperfixationDependencies(checkout: string): Promise<string[]> {
-  const raw = JSON.parse(await readFile(join(checkout, "package.json"), "utf8")) as {
-    dependencies?: Record<string, string>;
-    devDependencies?: Record<string, string>;
-  };
-  return Object.keys({ ...raw.dependencies, ...raw.devDependencies })
-    .filter((name) => name.startsWith("@hyperfixation/"))
-    .sort();
-}
-
-const RANGE_PREFIX = /^[\^~=v><\s]*/u;
-
-/** Every `@hyperfixation/*` mention the lockfile carries, as `name@version`. */
-const LOCK_MENTION = /@hyperfixation\/(?<name>[a-z-]+)@(?<version>\d[^\s'":,()]*)/gu;
-
-/**
- * What still names another version after the update — the check that would have caught the 0.1.8
- * bump, whose `package.json` kept `admin`, `auth` and `cli` at `^0.1.7`. The app's own
- * `core-version.test.ts` catches it too, but only after a broken PR has been opened.
- */
-async function bumpLeftovers(checkout: string, version: string): Promise<string[]> {
-  const raw = JSON.parse(await readFile(join(checkout, "package.json"), "utf8")) as {
-    dependencies?: Record<string, string>;
-    devDependencies?: Record<string, string>;
-  };
-  const leftovers: string[] = [];
-  for (const field of ["dependencies", "devDependencies"] as const) {
-    for (const [name, spec] of Object.entries(raw[field] ?? {})) {
-      if (!name.startsWith("@hyperfixation/")) continue;
-      if (spec.replace(RANGE_PREFIX, "") !== version) {
-        leftovers.push(`package.json ${field}["${name}"] is ${spec}, not ${version}`);
-      }
-    }
-  }
-  const lockfile = join(checkout, "pnpm-lock.yaml");
-  if (existsSync(lockfile)) {
-    for (const match of (await readFile(lockfile, "utf8")).matchAll(LOCK_MENTION)) {
-      const { name, version: resolved } = match.groups as { name: string; version: string };
-      if (resolved !== version) {
-        leftovers.push(`pnpm-lock.yaml resolves @hyperfixation/${name} to ${resolved}`);
-      }
-    }
-  }
-  return [...new Set(leftovers)];
-}
-
-/**
- * One bump PR on one downstream repo, or nothing. Every `@hyperfixation/*` moves together —
- * a mixed set is a combination nothing was tested against — which is why the whole set goes to
- * one pinned `pnpm update` and the branch is named for the release rather than for a package.
- */
-async function bumpDownstream(
-  repo: string,
-  version: string,
-  deps: ReleaseCIDeps,
-  root: string,
-): Promise<boolean> {
-  const branch = `core-bump/${version}`;
-  const url = cloneUrl(repo, deps.token);
-
-  const heads = capture(deps.exec, root, "git", ["ls-remote", "--heads", url, `refs/heads/${branch}`]);
-  if (heads.trim() !== "") {
-    deps.log(`bump      ${repo} already has ${branch}`);
-    return false;
-  }
-  // A merged bump PR's branch is deleted, so `ls-remote` alone would reopen it.
-  const prs = gh(deps, root, ["pr", "list", "--repo", repo, "--head", branch, "--state", "all", "--json", "number"]);
-  if ((JSON.parse(prs.trim() === "" ? "[]" : prs) as unknown[]).length > 0) {
-    deps.log(`bump      ${repo} already has a PR for ${branch}`);
-    return false;
-  }
-
-  const work = await mkdtemp(join(tmpdir(), "hf-bump-"));
-  const checkout = join(work, "app");
-  try {
-    must(deps.exec, root, "git", ["clone", "--depth", "1", url, checkout]);
-    const names = await hyperfixationDependencies(checkout);
-    if (names.length === 0) {
-      deps.log(`bump      ${repo} depends on no @hyperfixation/* package`);
-      return false;
-    }
-    must(deps.exec, checkout, "git", ["checkout", "-b", branch]);
-    // Moves the caret in package.json and the lockfile together. Pinned to the exact version
-    // rather than `--latest`: an exact pin cannot quietly resolve the version the packument still
-    // names. It resolves a version minutes old only because the app's `pnpm-workspace.yaml` keeps
-    // `@hyperfixation/*` in `minimumReleaseAgeExclude`; without it pnpm 12 refuses anything
-    // published under 24h ago.
-    must(deps.exec, checkout, "pnpm", ["update", `@hyperfixation/*@${version}`]);
-    const leftovers = await bumpLeftovers(checkout, version);
-    if (leftovers.length > 0) {
-      throw new BumpError(
-        `${repo} is not wholly on ${version} after the update:\n    ${leftovers.join("\n    ")}`,
-      );
-    }
-    if (capture(deps.exec, checkout, "git", ["status", "--porcelain"]).trim() === "") {
-      deps.log(`bump      ${repo} is already at ${version}`);
-      return false;
-    }
-    must(deps.exec, checkout, "git", [
-      "-c",
-      `user.name=${BOT_NAME}`,
-      "-c",
-      `user.email=${BOT_EMAIL}`,
-      "commit",
-      "-am",
-      `Bump @hyperfixation/* to ${version}`,
-    ]);
-    must(deps.exec, checkout, "git", ["push", "origin", branch]);
-    gh(deps, checkout, [
-      "pr",
-      "create",
-      "--repo",
-      repo,
-      "--head",
-      branch,
-      "--title",
-      `Bump @hyperfixation/* to ${version}`,
-      "--body",
-      `Every \`@hyperfixation/*\` package moved together to \`${version}\`, opened by hyperfixation-core's release run.\n\nThis app's own contract suite gates the merge. A red CI here means the release changed something this app depends on; read the failure before overriding it.`,
-    ]);
-    deps.log(`bump      ${repo} ${branch} opened`);
-    return true;
-  } finally {
-    await rm(work, { recursive: true, force: true });
-  }
 }
 
 export async function releaseCI(
@@ -263,7 +125,7 @@ export async function releaseCI(
   // full, and a release run must be a no-op rather than a re-tag and a second round of bump PRs.
   if (already.size === order.length) {
     deps.log(`${version} is already on ${deps.registry.url} in full — nothing to do.`);
-    return { version, published: [], skipped: order, tagged: undefined, bumped: [], untouched: [] };
+    return { version, published: [], skipped: order, tagged: undefined, bumpable: false };
   }
 
   const work = await mkdtemp(join(tmpdir(), "hf-release-ci-"));
@@ -300,7 +162,7 @@ export async function releaseCI(
 
     if (options.dryRun) {
       deps.log("\n--dry-run: not verifying, not tagging, opening no bump PRs.");
-      return { version, published, skipped, tagged: undefined, bumped: [], untouched: [] };
+      return { version, published, skipped, tagged: undefined, bumpable: false };
     }
 
     const problems = await registryProblems(
@@ -330,12 +192,6 @@ export async function releaseCI(
     }
 
     const downstream = await readDownstream(options.root);
-    if (downstream.length > 0 && deps.token === "") {
-      throw new ReleaseError(
-        "downstream.txt names repositories but no bot token was passed: GITHUB_TOKEN must carry " +
-          "the hyperfixation-bot App's installation token, or the bump PRs cannot be opened.",
-      );
-    }
     if (downstream.length > 0) {
       const { misses, waitedMs } = await awaitInstallable(
         deps.registry,
@@ -353,25 +209,13 @@ export async function releaseCI(
       deps.log(`\nAll ${order.length} abbreviated packuments serve ${version}.`);
     }
 
-    const bumped: string[] = [];
-    const untouched: string[] = [];
-    const refused: string[] = [];
-    for (const repo of downstream) {
-      try {
-        if (await bumpDownstream(repo, version, deps, options.root)) bumped.push(repo);
-        else untouched.push(repo);
-      } catch (error) {
-        if (!(error instanceof BumpError)) throw error;
-        deps.log(`bump      ${error.message}`);
-        refused.push(error.message);
-      }
-    }
-    // Reported after the loop so one refusing repo does not cost the others their PR.
-    if (refused.length > 0) {
-      throw new ReleaseError(`No bump PR was opened on:\n  ${refused.join("\n  ")}`);
-    }
-
-    return { version, published, skipped, tagged: exists ? undefined : tag, bumped, untouched };
+    return {
+      version,
+      published,
+      skipped,
+      tagged: exists ? undefined : tag,
+      bumpable: downstream.length > 0 && published.length > 0,
+    };
   } finally {
     await rm(work, { recursive: true, force: true });
   }
@@ -383,6 +227,7 @@ async function main(): Promise<number> {
       "dry-run": { type: "boolean", default: false },
       registry: { type: "string", default: NPMJS_REGISTRY },
       root: { type: "string", default: CORE_ROOT },
+      result: { type: "string" },
       help: { type: "boolean", default: false },
     },
   });
@@ -402,16 +247,18 @@ async function main(): Promise<number> {
       registry: httpRegistryClient(options.registry),
       integrity: tarballIntegrity,
       log: (line) => console.log(line),
-      token: process.env.GITHUB_TOKEN ?? "",
     });
+    if (values.result !== undefined) {
+      await writeFile(resolve(values.result), JSON.stringify(result), "utf8");
+    }
     console.log(
       `\n${result.version}: published ${result.published.length}, skipped ${result.skipped.length}` +
-        `, tag ${result.tagged ?? "(unchanged)"}, bump PRs ${result.bumped.length}`,
+        `, tag ${result.tagged ?? "(unchanged)"}, bump ${result.bumpable}`,
     );
     return 0;
   } catch (error) {
     if (error instanceof ReleaseError) {
-      console.error(`\n${error.message}`);
+      console.error(`\n${redact(error.message)}`);
       return 1;
     }
     throw error;
