@@ -38,11 +38,26 @@ export const hfSession = pgTable("hf_session", {
   // Defaults to the weaker factor: a session created by a path that does not yet
   // stamp one must not pass a passkey-gated check by omission.
   factor: text("factor", { enum: sessionFactors }).notNull().default("code"),
-  // Set when *this* session completed a passkey registration, and the only thing a promotion to
-  // `factor = 'passkey'` is allowed to read. Null on every session anything else created, which
-  // is why it is nullable rather than defaulted: "this session enrolled nothing" has to be the
-  // state a row arrives in.
-  passkeyEnrolledAt: timestamp("passkey_enrolled_at", { withTimezone: true, mode: "date" }),
+});
+
+/**
+ * One row per session that completed a passkey registration, and the only thing a promotion to
+ * `factor = 'passkey'` is allowed to read.
+ *
+ * A column on `hf_session` was the obvious place and is not an available one: `hfSession`'s
+ * printed type is public API, so a column reads as a *retyped* member to `api-diff` — breaking by
+ * the versioning policy, with no path through the gate — while a new table is an added export.
+ * The blind spot behind that is #131.
+ *
+ * `session_id` is the whole key, so a second registration from the same session is inert. The
+ * cascade is what keeps the proof from outliving the session it proves something about:
+ * `resetSecondFactor` deletes the user's sessions, and these rows go with them.
+ */
+export const hfSessionPasskeyEnrolment = pgTable("hf_session_passkey_enrolment", {
+  sessionId: text("session_id")
+    .primaryKey()
+    .references(() => hfSession.id, { onDelete: "cascade" }),
+  enrolledAt: timestamp("enrolled_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
 });
 
 export const hfAccount = pgTable("hf_account", {

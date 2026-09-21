@@ -13,6 +13,8 @@ export const GRANT_RO_EXCLUDED_TABLES = [
   "hf_account",
   "hf_verification",
   "hf_passkey",
+  // Session-derived: which session enrolled a passkey names a session, and the promotion reads it.
+  "hf_session_passkey_enrolment",
 ] as const;
 
 export interface GrantRoResult {

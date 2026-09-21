@@ -40,12 +40,13 @@ export const AUTH_SCHEMA = {
 const UPGRADE_SESSION_FACTOR_STATEMENT =
   "UPDATE hf_session SET factor = 'passkey', updated_at = now() " +
   "WHERE token = $1 AND factor = 'code' AND expires_at > now() " +
-  "AND passkey_enrolled_at IS NOT NULL " +
+  "AND EXISTS (SELECT 1 FROM hf_session_passkey_enrolment e WHERE e.session_id = hf_session.id) " +
   "AND EXISTS (SELECT 1 FROM hf_passkey p WHERE p.user_id = hf_session.user_id)";
 
 /** Records that this very session completed a registration; see `stampPasskeyEnrolment`. */
 const STAMP_PASSKEY_ENROLMENT_STATEMENT =
-  "UPDATE hf_session SET passkey_enrolled_at = now(), updated_at = now() WHERE token = $1";
+  "INSERT INTO hf_session_passkey_enrolment (session_id) " +
+  "SELECT id FROM hf_session WHERE token = $1 ON CONFLICT (session_id) DO NOTHING";
 
 // Answers `passkeyEndpointAllowed`. A session's own factor and whether its user holds any
 // authenticator at all — no timestamps, because a time is not a session.
@@ -147,14 +148,15 @@ export function createAuth(options: CreateAuthOptions) {
  * Promotes the session that just enrolled a passkey, so the user is not sent back through the
  * email code to reach the app they enrolled from.
  *
- * Registration is not authentication, so it does not go through `sessionFactorForPath`: this is
- * a deliberate second entry into `passkey`. What makes it safe is `passkey_enrolled_at`, not the
- * caller: the WebAuthn ceremony is client-side, so a server action that merely asks "is this a
- * code session?" before promoting is an invitation to skip the ceremony and call it directly —
- * whoever could read the emailed code would hold `passkey` and, with the role, `/admin/*`.
+ * Registration is not authentication, so it does not go through `sessionFactorForPath`: this is a
+ * deliberate second entry into `passkey`. What makes it safe is the `hf_session_passkey_enrolment`
+ * row, not the caller: the WebAuthn ceremony is client-side, so a server action that merely asks
+ * "is this a code session?" before promoting is an invitation to skip the ceremony and call it
+ * directly — whoever could read the emailed code would hold `passkey` and, with the role,
+ * `/admin/*`.
  *
- * The proof has to be a column on *this row*, set by `createAuth`'s after-hook when the plugin
- * itself returned a verified registration. Anything that infers enrolment from a time instead —
+ * The proof has to name *this session*, and it is written by `createAuth`'s after-hook when the
+ * plugin itself returned a verified registration. Anything that infers enrolment from a time —
  * "a `hf_passkey` row newer than this session exists" was the first attempt — binds the
  * promotion to a clock rather than to a session: an attacker's idle code session promotes itself
  * the moment the victim legitimately adds a second device from their own passkey session, hours
@@ -165,7 +167,8 @@ export function createAuth(options: CreateAuthOptions) {
  * `expires_at > now()` because a dead session is not one to hand the stronger factor to, and
  * the `factor = 'code'` predicate keeps it a no-op on a session that already holds it. The
  * `EXISTS` on `hf_passkey` is belt and braces — a stamp with no surviving authenticator behind
- * it is nothing to promote on — and it is time-free, so it cannot refuse an honest enrolment.
+ * it is nothing to promote on — and both `EXISTS` clauses are time-free, so neither can refuse
+ * an honest enrolment.
  */
 export async function upgradeSessionFactor(pool: Pool, sessionToken: string): Promise<boolean> {
   const result = await pool.query(UPGRADE_SESSION_FACTOR_STATEMENT, [sessionToken]);
@@ -176,9 +179,12 @@ export async function upgradeSessionFactor(pool: Pool, sessionToken: string): Pr
  * Records on the calling session that it, and not some other session of the same user, completed
  * a passkey registration. The one thing `upgradeSessionFactor` promotes on.
  *
- * Unconditional on `factor`: stamping a session that already holds `passkey` is true and inert.
- * It is the caller — `createAuth`'s after-hook — that must have established the registration
- * actually succeeded, because nothing in this statement can tell.
+ * `SELECT id FROM hf_session WHERE token = $1` rather than a parameter, so a token that names no
+ * session inserts nothing and there is no row to orphan. Unconditional on `factor`: stamping a
+ * session that already holds `passkey` is inert. True means a row was written, so a second stamp
+ * of the same session is false — the `ON CONFLICT` makes the first one stand. It is the caller —
+ * `createAuth`'s after-hook — that must have established the registration actually succeeded,
+ * because nothing in this statement can tell.
  */
 export async function stampPasskeyEnrolment(pool: Pool, sessionToken: string): Promise<boolean> {
   const result = await pool.query(STAMP_PASSKEY_ENROLMENT_STATEMENT, [sessionToken]);

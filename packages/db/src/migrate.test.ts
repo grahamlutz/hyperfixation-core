@@ -240,7 +240,9 @@ describe("the five-step migrator", () => {
                   has_table_privilege('hf_session', 'SELECT') AS "hf_session",
                   has_table_privilege('hf_account', 'SELECT') AS "hf_account",
                   has_table_privilege('hf_verification', 'SELECT') AS "hf_verification",
-                  has_table_privilege('hf_passkey', 'SELECT') AS "hf_passkey"`,
+                  has_table_privilege('hf_passkey', 'SELECT') AS "hf_passkey",
+                  has_table_privilege('hf_session_passkey_enrolment', 'SELECT')
+                    AS "hf_session_passkey_enrolment"`,
         );
         expect(rows[0]!.run).toBe(true);
         for (const table of GRANT_RO_EXCLUDED_TABLES) {

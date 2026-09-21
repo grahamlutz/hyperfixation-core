@@ -74,9 +74,17 @@ describe("enrolling a passkey and promoting the session that did", () => {
 
   const stampedTokens = async (): Promise<string[]> => {
     const { rows } = await pool.query<{ token: string }>(
-      "SELECT token FROM hf_session WHERE passkey_enrolled_at IS NOT NULL ORDER BY token",
+      "SELECT s.token FROM hf_session_passkey_enrolment e " +
+        "JOIN hf_session s ON s.id = e.session_id ORDER BY s.token",
     );
     return rows.map((row) => row.token);
+  };
+
+  const stampRowCount = async (): Promise<number> => {
+    const { rows } = await pool.query<{ count: string }>(
+      "SELECT count(*) AS count FROM hf_session_passkey_enrolment",
+    );
+    return Number(rows[0]?.count);
   };
 
   const enrol = (id: string, userId: string): Promise<unknown> =>
@@ -138,6 +146,14 @@ describe("enrolling a passkey and promoting the session that did", () => {
       expect(await upgradeSessionFactor(pool, "s-code")).toBe(false);
     });
 
+    it("refuses once the stamp row is gone, however the row left", async () => {
+      await completeEnrolment("pk-new", "u-one", "s-code");
+      await pool.query("DELETE FROM hf_session_passkey_enrolment");
+
+      expect(await upgradeSessionFactor(pool, "s-code")).toBe(false);
+      expect(await factorOf("s-code")).toBe("code");
+    });
+
     it("does not promote a stamped session whose user holds no authenticator", async () => {
       // Belt and braces: the stamp survives a later `delete-passkey`, and a stamp with nothing
       // behind it is not something to hand the stronger factor to.
@@ -175,8 +191,25 @@ describe("enrolling a passkey and promoting the session that did", () => {
       expect(await stampedTokens()).toEqual(["s-code"]);
     });
 
-    it("says so when the token names nothing", async () => {
+    it("says so when the token names nothing, and leaves no row behind", async () => {
+      // The insert selects the session id rather than taking one, so a foreign token writes
+      // nothing at all — there is no orphan row for a later session to inherit.
       expect(await stampPasskeyEnrolment(pool, "no-such-token")).toBe(false);
+      expect(await stampRowCount()).toBe(0);
+    });
+
+    it("lets the first stamp stand when the same session registers twice", async () => {
+      expect(await stampPasskeyEnrolment(pool, "s-code")).toBe(true);
+      expect(await stampPasskeyEnrolment(pool, "s-code")).toBe(false);
+      expect(await stampRowCount()).toBe(1);
+    });
+
+    it("goes when the session goes, so the proof never outlives it", async () => {
+      await completeEnrolment("pk-new", "u-one", "s-code");
+
+      await pool.query("DELETE FROM hf_session WHERE token = 's-code'");
+
+      expect(await stampRowCount()).toBe(0);
     });
   });
 

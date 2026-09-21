@@ -135,7 +135,8 @@ describe("the better-auth factory against the hf_* tables", () => {
 
   const stampedTokens = async (): Promise<string[]> => {
     const { rows } = await pool.query<{ token: string }>(
-      "SELECT token FROM hf_session WHERE passkey_enrolled_at IS NOT NULL ORDER BY token",
+      "SELECT s.token FROM hf_session_passkey_enrolment e " +
+        "JOIN hf_session s ON s.id = e.session_id ORDER BY s.token",
     );
     return rows.map((row) => row.token);
   };

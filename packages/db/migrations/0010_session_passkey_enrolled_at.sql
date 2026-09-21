@@ -1,1 +1,0 @@
-ALTER TABLE "hf_session" ADD COLUMN "passkey_enrolled_at" timestamp with time zone;
