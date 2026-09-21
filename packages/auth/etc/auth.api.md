@@ -1425,6 +1425,9 @@ defaultValue: string;
 };
 };
 };
+hooks: {
+before: Middleware<MiddlewareOptions, (inputContext: MiddlewareInputContext<MiddlewareOptions>) => Promise<void>>;
+};
 databaseHooks: {
 session: {
 create: {
@@ -3514,10 +3517,19 @@ export function hasRole(user: SessionUser | null | undefined, role: string): boo
 export type HyperfixationAuth = ReturnType<typeof createAuth>;
 
 // @public
+export function mayEnrolPasskey(pool: Pool, sessionToken: string): Promise<boolean>;
+
+// @public
 export const PASSKEY_AUTHENTICATION_PATH = "/passkey/verify-authentication";
 
 // @public
+export const PASSKEY_REGISTRATION_OPTIONS_PATH = "/passkey/generate-register-options";
+
+// @public
 export const PASSKEY_REGISTRATION_PATH = "/passkey/verify-registration";
+
+// @public
+export const PASSKEY_REGISTRATION_PATHS: readonly string[];
 
 // @public (undocumented)
 export type RequireSession = (options?: RequireSessionOptions) => Promise<AuthSession>;

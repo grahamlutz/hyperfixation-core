@@ -43,8 +43,45 @@ describe("the better-auth factory against the hf_* tables", () => {
     await auth.api.sendVerificationOTP({ body: { email, type: "sign-in" } });
     const otp = sent.at(-1)!.otp;
     await auth.api.signInEmailOTP({ body: { email, otp } });
+    return latestSessionToken(email);
+  };
+
+  /** The same sign-in, kept as the `Cookie` header an endpoint is actually driven with. */
+  const signInWithCookie = async (email: string): Promise<string> => {
+    await auth.api.sendVerificationOTP({ body: { email, type: "sign-in" } });
+    const otp = sent.at(-1)!.otp;
+    const { headers } = await auth.api.signInEmailOTP({
+      body: { email, otp },
+      returnHeaders: true,
+    });
+    return headers
+      .getSetCookie()
+      .map((value) => value.split(";")[0]!)
+      .join("; ");
+  };
+
+  /**
+   * What the WebAuthn ceremony leaves behind, which is all the two rules are allowed to read.
+   * `offset` is from the session's own `created_at`, because that ordering is the whole rule.
+   */
+  const enrolPasskey = async (
+    userId: string,
+    sessionToken: string,
+    offset: string,
+  ): Promise<void> => {
+    await pool.query(
+      "INSERT INTO hf_passkey (id, name, public_key, user_id, credential_id, counter, " +
+        "device_type, backed_up, created_at) VALUES ($1, 'device', 'pk', $2, $1, 0, " +
+        "'singleDevice', true, (SELECT created_at FROM hf_session WHERE token = $3) + " +
+        "$4::interval)",
+      [`pk-${sessionToken.slice(0, 8)}`, userId, sessionToken, offset],
+    );
+  };
+
+  const latestSessionToken = async (email: string): Promise<string> => {
     const { rows } = await pool.query<{ token: string }>(
-      "SELECT token FROM hf_session WHERE user_id = (SELECT id FROM hf_user WHERE email = $1)",
+      "SELECT token FROM hf_session WHERE user_id = (SELECT id FROM hf_user WHERE email = $1) " +
+        "ORDER BY created_at DESC, id DESC LIMIT 1",
       [email],
     );
     return rows[0]!.token;
@@ -89,21 +126,38 @@ describe("the better-auth factory against the hf_* tables", () => {
     expect(rows[0]).toEqual({ users: 0, sessions: 0 });
   });
 
-  it("promotes the session that enrolled a passkey, and only from code", async () => {
+  it("promotes the session that enrolled a passkey, and not one that merely asked", async () => {
     const token = await signInByCode("member@app.test");
 
-    expect(await upgradeSessionFactor(pool, token)).toBe(true);
-    const factorOf = async (): Promise<string> => {
-      const { rows } = await pool.query<{ factor: string }>(
-        "SELECT factor FROM hf_session WHERE token = $1",
-        [token],
-      );
-      return rows[0]!.factor;
-    };
-    expect(await factorOf()).toBe("passkey");
-
-    // Already the stronger factor: a second call changes nothing and says so.
+    // The ceremony is client-side, so calling the promotion is not evidence it happened.
     expect(await upgradeSessionFactor(pool, token)).toBe(false);
-    expect(await upgradeSessionFactor(pool, "no-such-token")).toBe(false);
+
+    await enrolPasskey("u-member", token, "1 second");
+    expect(await upgradeSessionFactor(pool, token)).toBe(true);
+    const { rows } = await pool.query<{ factor: string }>(
+      "SELECT factor FROM hf_session WHERE token = $1",
+      [token],
+    );
+    expect(rows[0]!.factor).toBe("passkey");
+  });
+
+  it("lets a code session run the ceremony while the user has no passkey yet", async () => {
+    const cookie = await signInWithCookie("member@app.test");
+
+    await expect(
+      auth.api.generatePasskeyRegistrationOptions({ headers: new Headers({ cookie }) }),
+    ).resolves.toMatchObject({ rp: { id: "app.test" } });
+  });
+
+  it("404s the ceremony for a code session whose user already has a passkey", async () => {
+    // The attacker who can read the inbox, on an account that is already enrolled. Without
+    // this they would enrol their own authenticator and the promotion that follows would be
+    // honest — which is why the refusal has to be here and not only on the promotion.
+    const cookie = await signInWithCookie("member@app.test");
+    await enrolPasskey("u-member", await latestSessionToken("member@app.test"), "-1 hour");
+
+    await expect(
+      auth.api.generatePasskeyRegistrationOptions({ headers: new Headers({ cookie }) }),
+    ).rejects.toMatchObject({ status: "NOT_FOUND" });
   });
 });

@@ -278,6 +278,20 @@ otherwise it stays covered by core's redeploy cases and is said so. Calendar: 20
 > **Unchanged, waiting on X3** — but two of its readings are now commands rather than `psql`: D1's `lock` and
 > `connections` lines (core #115) and C2's drift tolerance (core #114).
 
+> **Finding, 2026-09-20 — the phone passkey enrolment above was reachable without a phone (HIGH).** A security
+> review of the enrolment flow found that `upgradeSessionFactor` promoted on `token = $1 AND factor = 'code'` and
+> nothing else. The WebAuthn ceremony is entirely client-side, so the template's `promoteSession()` server action —
+> guarded only by `requireSession({ factor: 'code' })` — could be invoked directly by anyone holding a code-factor
+> session: read an admin's inbox, sign in with the emailed code, call the action, hold `factor = 'passkey'` and the
+> whole of `/admin/*`. The second half was that a code session could *enrol* on an account that already had a
+> passkey, so the attacker could register their own authenticator and then promote legitimately. Fixed in core: the
+> promotion's UPDATE now also requires `EXISTS (SELECT 1 FROM hf_passkey p WHERE p.user_id = hf_session.user_id AND
+> p.created_at >= hf_session.created_at)` and a live `expires_at`, in the one statement; and `createAuth`'s new
+> `before` hook 404s `/passkey/generate-register-options` and `/passkey/verify-registration` for a code session whose
+> user holds a passkey older than that session. The code factor stays the bootstrap for a *first* passkey, which is
+> what keeps X4's enrolment and the admin `resetSecondFactor` recovery path working. The X4 reading is unchanged —
+> `hf_passkey` = 1 after a real phone enrolment — but it now proves something it did not before.
+
 ## X5 — A release reaches both apps (user; after W2; the next `Version Packages` PR) — 🚧 In progress
 
 Merge it. Evidence: three `core-bump/<v>` PRs (template, `demo-app`, `demo-two`), each CI green, each merged; `hf deploy`

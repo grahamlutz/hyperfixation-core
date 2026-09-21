@@ -9,6 +9,15 @@ export const PASSKEY_AUTHENTICATION_PATH = "/passkey/verify-authentication";
 /** Enrolment. It creates no session, but it does let an existing one be promoted. */
 export const PASSKEY_REGISTRATION_PATH = "/passkey/verify-registration";
 
+/** The ceremony's first half. Gated with the second, or the refusal arrives too late to matter. */
+export const PASSKEY_REGISTRATION_OPTIONS_PATH = "/passkey/generate-register-options";
+
+/** Both halves of enrolment, as the paths better-auth dispatches on. */
+export const PASSKEY_REGISTRATION_PATHS: readonly string[] = [
+  PASSKEY_REGISTRATION_OPTIONS_PATH,
+  PASSKEY_REGISTRATION_PATH,
+];
+
 /** The email-OTP sign-in endpoint, named here so the stamping rule reads as a pair. */
 export const EMAIL_OTP_SIGN_IN_PATH = "/sign-in/email-otp";
 

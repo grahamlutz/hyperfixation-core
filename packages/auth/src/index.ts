@@ -1,5 +1,6 @@
 export {
   createAuth,
+  mayEnrolPasskey,
   upgradeSessionFactor,
   AUTH_SCHEMA,
   type CreateAuthOptions,
@@ -11,7 +12,9 @@ export {
   sessionFactors,
   EMAIL_OTP_SIGN_IN_PATH,
   PASSKEY_AUTHENTICATION_PATH,
+  PASSKEY_REGISTRATION_OPTIONS_PATH,
   PASSKEY_REGISTRATION_PATH,
+  PASSKEY_REGISTRATION_PATHS,
   type AuthSession,
   type SessionFactor,
   type SessionUser,
