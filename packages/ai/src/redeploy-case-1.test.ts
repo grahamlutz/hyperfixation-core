@@ -8,7 +8,7 @@ import {
   type TestDatabase,
 } from "@hyperfixation/testing";
 import { resetClient } from "@hyperfixation/workflows";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import {
   actionRows,
   approvalRows,
@@ -55,7 +55,18 @@ function actionSends(output: string): number {
 describe("redeploy case 1 — an approval across a redeploy with changed code", () => {
   let database: TestDatabase;
   let probe: LedgerProbe;
-  let workerB: SpawnedWorker;
+  let v2Workers: SpawnedWorker[] = [];
+
+  /** Each case brings its own, so neither depends on a worker the other left running. */
+  function v2Worker(): SpawnedWorker {
+    const worker = spawnWorker({
+      module: V2_MODULE,
+      appName: database.appName,
+      databaseUrl: database.applicationUrl,
+    });
+    v2Workers.push(worker);
+    return worker;
+  }
 
   function decider(control: {
     approvalIds: number[];
@@ -76,9 +87,13 @@ describe("redeploy case 1 — an approval across a redeploy with changed code", 
     await seedAppState(database, "100");
   }, 60_000);
 
+  afterEach(async () => {
+    await Promise.all(v2Workers.map((worker) => worker.kill().catch(() => undefined)));
+    v2Workers = [];
+  });
+
   afterAll(async () => {
     await resetClient();
-    await workerB?.kill().catch(() => undefined);
     await probe?.close();
     await database?.drop();
   });
@@ -118,11 +133,7 @@ describe("redeploy case 1 — an approval across a redeploy with changed code", 
       }
       expect([callsA, sendsA]).toEqual([1, 0]);
 
-      workerB = spawnWorker({
-        module: V2_MODULE,
-        appName: database.appName,
-        databaseUrl: database.applicationUrl,
-      });
+      const workerB = v2Worker();
       await workerB.ready();
       // A `waiting` run is nobody's to move: reconcile() touches `running` and `paused` ones.
       expect(await runRow(probe, runId)).toMatchObject({ status: "waiting", attempt: 1 });
@@ -167,6 +178,8 @@ describe("redeploy case 1 — an approval across a redeploy with changed code", 
     "leaves nothing behind when the deciding process dies before its COMMIT",
     async () => {
       const runId = `case1-killed-${testBuildSha()}`;
+      // Runs `approvalFlow` to `waiting` and again to `done`; the deciders only decide.
+      await v2Worker().ready();
       await startRun(probe, approvalFlow(), INPUT, runId);
       await waitForStatus(probe, runId, "waiting", 120_000);
       const [approval] = await approvalRows(probe, runId);

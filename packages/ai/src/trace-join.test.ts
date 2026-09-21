@@ -34,7 +34,9 @@ const CALL = { key: "k", model: MOCK_MODEL_ID, prompt: "draft", input: { a: 1 } 
 
 /**
  * The OTel registration below is process-wide, which is why this file holds nothing else and
- * tears both globals down in `afterAll`. The `startActiveSpan` around the call stands in for the
+ * tears both globals down in `afterAll`. The unregistered case lives in
+ * `trace-join-unregistered.test.ts`: the SDK keeps the tracer it first resolved, so once a
+ * provider has been registered in a module graph, "none registered" cannot be restored in it. The `startActiveSpan` around the call stands in for the
  * DBOS step span a real flow runs under — `startWorker()` cannot be launched in-process.
  */
 describe("the trace id on the ledger row", () => {
@@ -80,16 +82,6 @@ describe("the trace id on the ledger row", () => {
       return rows[0]?.trace_id;
     });
   }
-
-  // First, so it runs against the no-op proxy tracer the unset-keys worker leaves in place.
-  it("is null when no tracer provider is registered", async () => {
-    const ctx = await context("trace-none");
-    const llm = ledger(new MockLanguageModel({ responses: [{ text: "one" }] }));
-
-    await expect(llm.run(ctx, CALL)).resolves.toEqual({ text: "one" });
-    expect(await traceIdOf("trace-none")).toBeNull();
-    expect(exporter.getFinishedSpans()).toHaveLength(0);
-  });
 
   it("is the enclosing span's trace, and the join fields land on the gen_ai span", async () => {
     contextManager.enable();
