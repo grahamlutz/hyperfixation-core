@@ -9,6 +9,9 @@ this document only orders it.** Markers: ✅ Done / ✅ Done (deviated) / 🚧 I
 **Written against** core `origin/main` `e1dba5e` and template `origin/main` `819cfbb`. The "Follow-ups from X1" list this
 doc folds in is in the Phase 4 doc (core #109).
 
+**Releases so far this phase:** `0.1.7` (2026-09-20) and `0.1.8` (2026-09-20) are published and attested; `0.1.9` is
+releasing now off `Version Packages` (core #128).
+
 **Decided (Graham, 2026-09-20):** the second app is a **permanent throwaway named `demo-two`**, kept as the second
 downstream; it runs on **real provider keys** (not fixtures), under a $10 cap. The other open questions below are
 recorded as recommended-by-default.
@@ -39,19 +42,20 @@ file (secrets rule, core `CLAUDE.md`). X3 therefore adds a first-real-call check
 | D2 | [template #29](https://github.com/grahamlutz/hyperfixation-template/pull/29) | 2026-09-19 | Initialise Sentry in the web and the worker, errors only |
 | D3 | [template #31](https://github.com/grahamlutz/hyperfixation-template/pull/31) | 2026-09-20 | Bring the prod compose stack up in CI and assert it (D3) |
 | D4 | [template #32](https://github.com/grahamlutz/hyperfixation-template/pull/32) | 2026-09-20 | Assert a redeploy across a step change in CI (D4) |
-| docs | [core #76](https://github.com/grahamlutz/hyperfixation-core/pull/76), [core #77](https://github.com/grahamlutz/hyperfixation-core/pull/77), [core #107](https://github.com/grahamlutz/hyperfixation-core/pull/107), [core #108](https://github.com/grahamlutz/hyperfixation-core/pull/108), [core #109](https://github.com/grahamlutz/hyperfixation-core/pull/109), [core #110](https://github.com/grahamlutz/hyperfixation-core/pull/110) | 2026-09-20 | Record 0.1.1, the publishing lessons and the X1 fixes in the Phase 3 doc |
+| docs | [core #76](https://github.com/grahamlutz/hyperfixation-core/pull/76), [core #77](https://github.com/grahamlutz/hyperfixation-core/pull/77), [core #107](https://github.com/grahamlutz/hyperfixation-core/pull/107), [core #108](https://github.com/grahamlutz/hyperfixation-core/pull/108), [core #109](https://github.com/grahamlutz/hyperfixation-core/pull/109), [core #110](https://github.com/grahamlutz/hyperfixation-core/pull/110), [core #119](https://github.com/grahamlutz/hyperfixation-core/pull/119), [core #127](https://github.com/grahamlutz/hyperfixation-core/pull/127) | 2026-09-21 | Record 0.1.1, the publishing lessons and the X1 fixes in the Phase 3 doc |
 | E1 | [core #52](https://github.com/grahamlutz/hyperfixation-core/pull/52) | 2026-09-19 | Give the cloud path its config, state cache and five validated clients |
 | E2 | [core #54](https://github.com/grahamlutz/hyperfixation-core/pull/54) | 2026-09-19 | Give the cloud path a runner, two database transports and its provisioning |
 | E3 | [core #58](https://github.com/grahamlutz/hyperfixation-core/pull/58), [core #61](https://github.com/grahamlutz/hyperfixation-core/pull/61), [core #62](https://github.com/grahamlutz/hyperfixation-core/pull/62) | 2026-09-20 | Give the cloud hf new its template fetch, env overlay and step runner |
 | E4 | [core #55](https://github.com/grahamlutz/hyperfixation-core/pull/55) | 2026-09-20 | Give the cloud path hf doctor, one line per finding |
 | E5 | [core #56](https://github.com/grahamlutz/hyperfixation-core/pull/56) | 2026-09-20 | Give hf a restore-check that proves a backup restores |
 | M1 | [core #112](https://github.com/grahamlutz/hyperfixation-core/pull/112) | 2026-09-20 | Fail a core migration that is not additive against the last release |
-| misc | [core #60](https://github.com/grahamlutz/hyperfixation-core/pull/60), [core #57](https://github.com/grahamlutz/hyperfixation-core/pull/57), [core #75](https://github.com/grahamlutz/hyperfixation-core/pull/75), [core #78](https://github.com/grahamlutz/hyperfixation-core/pull/78), [template #36](https://github.com/grahamlutz/hyperfixation-template/pull/36), [core #85](https://github.com/grahamlutz/hyperfixation-core/pull/85), [core #92](https://github.com/grahamlutz/hyperfixation-core/pull/92), [core #96](https://github.com/grahamlutz/hyperfixation-core/pull/96), [template #38](https://github.com/grahamlutz/hyperfixation-template/pull/38), [core #103](https://github.com/grahamlutz/hyperfixation-core/pull/103), [template #42](https://github.com/grahamlutz/hyperfixation-template/pull/42), [core #105](https://github.com/grahamlutz/hyperfixation-core/pull/105), [template #43](https://github.com/grahamlutz/hyperfixation-template/pull/43), [template #44](https://github.com/grahamlutz/hyperfixation-template/pull/44), [template #47](https://github.com/grahamlutz/hyperfixation-template/pull/47) | 2026-09-20 | Stop a child that exits before reading its stdin from failing the run with EPIPE |
-| R1 | [core #80](https://github.com/grahamlutz/hyperfixation-core/pull/80), [core #81](https://github.com/grahamlutz/hyperfixation-core/pull/81), [core #82](https://github.com/grahamlutz/hyperfixation-core/pull/82) | 2026-09-20 | Release on a push to main: OIDC publish, our own tag, and the downstream bump PRs |
+| misc | [core #60](https://github.com/grahamlutz/hyperfixation-core/pull/60), [core #57](https://github.com/grahamlutz/hyperfixation-core/pull/57), [core #75](https://github.com/grahamlutz/hyperfixation-core/pull/75), [core #78](https://github.com/grahamlutz/hyperfixation-core/pull/78), [template #36](https://github.com/grahamlutz/hyperfixation-template/pull/36), [core #85](https://github.com/grahamlutz/hyperfixation-core/pull/85), [core #92](https://github.com/grahamlutz/hyperfixation-core/pull/92), [core #96](https://github.com/grahamlutz/hyperfixation-core/pull/96), [template #38](https://github.com/grahamlutz/hyperfixation-template/pull/38), [core #103](https://github.com/grahamlutz/hyperfixation-core/pull/103), [template #42](https://github.com/grahamlutz/hyperfixation-template/pull/42), [core #105](https://github.com/grahamlutz/hyperfixation-core/pull/105), [template #43](https://github.com/grahamlutz/hyperfixation-template/pull/43), [template #44](https://github.com/grahamlutz/hyperfixation-template/pull/44), [template #47](https://github.com/grahamlutz/hyperfixation-template/pull/47), [template #48](https://github.com/grahamlutz/hyperfixation-template/pull/48), [core #118](https://github.com/grahamlutz/hyperfixation-core/pull/118), [core #123](https://github.com/grahamlutz/hyperfixation-core/pull/123), [template #50](https://github.com/grahamlutz/hyperfixation-template/pull/50), [core #125](https://github.com/grahamlutz/hyperfixation-core/pull/125), [template #51](https://github.com/grahamlutz/hyperfixation-template/pull/51), [core #130](https://github.com/grahamlutz/hyperfixation-core/pull/130), [template #52](https://github.com/grahamlutz/hyperfixation-template/pull/52), [core #133](https://github.com/grahamlutz/hyperfixation-core/pull/133), [core #124](https://github.com/grahamlutz/hyperfixation-core/pull/124) | 2026-09-21 | Stop a child that exits before reading its stdin from failing the run with EPIPE |
+| R1 | [core #80](https://github.com/grahamlutz/hyperfixation-core/pull/80), [core #81](https://github.com/grahamlutz/hyperfixation-core/pull/81), [core #82](https://github.com/grahamlutz/hyperfixation-core/pull/82), [core #122](https://github.com/grahamlutz/hyperfixation-core/pull/122), [core #126](https://github.com/grahamlutz/hyperfixation-core/pull/126), [core #129](https://github.com/grahamlutz/hyperfixation-core/pull/129) | 2026-09-21 | Release on a push to main: OIDC publish, our own tag, and the downstream bump PRs |
 | R2 | [core #90](https://github.com/grahamlutz/hyperfixation-core/pull/90) | 2026-09-20 | Verify a release against its provenance attestation, not a rebuild of it |
 | S1 | [core #116](https://github.com/grahamlutz/hyperfixation-core/pull/116) | 2026-09-20 | Prove in CI that the packed CLI can still scaffold and start an app |
 | tooling | [core #68](https://github.com/grahamlutz/hyperfixation-core/pull/68), [core #71](https://github.com/grahamlutz/hyperfixation-core/pull/71) | 2026-09-20 | Generate the phase-order status table from merged PR bodies |
 | W1 | [core #117](https://github.com/grahamlutz/hyperfixation-core/pull/117) | 2026-09-20 | Give demo-app core-bump PRs, and fail when release.yml's token list drifts from downstream.txt |
+| W2 | [core #121](https://github.com/grahamlutz/hyperfixation-core/pull/121) | 2026-09-20 | Give demo-two core-bump PRs |
 | X1 | [core #73](https://github.com/grahamlutz/hyperfixation-core/pull/73) | 2026-09-20 | Add the X1 runbook for the first real-box deployment |
 | X1-fixes | [core #74](https://github.com/grahamlutz/hyperfixation-core/pull/74), [template #33](https://github.com/grahamlutz/hyperfixation-template/pull/33), [template #34](https://github.com/grahamlutz/hyperfixation-template/pull/34), [core #87](https://github.com/grahamlutz/hyperfixation-core/pull/87), [core #89](https://github.com/grahamlutz/hyperfixation-core/pull/89), [core #88](https://github.com/grahamlutz/hyperfixation-core/pull/88), [core #91](https://github.com/grahamlutz/hyperfixation-core/pull/91), [core #94](https://github.com/grahamlutz/hyperfixation-core/pull/94), [core #97](https://github.com/grahamlutz/hyperfixation-core/pull/97), [core #99](https://github.com/grahamlutz/hyperfixation-core/pull/99), [core #100](https://github.com/grahamlutz/hyperfixation-core/pull/100), [core #98](https://github.com/grahamlutz/hyperfixation-core/pull/98) | 2026-09-20 | Fix two X1 blockers: hf doctor on an older /api/status, and hf new's config check |
 <!-- plan-sync:end -->
@@ -237,8 +241,13 @@ one real call reconciled to a real usage line.
 | Finding | Fix | PR |
 |---|---|---|
 | Deploy failed: `Bind for :::3000 … port is already allocated`. A published host port is one per box, and `demo-app` had it | the prod compose `expose`s the port instead of publishing it; test-only overlay for the e2e; `compose-ports.test.ts` | template #47 ✅ |
-| `hf_budget_period.spent_usd` was `numeric(12,4)` while `hf_llm_call.cost_usd` is `numeric(12,6)`, so the period total rounded on every settle: `/api/status` read `spentUsd 0.0017` against `ledgerUsd 0.001693`, drift `0.000007`, health `degraded`. Measured: 200 settles of ~$0.0008 end $0.0007 off the ledger, and a $0.0049 cap admits six calls where five fit | migration `0009` widens `spent_usd` to the ledger's scale; a bounded backfill repairs only rows whose gap is explainable as rounding; `packages/ai/src/budget-scale.test.ts` | core #118 🚧 in progress |
+| `hf_budget_period.spent_usd` was `numeric(12,4)` while `hf_llm_call.cost_usd` is `numeric(12,6)`, so the period total rounded on every settle: `/api/status` read `spentUsd 0.0017` against `ledgerUsd 0.001693`, drift `0.000007`, health `degraded`. Measured: 200 settles of ~$0.0008 end $0.0007 off the ledger, and a $0.0049 cap admits six calls where five fit | migration `0009` widens `spent_usd` to the ledger's scale; a bounded backfill repairs only rows whose gap is explainable as rounding; `packages/ai/src/budget-scale.test.ts` | core #118 ✅ (0.1.8) |
 | core #118's `downstream` and `scaffold` jobs fail on the template's `tests/admin-budget.test.ts`, which pins `spent_usd` at four decimals | the assertions read the value at whatever scale the ledger stores | template #48 ✅ |
+| Langfuse received **zero** traces for 24 h of real `claude-haiku-4-5` calls whose `hf_llm_call` rows are fine. Every OTel global is first-one-wins and `@sentry/node` v10 takes the trace global in both processes, so core's `provider.register()` was refused silently and returned a registration anyway — every `gen_ai` span went to Sentry's provider at `tracesSampleRate: 0` | the app passes `skipOpenTelemetrySetup: true` to both `Sentry.init()`s, so Langfuse gets the trace global; core says so instead of returning a registration it did not make, and `LangfuseConflict` names a differing config | template #51 ✅, core #125 ✅ |
+| The #103 audit's two remaining per-module registries: `registerLangfuse` had no duplicate guard at all, and `defineApp`'s `attach()` and `run-context.ts`'s `AsyncLocalStorage` were per-module-instance — the `DuplicateFlow` root cause, one layer away and silent | the run context, the worker runtime and the Langfuse registration move onto `Symbol.for(…)` process globals, and `attach()` keys the control plane by app name. Its review then found `shutdown()` claiming a re-register that `register()`'s first-one-wins cannot give: shutdown now releases the **trace** global only — releasing the context global broke Sentry's scope isolation — and a `core, shuffled` CI step proves the tests no longer lean on declaration order (`workflows`' shuffle limited by #132) | core #123 ✅, core #133 ✅ |
+| Giving Langfuse the trace global also dropped `SentryContextManager`, and Sentry's scope forking writes into the OTel **context** global — so `withScope`/`withIsolationScope` fell through to the process-global default and one request's tags rode out on every other's. Found by #51's own agent, before any report | `src/otel-context.ts` installs `SentryContextManager` on the context global right after `Sentry.init()`: Sentry takes *context*, Langfuse takes *trace*, neither needs the other's. No core change | template #52 ✅ |
+| #103's `defineFlow` idempotency was `fn.toString()` compared character for character, which two webpack layers of one source never are — so "an identical re-definition is the flow it already defined" did not hold on a real Next build. Found by template #50's layers e2e, which drives the real layers | `defineFlow` fingerprints a **normalised token stream** (identifiers and webpack module ids folded out), with `DefineFlowOptions.version` as the escape hatch when a definition really did change; the two real bundler outputs are committed fixtures | core #130 ✅ |
+| A `factor = 'code'` session could promote itself to `passkey` and hold the whole of `/admin/*` without ever touching a phone. Found by an adversary reviewing the enrolment flow, before any exploit — written up under X4 below | a session promotes only on a passkey **it** enrolled: an allowlist gate over every `/passkey/*` endpoint, an `hf_session_passkey_enrolment` row (migration `0010`) stamped only after a verified registration, one atomic time-free `UPDATE`. Three adversary rounds broke two earlier designs first, and `api-diff` was deliberately **not** loosened to pass it — #131 tracks its blind spot | core #124 ✅ |
 
 > **After #47.** `demo-two` serves `https://demo-two.hyperfixation.ai` on `3bf4cef`, core `0.1.7`, `llm.mode` `live`;
 > Coolify routes to it with only `expose`, so that assumption is no longer unverified. `hf doctor` shows both apps'
@@ -246,9 +255,15 @@ one real call reconciled to a real usage line.
 > failed. **First real provider calls:** two `claude-haiku-4-5` calls — 488 in / 70 out → $0.000838 and 485 in / 74 out
 > → $0.000855, matching the list price of $1/$5 per MTok exactly; ledger $0.001693.
 >
-> **Pending:** Graham's comparison with the Anthropic console usage page; **W2** — one core PR adding
-> `grahamlutz/demo-two` to `downstream.txt` **and** to `release.yml`'s repository list (W1's lesson); `hf restore-check
-> demo-two` after a backup; whether Langfuse identifies the app on a trace (open question 3).
+> **W2 done (core #121).** `grahamlutz/demo-two` is in `downstream.txt` and in `release.yml`'s app-token list (W1's
+> lesson, kept in step by the guard test); demo-two's own CI was green before the line went in.
+>
+> **Open question 3 answered the hard way.** Langfuse did not identify the app on a trace because it never received
+> one — see the tracing row above. Naming the app on a trace is Phase 6 L1; whether the shared project is enough is
+> still open until a trace arrives.
+>
+> **Pending (operator):** the two calls compared with the Anthropic console usage page — 488 in / 70 out →
+> $0.000838 and 485 in / 74 out → $0.000855; `hf restore-check demo-two` after a backup.
 
 > **Finding (X3, 2026-09-20): the first two real calls put `/api/status` into `degraded` on a drift that was only a
 > column's scale.** Haiku 4.5 billed $0.000838 and $0.000855 — exactly list price for 488/70 and 485/74 tokens — but
@@ -274,6 +289,16 @@ on a phone-approved batch), and — if a run is ever observed `running` mid-step
 otherwise it stays covered by core's redeploy cases and is said so. Calendar: 2026-10-01 first-of-month row on both apps.
 
 **Done means:** the table above filled with numbers.
+
+**Before any of it — after 0.1.9 (operator only).** Nothing below can run until both apps are on the release, and the
+budget lever needs `/admin`, which a code session can no longer reach: core #124 made a code-factor session promotable
+only on a passkey it enrolled itself.
+
+- [ ] `0.1.9` publishes; the three `core-bump/0.1.9` PRs open by themselves, go green and merge (that is X5).
+- [ ] `hf deploy demo-app` and `hf deploy demo-two`; `/api/status` reports `0.1.9` on both.
+- [ ] Enrol an admin passkey on `demo-two` from a phone — which is also X1's leftover phone-passkey proof
+      (`hf_passkey` = 1) and the only way into its admin form.
+- [ ] `hf doctor` clean on both apps.
 
 > **Unchanged, waiting on X3** — but two of its readings are now commands rather than `psql`: D1's `lock` and
 > `connections` lines (core #115) and C2's drift tolerance (core #114).
@@ -327,6 +352,13 @@ both apps; `hf doctor` clean; `core-version.test.ts` green in both app repos. Do
 > **Half proven, 2026-09-20.** `0.1.7` opened bump PRs on the template (#46) and on `demo-app` (#11) with nothing done
 > by hand, both merged when green, and `hf deploy demo-app` published it (see W1). `demo-two` becomes the third entry
 > once W2 lands; the release after that is the whole of X5.
+
+> **0.1.8, 2026-09-20 — three PRs, one repaired by hand.** With W2 in, the release opened all three: template #49,
+> `demo-app` #12, `demo-two` #2 ✅, and all three merged. The template's opened at `^0.1.7` for the three packages
+> published last: every per-version document was `200`, but the abbreviated packument pnpm resolves a range from had
+> not caught up on that cache. `core-version.test.ts` failed the PR, which is the gate working, and #49 was repaired by
+> hand. **core #122** makes `release:ci` wait for the packument before opening a bump PR, so `0.1.9` is the first
+> unaided three-repo release — and the whole of X5.
 
 ---
 

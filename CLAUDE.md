@@ -19,6 +19,10 @@ maintainer tooling and never publishes. The app template is the separate
   the diff you get locally is noise that hides the real API change.
 - Wait for CI: `gh pr checks <n> --watch && gh pr merge <n>`, or `gh pr merge --auto`. A hook
   blocks merging through red.
+- A security-sensitive PR is never self-merged by the agent that wrote it: open it, get CI green, then an
+  adversary review and an orchestrator merge.
+- Never loosen `api-diff` to make a PR pass — shape the change so the gate sees an addition. #124 moved a
+  column to its own table rather than widen the gate; #131 tracks the blind spot.
 - Never `docker system prune` or `docker image prune -a` — the colima disk is small.
 - Never `npm publish` by hand: merging the `Version Packages` PR runs `release.yml`, which publishes all nine
   with OIDC trusted publishing and tags the release.

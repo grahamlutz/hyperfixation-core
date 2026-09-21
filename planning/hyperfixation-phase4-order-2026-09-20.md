@@ -319,12 +319,13 @@ None block Phase 4; the first two are the most likely to bite.
 - ✅ **The api-diff gate no longer catches a removed CLI command.** #98 excused a changed `COMMANDS` /
   `USAGE` literal so a command could be added; a removed command passes too. Tighten it to accept
   additions only (new tuple is a superset of the old). **Done in Phase 5 C3 (core #111).**
-- ⬜ **An end-to-end guard against a second `DuplicateFlow`.** A template prod e2e that hits an
-  authenticated page plus a server action twice and asserts the web log has no `DuplicateFlow` (core #103
-  fixed `defineFlow`; nothing yet exercises the real Next layers).
-- ⬜ **Two registries the #103 audit left alone.** `registerLangfuse` has no duplicate guard (a second
-  tracer provider leaks; only called once per runtime today), and `defineApp`'s `attach()` and
-  `run-context.ts`'s ALS are per-instance under two module layers.
+- ✅ **An end-to-end guard against a second `DuplicateFlow`.** `tests/e2e/layers.e2e.ts` drives both module
+  layers against the standalone build (**template #50**) and found the hazard still live at `0.1.8`: #103's
+  idempotency compared `fn.toString()`, which two layers' copies never match. **Fixed in core #130** — the
+  fingerprint is a normalised token stream, with `DefineFlowOptions.version` as the escape hatch.
+- ✅ **Two registries the #103 audit left alone.** Both moved onto `Symbol.for(…)` process globals and
+  `attach()` keys the control plane by app name (**core #123**); its review's three findings, the
+  `shutdown()` one included, are **core #133**.
 - ✅ **`downstream.txt` lists only the template.** Add `grahamlutz/demo-app` to give it core-bump PRs;
   until then it is updated by hand (`pnpm update '@hyperfixation/*'`, commit, `hf deploy demo-app`).
   **Done in Phase 5 W1 (core #117)** — `release.yml`'s own repository list had to gain the line too.
