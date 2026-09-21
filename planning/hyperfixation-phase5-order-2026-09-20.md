@@ -284,13 +284,37 @@ otherwise it stays covered by core's redeploy cases and is said so. Calendar: 20
 > guarded only by `requireSession({ factor: 'code' })` — could be invoked directly by anyone holding a code-factor
 > session: read an admin's inbox, sign in with the emailed code, call the action, hold `factor = 'passkey'` and the
 > whole of `/admin/*`. The second half was that a code session could *enrol* on an account that already had a
-> passkey, so the attacker could register their own authenticator and then promote legitimately. Fixed in core: the
-> promotion's UPDATE now also requires `EXISTS (SELECT 1 FROM hf_passkey p WHERE p.user_id = hf_session.user_id AND
-> p.created_at >= hf_session.created_at)` and a live `expires_at`, in the one statement; and `createAuth`'s new
-> `before` hook 404s `/passkey/generate-register-options` and `/passkey/verify-registration` for a code session whose
-> user holds a passkey older than that session. The code factor stays the bootstrap for a *first* passkey, which is
-> what keeps X4's enrolment and the admin `resetSecondFactor` recovery path working. The X4 reading is unchanged —
-> `hf_passkey` = 1 after a real phone enrolment — but it now proves something it did not before.
+> passkey, so the attacker could register their own authenticator and then promote legitimately.
+>
+> **The first fix was itself broken, two ways, both proved with runnable code against a real Postgres.**
+> *(1, CRITICAL)* Its `before` hook matched only the two registration paths, but the plugin also exposes
+> `/passkey/list-user-passkeys`, `/passkey/delete-passkey` and `/passkey/update-passkey`, each guarded on a session
+> and — on two of them — ownership, never a factor. So the chain was: code session → list the victim's passkey ids →
+> delete them → the enrolment gate now reads "this user has none, let them bootstrap" → enrol the attacker's own
+> authenticator → promote → `/admin/*`. The gate undone by the endpoint next to it. *(2, HIGH)* Its promotion
+> predicate, `EXISTS (… p.created_at >= hf_session.created_at)`, bound the promotion to a **time** rather than to a
+> session: the victim holds an old authenticator, the attacker's inbox-only session sits idle, and an hour later the
+> victim legitimately adds a second device from their own passkey session — at which point a passkey newer than the
+> attacker's session exists and the untouched session promotes itself.
+>
+> **The design that replaced it.** *(A)* An **inversion**: every `/passkey/*` endpoint except the two unauthenticated
+> sign-in paths (`generate-authenticate-options`, `verify-authentication`) is answered for by factor, so an endpoint a
+> plugin upgrade adds is refused before anyone reads its release notes. A `factor = 'code'` session may reach only
+> `generate-register-options` and `verify-registration`, and only while its user holds **zero** passkeys; everything
+> else 404s. A `factor = 'passkey'` session may drive all of them. *(B)* A new nullable
+> `hf_session.passkey_enrolled_at` (core migration `0010`, additive), stamped by a `hooks.after` on
+> `/passkey/verify-registration` on **the calling session** and only when the plugin returned a verified
+> registration — better-auth runs after-hooks over a thrown `APIError` too, so the success check is the difference
+> between a ceremony and a POST of junk. The promotion is then one statement:
+> `UPDATE hf_session SET factor = 'passkey', updated_at = now() WHERE token = $1 AND factor = 'code' AND expires_at >
+> now() AND passkey_enrolled_at IS NOT NULL AND EXISTS (SELECT 1 FROM hf_passkey p WHERE p.user_id =
+> hf_session.user_id)` — no timestamp comparison anywhere, the `EXISTS` time-free belt and braces.
+>
+> The code factor stays the bootstrap for a *first* passkey, which is what keeps X4's enrolment and the admin
+> `resetSecondFactor` recovery path working. **Upgrade safety:** a session minted by passkey sign-in needs no stamp
+> (it is already `passkey`), and every code session already in a live database has `passkey_enrolled_at IS NULL` — it
+> simply cannot promote until a fresh enrolment, which is the right answer and needs no backfill. The X4 reading is
+> unchanged — `hf_passkey` = 1 after a real phone enrolment — but it now proves something it did not before.
 
 ## X5 — A release reaches both apps (user; after W2; the next `Version Packages` PR) — 🚧 In progress
 

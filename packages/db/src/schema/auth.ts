@@ -38,6 +38,11 @@ export const hfSession = pgTable("hf_session", {
   // Defaults to the weaker factor: a session created by a path that does not yet
   // stamp one must not pass a passkey-gated check by omission.
   factor: text("factor", { enum: sessionFactors }).notNull().default("code"),
+  // Set when *this* session completed a passkey registration, and the only thing a promotion to
+  // `factor = 'passkey'` is allowed to read. Null on every session anything else created, which
+  // is why it is nullable rather than defaulted: "this session enrolled nothing" has to be the
+  // state a row arrives in.
+  passkeyEnrolledAt: timestamp("passkey_enrolled_at", { withTimezone: true, mode: "date" }),
 });
 
 export const hfAccount = pgTable("hf_account", {

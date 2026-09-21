@@ -11,12 +11,14 @@ import {
 import { passkey } from "@better-auth/passkey";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
+import { APIError, createAuthMiddleware, getSessionFromCtx, isAPIError } from "better-auth/api";
 import { admin, emailOTP, organization } from "better-auth/plugins";
 import { drizzle } from "drizzle-orm/node-postgres";
 import type { Pool } from "pg";
 import { ADMIN_ROLE } from "./policy.js";
 import {
+  isGuardedPasskeyPath,
+  PASSKEY_REGISTRATION_PATH,
   PASSKEY_REGISTRATION_PATHS,
   sessionFactorForPath,
   type SessionFactor,
@@ -38,14 +40,18 @@ export const AUTH_SCHEMA = {
 const UPGRADE_SESSION_FACTOR_STATEMENT =
   "UPDATE hf_session SET factor = 'passkey', updated_at = now() " +
   "WHERE token = $1 AND factor = 'code' AND expires_at > now() " +
-  "AND EXISTS (SELECT 1 FROM hf_passkey p " +
-  "WHERE p.user_id = hf_session.user_id AND p.created_at >= hf_session.created_at)";
+  "AND passkey_enrolled_at IS NOT NULL " +
+  "AND EXISTS (SELECT 1 FROM hf_passkey p WHERE p.user_id = hf_session.user_id)";
 
-// Answers `mayEnrolPasskey`; see there for why a missing row is a yes.
-const MAY_ENROL_PASSKEY_STATEMENT =
-  "SELECT NOT EXISTS (SELECT 1 FROM hf_passkey p " +
-  "WHERE p.user_id = s.user_id AND (p.created_at IS NULL OR p.created_at < s.created_at)) " +
-  "AS may_enrol FROM hf_session s WHERE s.token = $1 AND s.factor = 'code'";
+/** Records that this very session completed a registration; see `stampPasskeyEnrolment`. */
+const STAMP_PASSKEY_ENROLMENT_STATEMENT =
+  "UPDATE hf_session SET passkey_enrolled_at = now(), updated_at = now() WHERE token = $1";
+
+// Answers `passkeyEndpointAllowed`. A session's own factor and whether its user holds any
+// authenticator at all — no timestamps, because a time is not a session.
+const PASSKEY_SESSION_STATEMENT =
+  "SELECT s.factor, EXISTS (SELECT 1 FROM hf_passkey p WHERE p.user_id = s.user_id) " +
+  "AS has_passkey FROM hf_session s WHERE s.token = $1";
 
 export interface CreateAuthOptions {
   /** The web pool — 5 connections in the budget. Never the step pool, never the control pool. */
@@ -89,16 +95,30 @@ export function createAuth(options: CreateAuthOptions) {
     },
     hooks: {
       // The other half of `upgradeSessionFactor`'s rule, and it has to live here rather than in
-      // `evaluateAccess`: `/api/auth/*` is the auth area, which a code session is allowed to
-      // drive, and the plugin's own guard asks only for a session. 404 is what the policy
+      // `evaluateAccess`: `routeAreaOf` strips `/api`, so `/api/auth/passkey/*` is the auth
+      // area, which a code session is allowed to drive, and the plugin's own guards ask for a
+      // session and (on three of them) ownership, never a factor. 404 is what the policy
       // answers when a refusal must not describe what it refused.
       before: createAuthMiddleware(async (ctx) => {
-        if (!PASSKEY_REGISTRATION_PATHS.includes(ctx.path)) return;
+        if (!isGuardedPasskeyPath(ctx.path)) return;
         const current = await getSessionFromCtx(ctx);
+        // No session is the plugin's own refusal to make, not this gate's.
         if (current === null) return;
-        if (!(await mayEnrolPasskey(options.pool, current.session.token))) {
+        if (!(await passkeyEndpointAllowed(options.pool, current.session.token, ctx.path))) {
           throw new APIError("NOT_FOUND");
         }
+      }),
+      // What a promotion is later allowed to read. It has to be here and not in the template's
+      // server action for the same reason the predicate cannot be `factor = 'code'`: only
+      // better-auth knows whether the ceremony actually verified.
+      after: createAuthMiddleware(async (ctx) => {
+        if (ctx.path !== PASSKEY_REGISTRATION_PATH) return;
+        if (!passkeyRegistrationSucceeded(ctx.context.returned)) return;
+        // The before hook already resolved this and `getSessionFromCtx` caches on the context,
+        // so this is the *calling* session even when the endpoint minted a second one.
+        const current = await getSessionFromCtx(ctx);
+        if (current === null) return;
+        await stampPasskeyEnrolment(options.pool, current.session.token);
       }),
     },
     databaseHooks: {
@@ -128,18 +148,24 @@ export function createAuth(options: CreateAuthOptions) {
  * email code to reach the app they enrolled from.
  *
  * Registration is not authentication, so it does not go through `sessionFactorForPath`: this is
- * a deliberate second entry into `passkey`. What makes it safe is the `EXISTS` clause, not the
+ * a deliberate second entry into `passkey`. What makes it safe is `passkey_enrolled_at`, not the
  * caller: the WebAuthn ceremony is client-side, so a server action that merely asks "is this a
  * code session?" before promoting is an invitation to skip the ceremony and call it directly —
- * whoever could read the emailed code would hold `passkey` and, with the role, `/admin/*`. The
- * proof of enrolment has to be a row, and it has to be one this session put there, so the
- * predicate is `hf_passkey.created_at >= hf_session.created_at`: a passkey the user already had
- * proves only that somebody once enrolled one, which is what the attacker is relying on.
+ * whoever could read the emailed code would hold `passkey` and, with the role, `/admin/*`.
+ *
+ * The proof has to be a column on *this row*, set by `createAuth`'s after-hook when the plugin
+ * itself returned a verified registration. Anything that infers enrolment from a time instead —
+ * "a `hf_passkey` row newer than this session exists" was the first attempt — binds the
+ * promotion to a clock rather than to a session: an attacker's idle code session promotes itself
+ * the moment the victim legitimately adds a second device from their own passkey session, hours
+ * later and with nothing of the attacker's involved.
  *
  * One statement, so there is no window between the read and the write: two concurrent calls
  * both see `factor = 'code'` only until the first commits, and the second updates no row.
  * `expires_at > now()` because a dead session is not one to hand the stronger factor to, and
- * the `factor = 'code'` predicate keeps it a no-op on a session that already holds it.
+ * the `factor = 'code'` predicate keeps it a no-op on a session that already holds it. The
+ * `EXISTS` on `hf_passkey` is belt and braces — a stamp with no surviving authenticator behind
+ * it is nothing to promote on — and it is time-free, so it cannot refuse an honest enrolment.
  */
 export async function upgradeSessionFactor(pool: Pool, sessionToken: string): Promise<boolean> {
   const result = await pool.query(UPGRADE_SESSION_FACTOR_STATEMENT, [sessionToken]);
@@ -147,26 +173,73 @@ export async function upgradeSessionFactor(pool: Pool, sessionToken: string): Pr
 }
 
 /**
- * Whether this session may run the enrolment ceremony at all.
+ * Records on the calling session that it, and not some other session of the same user, completed
+ * a passkey registration. The one thing `upgradeSessionFactor` promotes on.
  *
- * The code factor is the bootstrap: a user with no passkey has nothing else to enrol their
- * first one with, and `/auth/passkey` exists for exactly that. It stops being a bootstrap the
- * moment the user has one — from then on an enrolment reached with only an emailed code is an
- * attacker adding *their* authenticator to the victim's account, which `upgradeSessionFactor`
- * would then promote legitimately. So a code session may enrol only while the user holds no
- * passkey older than the session; a passkey session may always add another.
+ * Unconditional on `factor`: stamping a session that already holds `passkey` is true and inert.
+ * It is the caller — `createAuth`'s after-hook — that must have established the registration
+ * actually succeeded, because nothing in this statement can tell.
+ */
+export async function stampPasskeyEnrolment(pool: Pool, sessionToken: string): Promise<boolean> {
+  const result = await pool.query(STAMP_PASSKEY_ENROLMENT_STATEMENT, [sessionToken]);
+  return result.rowCount === 1;
+}
+
+/**
+ * Whether `/passkey/verify-registration` returned a registration rather than a refusal.
  *
- * A `hf_passkey` row whose `created_at` is null counts as older, because the column is nullable
- * and the safe reading of "we cannot tell when this was enrolled" is "before you got here".
- * A token with no code-factor session row is not this check's business — better-auth's own
- * session middleware refuses an absent session, and a passkey session is allowed — so it is a
- * yes.
+ * better-auth's dispatcher runs the after-hooks either way: an `APIError` thrown by the handler
+ * is caught and parked in `ctx.context.returned` before they run, so a failed ceremony reaches
+ * this hook looking exactly like a successful one but for the value. A stamp on a failure would
+ * hand the promotion to anyone who can POST the endpoint with junk.
+ */
+export function passkeyRegistrationSucceeded(returned: unknown): boolean {
+  if (returned === null || typeof returned !== "object") return false;
+  if (isAPIError(returned)) return false;
+  // The endpoint answers with the created `hf_passkey` row, so its id is the proof.
+  return typeof (returned as { id?: unknown }).id === "string";
+}
+
+/**
+ * Which `/passkey/*` endpoint this session's factor may drive at all.
+ *
+ * A `passkey` session may drive every one of them — it proved possession of an authenticator,
+ * which is the whole of what the plugin's own guards assume. A `code` session may reach only the
+ * two registration paths, and only while its user holds **no** authenticator: the emailed code
+ * is the bootstrap for a *first* passkey and `/auth/passkey` exists for exactly that, and it
+ * stops being a bootstrap the moment there is one to be locked out of.
+ *
+ * "No passkey" is counted over the whole user with no reference to when anything was created.
+ * A code session must not reach `delete-passkey` either, because the two rules compose into the
+ * attack otherwise: delete the victim's authenticators, become a first enrolment again, enrol
+ * your own. Hence the caller is `isGuardedPasskeyPath`, not a list of the paths known to be
+ * dangerous.
+ *
+ * A token with no `hf_session` row is not this check's business — better-auth's own session
+ * middleware refuses an absent session — so it is a yes.
+ */
+export async function passkeyEndpointAllowed(
+  pool: Pool,
+  sessionToken: string,
+  path: string,
+): Promise<boolean> {
+  const { rows } = await pool.query<{ factor: string; has_passkey: boolean }>(
+    PASSKEY_SESSION_STATEMENT,
+    [sessionToken],
+  );
+  const session = rows[0];
+  if (session === undefined) return true;
+  if (session.factor !== "code") return true;
+  return PASSKEY_REGISTRATION_PATHS.includes(path) && !session.has_passkey;
+}
+
+/**
+ * Whether this session may run the enrolment ceremony: `passkeyEndpointAllowed` asked about the
+ * registration path. Kept as its own name because that is the question the template's enrolment
+ * page and the recovery path are about.
  */
 export async function mayEnrolPasskey(pool: Pool, sessionToken: string): Promise<boolean> {
-  const { rows } = await pool.query<{ may_enrol: boolean }>(MAY_ENROL_PASSKEY_STATEMENT, [
-    sessionToken,
-  ]);
-  return rows[0]?.may_enrol ?? true;
+  return passkeyEndpointAllowed(pool, sessionToken, PASSKEY_REGISTRATION_PATH);
 }
 
 /**

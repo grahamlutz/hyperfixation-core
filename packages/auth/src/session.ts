@@ -18,6 +18,34 @@ export const PASSKEY_REGISTRATION_PATHS: readonly string[] = [
   PASSKEY_REGISTRATION_PATH,
 ];
 
+/** The challenge half of the sign-in ceremony; named only so the open pair is spelled out. */
+export const PASSKEY_AUTHENTICATION_OPTIONS_PATH = "/passkey/generate-authenticate-options";
+
+/**
+ * The only two `/passkey/*` endpoints that take no session, and so the only two the factor gate
+ * has nothing to say about: they *are* how a passkey holder signs in.
+ */
+export const PASSKEY_SIGN_IN_PATHS: readonly string[] = [
+  PASSKEY_AUTHENTICATION_OPTIONS_PATH,
+  PASSKEY_AUTHENTICATION_PATH,
+];
+
+/**
+ * An **allowlist by inversion**: every `/passkey/*` endpoint that is not one of the two sign-in
+ * paths has to be answered for by factor, whether or not this file knows what it does.
+ *
+ * Naming the guarded paths instead was the first version's mistake. The plugin also exposes
+ * `list-user-passkeys`, `delete-passkey` and `update-passkey`, each guarded on nothing but a
+ * session and ownership, and a code session that can delete the victim's authenticators walks
+ * straight back to "this user has no passkey, so let them enrol one" — the enrolment gate
+ * undone by the endpoint next to it. A plugin upgrade that adds a fifth such endpoint must be
+ * refused before anybody has read its release notes, which is what this shape buys.
+ */
+export function isGuardedPasskeyPath(path: string | null | undefined): boolean {
+  if (typeof path !== "string" || !path.startsWith("/passkey/")) return false;
+  return !PASSKEY_SIGN_IN_PATHS.includes(path);
+}
+
 /** The email-OTP sign-in endpoint, named here so the stamping rule reads as a pair. */
 export const EMAIL_OTP_SIGN_IN_PATH = "/sign-in/email-otp";
 

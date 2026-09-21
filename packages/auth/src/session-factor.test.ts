@@ -9,9 +9,12 @@ import {
 import { AccessRefused, createSessionGuard } from "./require-session.js";
 import {
   EMAIL_OTP_SIGN_IN_PATH,
+  PASSKEY_AUTHENTICATION_OPTIONS_PATH,
   PASSKEY_AUTHENTICATION_PATH,
+  PASSKEY_REGISTRATION_OPTIONS_PATH,
   PASSKEY_REGISTRATION_PATH,
   hasRole,
+  isGuardedPasskeyPath,
   sessionFactorForPath,
   type AuthSession,
   type SessionFactor,
@@ -41,6 +44,31 @@ describe("stamping a session's factor", () => {
     expect(sessionFactorForPath("/some/plugin/added/later")).toBe("code");
     expect(sessionFactorForPath(undefined)).toBe("code");
     expect(sessionFactorForPath(null)).toBe("code");
+  });
+});
+
+describe("which passkey endpoints the factor gate has to answer for", () => {
+  it("guards every one of them but the two sign-in paths", () => {
+    expect(isGuardedPasskeyPath(PASSKEY_REGISTRATION_OPTIONS_PATH)).toBe(true);
+    expect(isGuardedPasskeyPath(PASSKEY_REGISTRATION_PATH)).toBe(true);
+    expect(isGuardedPasskeyPath("/passkey/list-user-passkeys")).toBe(true);
+    expect(isGuardedPasskeyPath("/passkey/delete-passkey")).toBe(true);
+    expect(isGuardedPasskeyPath("/passkey/update-passkey")).toBe(true);
+
+    // The inversion: the next endpoint the plugin grows is guarded before anybody adds it here.
+    expect(isGuardedPasskeyPath("/passkey/some-future-endpoint")).toBe(true);
+  });
+
+  it("leaves the sign-in ceremony alone — it is how the stronger factor is reached", () => {
+    expect(isGuardedPasskeyPath(PASSKEY_AUTHENTICATION_OPTIONS_PATH)).toBe(false);
+    expect(isGuardedPasskeyPath(PASSKEY_AUTHENTICATION_PATH)).toBe(false);
+  });
+
+  it("has nothing to say about a path outside the plugin", () => {
+    expect(isGuardedPasskeyPath(EMAIL_OTP_SIGN_IN_PATH)).toBe(false);
+    expect(isGuardedPasskeyPath("/passkeys/delete")).toBe(false);
+    expect(isGuardedPasskeyPath(undefined)).toBe(false);
+    expect(isGuardedPasskeyPath(null)).toBe(false);
   });
 });
 
