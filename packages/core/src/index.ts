@@ -27,6 +27,24 @@ export {
 export { defineSource, type SourceDefinition, type SourceRow } from "./sources.js";
 export { defineResolver, type ResolverDefinition, type ResolverFuzzy } from "./resolvers.js";
 export {
+  fetch,
+  fetchDomainOf,
+  fetchGet,
+  urlHash,
+  FetchTooLarge,
+  DEFAULT_FETCH_MIN_INTERVAL_MS,
+  DEFAULT_FETCH_TTL_MS,
+  FETCH_BODY_LIMIT_BYTES,
+  FETCH_CACHED_STATEMENT,
+  FETCH_DOMAIN_LOCK_STATEMENT,
+  FETCH_DOMAIN_STAMP_STATEMENT,
+  FETCH_DOMAIN_UPSERT_STATEMENT,
+  FETCH_DOMAIN_WAIT_STATEMENT,
+  FETCH_WRITE_STATEMENT,
+  type FetchGetOptions,
+  type RawFetch,
+} from "./fetch.js";
+export {
   bigramDice,
   fuzzyCandidateStatement,
   resolveBatch,

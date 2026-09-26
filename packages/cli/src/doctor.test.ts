@@ -438,7 +438,7 @@ describe("hf doctor", () => {
     );
   });
 
-  it("fails on two advisory locks, and on one that is not the worker's key", async () => {
+  it("fails on two locks under the worker's key, and on one lock that is not it", async () => {
     const dir = await stateDirWith();
     harness.server.use(statusHandler(statusReport()));
 
@@ -447,7 +447,7 @@ describe("hf doctor", () => {
     );
     expect(two.ok).toBe(false);
     expect(findingOf(doctorLines(two), "lock")).toContain(
-      `FAIL lock: 2 advisory locks in ${DATABASE}`,
+      `FAIL lock: 2 advisory locks on hf-worker:demo_app in ${DATABASE}`,
     );
 
     harness.server.use(statusHandler(statusReport()));
@@ -459,8 +459,30 @@ describe("hf doctor", () => {
     );
     expect(other.ok).toBe(false);
     expect(findingOf(doctorLines(other), "lock")).toContain(
-      "is not hashtext('hf-worker:demo_app')",
+      "carries hashtext('hf-worker:demo_app'): 1 held, none the worker's",
     );
+  });
+
+  /**
+   * `fetch.get` holds `pg_advisory_xact_lock(hashtext('hf-fetch:' || domain))` across a request,
+   * so an app mid-fetch has a second advisory lock that is nothing to do with the worker. Counting
+   * every lock made that a `FAIL`, and `hf doctor` gates deploys.
+   */
+  it("passes with the worker's lock held alongside an in-flight fetch's lock", async () => {
+    const dir = await stateDirWith();
+    harness.server.use(statusHandler(statusReport()));
+
+    const result = await doctor(
+      options(dir, {
+        name: APP,
+        database: cluster({ locks: { [DATABASE]: { held: 2, matching: 1 } } }).open,
+      }),
+    );
+
+    expect(findingOf(doctorLines(result), "lock")).toBe(
+      `  OK   lock: one worker holds hf-worker:demo_app in ${DATABASE}`,
+    );
+    expect(result.ok).toBe(true);
   });
 
   it("reports one app's lock without the other app's deciding it", async () => {

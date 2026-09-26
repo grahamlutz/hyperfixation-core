@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   bigint,
+  customType,
   doublePrecision,
   index,
   integer,
@@ -38,6 +39,9 @@ export type LabelValue = (typeof labelValues)[number];
 
 const at = (name: string) => timestamp(name, { withTimezone: true, mode: "date" });
 const id = () => bigint("id", { mode: "number" }).generatedAlwaysAsIdentity().primaryKey();
+
+/** Drizzle 0.45 has no `bytea` builder; `node-postgres` already hands one back as a Buffer. */
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => "bytea" });
 
 export const hfSourceRun = pgTable("hf_source_run", {
   id: id(),
@@ -191,6 +195,46 @@ export const hfLabel = pgTable(
   },
   (t) => [index("hf_label_record_idx").on(t.recordType, t.recordId)],
 );
+
+/**
+ * One response per `(url_hash, method)`, kept until `expires_at`. The unique key is over the
+ * hash rather than the URL itself because a URL has no length bound and a btree entry does.
+ *
+ * `error` is set only for a response the cap refused: the row is the audit trail of the refusal
+ * and `fetch.get` re-throws from it on a hit, so rediscovering a too-large body costs nothing.
+ */
+export const hfRawFetch = pgTable(
+  "hf_raw_fetch",
+  {
+    id: id(),
+    url: text("url").notNull(),
+    urlHash: text("url_hash").notNull(),
+    method: text("method").notNull().default("GET"),
+    status: integer("status").notNull(),
+    headers: jsonb("headers"),
+    body: bytea("body"),
+    contentType: text("content_type"),
+    etag: text("etag"),
+    error: text("error"),
+    fetchedAt: at("fetched_at").notNull().defaultNow(),
+    expiresAt: at("expires_at").notNull(),
+    // The run that filled the row, for the timeline; a hit from another run does not move it.
+    runId: text("run_id"),
+  },
+  (t) => [uniqueIndex("hf_raw_fetch_url_method_uq").on(t.urlHash, t.method)],
+);
+
+/**
+ * The politeness interval per host, and when that host was last reached. Written under
+ * `pg_advisory_xact_lock(hashtext('hf-fetch:' || domain))`, which is what serializes N workers
+ * on one host; `last_fetched_at` is stamped with `clock_timestamp()` rather than `now()`,
+ * because `now()` inside the fetching transaction is the transaction's start.
+ */
+export const hfFetchDomain = pgTable("hf_fetch_domain", {
+  domain: text("domain").primaryKey(),
+  minIntervalMs: integer("min_interval_ms").notNull().default(1000),
+  lastFetchedAt: at("last_fetched_at"),
+});
 
 export const hfOutcome = pgTable(
   "hf_outcome",

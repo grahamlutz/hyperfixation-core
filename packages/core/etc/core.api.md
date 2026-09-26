@@ -410,6 +410,12 @@ export const DEFAULT_BOARD_LIMIT = 500;
 // @public
 export const DEFAULT_DISPLAY_COLUMN = "normalized_name";
 
+// @public
+export const DEFAULT_FETCH_MIN_INTERVAL_MS = 1000;
+
+// @public
+export const DEFAULT_FETCH_TTL_MS: number;
+
 // @public (undocumented)
 export const DEFAULT_RESOLVE_LIMIT = 500;
 
@@ -486,6 +492,60 @@ export const EXISTING_ACTIVITY_STATEMENT = "SELECT id FROM hf_activity WHERE run
 
 // @public (undocumented)
 export const EXISTING_SCORE_STATEMENT = "SELECT id FROM hf_score WHERE run_id = $1 AND key = $2 AND spec_name = $3";
+
+// @public
+const fetch_2: {
+    get: typeof fetchGet;
+};
+export { fetch_2 as fetch }
+
+// @public
+export const FETCH_BODY_LIMIT_BYTES: number;
+
+// @public
+export const FETCH_CACHED_STATEMENT: string;
+
+// @public
+export const FETCH_DOMAIN_LOCK_STATEMENT = "SELECT pg_advisory_xact_lock(hashtext('hf-fetch:' || $1::text))";
+
+// @public
+export const FETCH_DOMAIN_STAMP_STATEMENT = "UPDATE hf_fetch_domain SET last_fetched_at = clock_timestamp() WHERE domain = $1";
+
+// @public (undocumented)
+export const FETCH_DOMAIN_UPSERT_STATEMENT: string;
+
+// @public
+export const FETCH_DOMAIN_WAIT_STATEMENT: string;
+
+// @public (undocumented)
+export const FETCH_WRITE_STATEMENT: string;
+
+// @public
+export function fetchDomainOf(url: string): string;
+
+// @public
+export function fetchGet(ctx: StepContext, options: FetchGetOptions): Promise<RawFetch>;
+
+// @public
+export interface FetchGetOptions {
+    // (undocumented)
+    headers?: Record<string, string>;
+    method?: "GET" | "HEAD";
+    minIntervalMs?: number;
+    ttlMs?: number;
+    // (undocumented)
+    url: string;
+}
+
+// @public (undocumented)
+export class FetchTooLarge extends Error {
+    constructor(url: string, bytes: number, limitBytes: number);
+    readonly bytes: number;
+    // (undocumented)
+    readonly limitBytes: number;
+    // (undocumented)
+    readonly url: string;
+}
 
 // @public
 export function fireSchedule(pool: Pool, schedule: AnySchedule, start: (flow: Flow<unknown, unknown>, input: unknown) => Promise<StartedRun>): Promise<ScheduleFired>;
@@ -787,6 +847,30 @@ export interface QueueStatus {
     name: string;
     // (undocumented)
     running: number;
+}
+
+// @public
+export interface RawFetch {
+    body: Buffer | null;
+    cached: boolean;
+    // (undocumented)
+    contentType: string | null;
+    // (undocumented)
+    etag: string | null;
+    // (undocumented)
+    expiresAt: Date;
+    // (undocumented)
+    fetchedAt: Date;
+    // (undocumented)
+    headers: Record<string, string>;
+    // (undocumented)
+    id: number;
+    // (undocumented)
+    method: string;
+    // (undocumented)
+    status: number;
+    // (undocumented)
+    url: string;
 }
 
 // @public
@@ -1231,6 +1315,9 @@ export class UnknownRegistration extends Error {
     // (undocumented)
     readonly known: readonly string[];
 }
+
+// @public
+export function urlHash(url: string): string;
 
 // @public (undocumented)
 export const WORKSPACE_BOARD_OPERATION = "workspace.board";

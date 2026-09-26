@@ -399,6 +399,9 @@ importers:
       eslint:
         specifier: ^10.10.0
         version: 10.10.0(supports-color@8.1.1)
+      msw:
+        specifier: 2.15.0
+        version: 2.15.0(@types/node@22.20.2)(typescript@5.9.3)
       zod:
         specifier: 4.6.5
         version: 4.6.5
