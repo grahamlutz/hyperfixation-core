@@ -113,6 +113,10 @@ describe("per-app state cache", () => {
       ["a step without doneAt", { steps: { repo: {} } }],
       ["a nested key that is not a string", { steps: {}, coolify: { projectUuid: 7 } }],
       ["a nested key it does not know", { steps: {}, langfuse: { orgKey: "pk:sk" } }],
+      // The one half whose field names the operator's own variables decide: a name an env var
+      // cannot have, and a field beside `rotatedAt`, which would be a value nobody should keep.
+      ["a key that is not a variable name", { steps: {}, keys: { "not a var": {} } }],
+      ["a key record carrying more than a date", { steps: {}, keys: { SMTP_URL: { value: "x" } } }],
     ];
 
     for (const [what, contents] of cases) {
@@ -173,6 +177,11 @@ describe("per-app state cache", () => {
     await state.patch({ repo: "grahamlutz/demo-app", lastDeployedSha: "abc1234" });
     expect(secretsHash(state.state)).toBe(before);
 
+    // A rotation date is not a secret the envs carry: `hf rotate-key` PATCHes its one variable
+    // itself, and counting the date would make the next `hf new` replay the whole bulk PATCH.
+    await state.patch({ keys: { ANTHROPIC_API_KEY: { rotatedAt: "2026-09-26T00:00:00.000Z" } } });
+    expect(secretsHash(state.state)).toBe(before);
+
     await state.patch({ database: { applicationPassword: "a2" } });
     expect(secretsHash(state.state)).not.toBe(before);
   });
@@ -193,6 +202,7 @@ describe("per-app state cache", () => {
       betterAuthSecret: generateBetterAuthSecret(),
       langfuse: { publicKey: "pk-lf-1", secretKey: "sk-lf-1" },
       statusTokens: { read: "rt", write: "wt" },
+      keys: { ANTHROPIC_API_KEY: { rotatedAt: "2026-09-19T00:00:00.000Z" } },
       lastRestoreCheckAt: "2026-09-19T00:00:00.000Z",
       lastDeployedSha: "abc1234",
     });

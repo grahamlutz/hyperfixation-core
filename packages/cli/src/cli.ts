@@ -1,5 +1,6 @@
 import { parseArgs } from "node:util";
 import { bootstrapApp } from "./bootstrap.js";
+import { budgetApp, budgetLines } from "./budget.js";
 import { checkApp } from "./check.js";
 import { deployApp } from "./deploy-app.js";
 import { dev, devBuildSha } from "./dev.js";
@@ -9,6 +10,7 @@ import { migrateApp } from "./migrate.js";
 import { newApp } from "./new.js";
 import { newAppCloud } from "./new-cloud.js";
 import { formatRestoreCheck, restoreCheckApp } from "./restore-check.js";
+import { readKeyFromStdin, rotateKey, ROTATABLE_ENV } from "./rotate-key.js";
 import { statusTokenApp, type StatusTokenKind } from "./status-token.js";
 import { requireTemplateSource } from "./template-source.js";
 import { DEV_BUDGET_USD, upApp } from "./up.js";
@@ -27,6 +29,8 @@ export const COMMANDS = [
   "doctor",
   "restore-check",
   "version",
+  "budget",
+  "rotate-key",
 ] as const;
 
 export type Command = (typeof COMMANDS)[number];
@@ -80,6 +84,19 @@ export const USAGE = `hf — the hyperfixation CLI
                             read-only role may read, the last restore check, and open core-bump
                             PRs. Exits 1 on any finding
 
+  hf budget <name> --usd <n>
+                            set hf_app_state.budget_usd — the default every new month's period is
+                            created from — over the tunnel, with an hf_audit row naming the
+                            operator (HF_OPERATOR, else this machine's login name). The period
+                            already running is untouched: change that in the admin budget form
+
+  hf rotate-key <name> <VAR>
+                            replace one of the app's provider or channel variables. The new value
+                            is read from stdin and never from an argument, goes out in one Coolify
+                            request, and is not printed or stored anywhere; only
+                            keys.<VAR>.rotatedAt is recorded. Deploys afterwards, because the
+                            containers hold the old value until they are replaced
+
   hf gen [generator]        the app's turbo generators
 
   hf dev                    docker compose up, then pnpm dev under HF_BUILD_SHA=dev-<timestamp>
@@ -96,7 +113,7 @@ export const USAGE = `hf — the hyperfixation CLI
 
   hf version                the @hyperfixation/cli version behind this hf, also as --version, -v
 
-Every command but \`new\`, \`deploy\`, \`doctor\` and \`restore-check\` runs against the app at or above the working directory, or --dir.
+Every command but \`new\`, \`deploy\`, \`doctor\`, \`restore-check\`, \`budget\` and \`rotate-key\` runs against the app at or above the working directory, or --dir.
 `;
 
 export interface Io {
@@ -165,6 +182,10 @@ async function dispatch(command: Command, argv: readonly string[], io: Io): Prom
       return await commandDoctor(argv, io);
     case "restore-check":
       return await commandRestoreCheck(argv, io);
+    case "budget":
+      return await commandBudget(argv, io);
+    case "rotate-key":
+      return await commandRotateKey(argv, io);
     case "version":
       io.out(await cliVersion());
       return 0;
@@ -445,6 +466,42 @@ async function commandRestoreCheck(argv: readonly string[], io: Io): Promise<num
   });
   for (const line of formatRestoreCheck(result)) io.out(line);
   return result.ok ? 0 : 1;
+}
+
+async function commandBudget(argv: readonly string[], io: Io): Promise<number> {
+  const { values, positionals } = parseArgs({
+    args: [...argv],
+    options: { usd: { type: "string" } },
+    allowPositionals: true,
+  });
+
+  const name = positionals[0];
+  if (name === undefined || values.usd === undefined) {
+    io.err("hf budget needs a name and an amount: hf budget <name> --usd <n>");
+    return 1;
+  }
+
+  for (const line of budgetLines(await budgetApp({ app: name, budgetUsd: values.usd }))) {
+    io.out(line);
+  }
+  return 0;
+}
+
+async function commandRotateKey(argv: readonly string[], io: Io): Promise<number> {
+  const { positionals } = parseArgs({ args: [...argv], allowPositionals: true });
+
+  const [name, variable] = positionals;
+  if (name === undefined || variable === undefined) {
+    io.err("hf rotate-key needs a name and a variable: hf rotate-key <name> <VAR>");
+    io.err(`  one of ${ROTATABLE_ENV.join(", ")}, with the new value on stdin`);
+    return 1;
+  }
+
+  // Read before anything else reaches the network, and never from `argv`: an argument is in the
+  // shell's history and in the box's process list, and this is the value of a live credential.
+  const value = await readKeyFromStdin(process.stdin);
+  await rotateKey({ app: name, variable, value, io });
+  return 0;
 }
 
 async function commandUp(argv: readonly string[], io: Io): Promise<number> {

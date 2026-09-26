@@ -31,6 +31,7 @@ const STATUS_URL = `https://${APP}.${BASE_DOMAIN}/api/status`;
 const OTHER_APP = "other-app";
 const OTHER_STATUS_URL = `https://${OTHER_APP}.${BASE_DOMAIN}/api/status`;
 const GITHUB = "https://api.github.com";
+const COOLIFY = "https://coolify.test";
 const REPO = `grahamlutz/${APP}`;
 
 const MAIN_SHA = "1111111111111111111111111111111111111111";
@@ -46,7 +47,11 @@ const SECRETS = {
   readonlyPassword: "readonly-sekrit",
   langfuseSecretKey: "langfuse-sekrit",
   githubToken: "github-token-sekrit",
+  coolifyToken: "coolify-token-sekrit",
 };
+
+/** A value Coolify hands back beside every variable's name, and that no line may carry. */
+const ENV_VALUE = "env-value-sekrit";
 
 const ROUTES: StubRoute[] = [
   {
@@ -64,8 +69,17 @@ const ROUTES: StubRoute[] = [
   },
 ];
 
+const APP_UUID = "application-1";
+
+/** The app's Coolify environment as the `keys` line reads it: names, never values. */
+const ENV_NAMES = ["DATABASE_URL", "ANTHROPIC_API_KEY", "SOURCE_COMMIT"];
+
 const harness = createOpenApiHarness(ROUTES);
 const tempDirs: string[] = [];
+
+function daysBefore(days: number): string {
+  return new Date(NOW.getTime() - days * 86_400_000).toISOString();
+}
 
 async function tempDir(): Promise<string> {
   const dir = await mkdtemp(path.join(tmpdir(), "hf-doctor-"));
@@ -76,6 +90,8 @@ async function tempDir(): Promise<string> {
 function stateOf(overrides: Partial<AppState> = {}): Partial<AppState> {
   return {
     repo: REPO,
+    coolify: { projectUuid: "project-1", appUuid: APP_UUID },
+    keys: { ANTHROPIC_API_KEY: { rotatedAt: daysBefore(10) } },
     statusTokens: { read: SECRETS.readToken, write: SECRETS.writeToken },
     database: {
       migratorPassword: SECRETS.migratorPassword,
@@ -225,6 +241,7 @@ function options(dir: string, overrides: Partial<DoctorOptions> = {}): DoctorOpt
     now: () => NOW,
     // E006 needs a cluster; the check itself is exercised against one further down.
     privileges: async () => undefined,
+    envNames: () => Promise.resolve(ENV_NAMES),
     database: cluster().open,
     ...overrides,
   };
@@ -593,6 +610,126 @@ describe("hf doctor", () => {
     expect(findingOf(doctorLines(backends), "connections")).toBe(
       "  FAIL connections: connection terminated",
     );
+  });
+
+  it("dates each provider or channel key that is set, by name and never by value", async () => {
+    const dir = await stateDirWith();
+    harness.server.use(statusHandler(statusReport()));
+
+    const result = await doctor(
+      options(dir, {
+        name: APP,
+        envNames: () => Promise.resolve([...ENV_NAMES, "SMTP_URL"]),
+      }),
+    );
+    const keys = doctorLines(result).filter((line) => line.includes(" keys:"));
+
+    // One line per variable that is set and rotatable, and nothing about DATABASE_URL, which this
+    // command will not rotate, or SOURCE_COMMIT, which is not a secret.
+    expect(keys).toEqual([
+      `  OK   keys: ANTHROPIC_API_KEY rotated 10.0 day(s) ago (${daysBefore(10)})`,
+      "  WARN keys: SMTP_URL is set and no rotation of it is recorded — age unknown; " +
+        `run hf rotate-key ${APP} SMTP_URL`,
+    ]);
+  });
+
+  it("warns on a key rotated 91 days ago", async () => {
+    const dir = await stateDirWith(
+      stateOf({ keys: { ANTHROPIC_API_KEY: { rotatedAt: daysBefore(91) } } }),
+    );
+    harness.server.use(statusHandler(statusReport()));
+
+    const result = await doctor(options(dir, { name: APP }));
+
+    expect(result.ok).toBe(false);
+    expect(findingOf(doctorLines(result), "keys")).toBe(
+      `  WARN keys: ANTHROPIC_API_KEY rotated 91.0 day(s) ago (${daysBefore(91)}) — over 90 ` +
+        `days; run hf rotate-key ${APP} ANTHROPIC_API_KEY`,
+    );
+  });
+
+  it("is content on a key rotated 89 days ago, and on an app with no key at all", async () => {
+    const fresh = await stateDirWith(
+      stateOf({ keys: { ANTHROPIC_API_KEY: { rotatedAt: daysBefore(89) } } }),
+    );
+    harness.server.use(statusHandler(statusReport()));
+
+    const result = await doctor(options(fresh, { name: APP }));
+    expect(result.ok).toBe(true);
+    expect(findingOf(doctorLines(result), "keys")).toContain("89.0 day(s) ago");
+
+    harness.server.use(statusHandler(statusReport()));
+    const none = await doctor(
+      options(fresh, { name: APP, envNames: () => Promise.resolve(["DATABASE_URL"]) }),
+    );
+    expect(none.ok).toBe(true);
+    expect(findingOf(doctorLines(none), "keys")).toContain("no provider or channel key set");
+  });
+
+  it("warns on the keys line, and reports the rest, when Coolify cannot be asked", async () => {
+    const dir = await stateDirWith();
+    harness.server.use(statusHandler(statusReport()));
+
+    const result = await doctor(
+      options(dir, {
+        name: APP,
+        envNames: () => Promise.reject(new Error("HF_COOLIFY_TOKEN unset: set it in config.json")),
+      }),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(findingOf(doctorLines(result), "keys")).toBe(
+      "  WARN keys: HF_COOLIFY_TOKEN unset: set it in config.json",
+    );
+    expect(findingOf(doctorLines(result), "E006")).toContain("OK");
+  });
+
+  it("reads Coolify's own env list for names alone, and counts no preview twin", async () => {
+    const dir = await stateDirWith();
+    harness.server.use(
+      statusHandler(statusReport()),
+      harness.handler({
+        spec: "coolify",
+        method: "get",
+        url: `${COOLIFY}/api/v1/applications/{uuid}/envs`,
+        json: [
+          { uuid: "env-1", key: "ANTHROPIC_API_KEY", value: ENV_VALUE, is_preview: false },
+          { uuid: "env-2", key: "SMTP_URL", value: ENV_VALUE, is_preview: true },
+          { uuid: "env-3", key: "DATABASE_URL", value: ENV_VALUE, is_preview: false },
+        ],
+      }),
+    );
+
+    // No `envNames` stub: this is the one path that is handed Coolify's values.
+    const result = await doctor(
+      options(dir, {
+        name: APP,
+        envNames: undefined,
+        config: {
+          HF_BASE_DOMAIN: BASE_DOMAIN,
+          HF_GITHUB_TOKEN: SECRETS.githubToken,
+          HF_COOLIFY_URL: COOLIFY,
+          HF_COOLIFY_TOKEN: SECRETS.coolifyToken,
+        },
+      }),
+    );
+    const lines = doctorLines(result);
+
+    expect(result.ok).toBe(true);
+    expect(lines.filter((line) => line.includes(" keys:"))).toEqual([
+      `  OK   keys: ANTHROPIC_API_KEY rotated 10.0 day(s) ago (${daysBefore(10)})`,
+    ]);
+    expect(lines.join("\n")).not.toContain(ENV_VALUE);
+  });
+
+  it("warns when no Coolify application uuid was ever recorded to ask about", async () => {
+    const dir = await stateDirWith(stateOf({ coolify: {} }));
+    harness.server.use(statusHandler(statusReport()));
+
+    const result = await doctor(options(dir, { name: APP }));
+
+    expect(result.ok).toBe(false);
+    expect(findingOf(doctorLines(result), "keys")).toContain("no Coolify application uuid");
   });
 
   it("warns when the last restore check is older than a week, and when there is none", async () => {

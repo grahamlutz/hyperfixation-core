@@ -65,6 +65,19 @@ export interface StatusTokenState {
 }
 
 /**
+ * When one of the app's provider or channel variables was last rotated, and nothing else.
+ *
+ * Deliberately not the value: `hf rotate-key` sends that to Coolify and forgets it, so this file
+ * — the one thing on the laptop `hf doctor` reads without asking a provider — can date a key
+ * without holding one. A variable set by hand has no record here and reads as an unknown age,
+ * which is the warning.
+ */
+export interface KeyRotationState {
+  /** ISO 8601, when `hf rotate-key` last PATCHed the variable into Coolify's environment. */
+  rotatedAt?: string;
+}
+
+/**
  * Everything one cloud app's provisioning produced, so that a rerun, `hf doctor` and
  * `hf restore-check` do not have to ask five APIs what already exists.
  *
@@ -103,6 +116,8 @@ export interface AppState {
    * Never printed; it reaches the app through the Coolify env PATCH alone.
    */
   betterAuthSecret?: string;
+  /** One entry per variable `hf rotate-key` has rotated, keyed by the variable's own name. */
+  keys?: Record<string, KeyRotationState>;
   lastRestoreCheckAt?: string;
   lastDeployedSha?: string;
 }
@@ -244,10 +259,11 @@ function merge(state: AppState, changes: Partial<AppState>): AppState {
     ...mergeObject(state, changes, "database"),
     ...mergeObject(state, changes, "langfuse"),
     ...mergeObject(state, changes, "statusTokens"),
+    ...mergeObject(state, changes, "keys"),
   };
 }
 
-function mergeObject<Key extends "coolify" | "database" | "langfuse" | "statusTokens">(
+function mergeObject<Key extends "coolify" | "database" | "langfuse" | "statusTokens" | "keys">(
   state: AppState,
   changes: Partial<AppState>,
   key: Key,
@@ -306,6 +322,9 @@ function parseAppState(contents: string, file: string): AppState {
       case "statusTokens":
         state.statusTokens = parseFields(value, file, key, ["read", "write"]);
         break;
+      case "keys":
+        state.keys = parseKeys(value, file);
+        break;
       default:
         throw new AppStateInvalid(file, `${JSON.stringify(key)} is not an hf state key`);
     }
@@ -324,6 +343,24 @@ function parseSteps(value: unknown, file: string): Partial<Record<StepName, Step
     steps[name as StepName] = { doneAt: asString(fields.doneAt, file, `steps.${name}.doneAt`) };
   }
   return steps;
+}
+
+/**
+ * `keys`, whose own field names are the app's environment variables rather than a fixed list.
+ *
+ * A name is refused unless it is one an environment variable can have, and a record carries
+ * nothing but `rotatedAt`: this half of the file is written by `hf rotate-key`, and anything else
+ * under a variable's name would be a value nobody should have kept.
+ */
+function parseKeys(value: unknown, file: string): Record<string, KeyRotationState> {
+  const keys: Record<string, KeyRotationState> = {};
+  for (const [name, record] of Object.entries(asObject(value, file, "keys"))) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+      throw new AppStateInvalid(file, `keys.${name} is not an environment variable name`);
+    }
+    keys[name] = parseFields(record, file, `keys.${name}`, ["rotatedAt"]);
+  }
+  return keys;
 }
 
 function parseFields<Field extends string>(
