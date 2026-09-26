@@ -1,6 +1,7 @@
 import { access, readdir } from "node:fs/promises";
 import path from "node:path";
 import { checkE006, quoteIdent } from "@hyperfixation/db";
+import { GRANT_RO_EXCLUDED_TABLES, roleNames } from "@hyperfixation/db/migrator";
 import { Client } from "pg";
 import {
   DEFAULT_PG_ADMIN_USER,
@@ -24,6 +25,12 @@ export const RESTORE_CHECK_MAX_AGE_DAYS = 7;
 /** The `CONNECTION LIMIT` every application role is created with, in `provisionRoles`. */
 export const APPLICATION_ROLE_CONNECTION_LIMIT = 25;
 
+/** The `CONNECTION LIMIT` the `_ro` role is created with; Metabase is one reader, not an app. */
+export const READONLY_ROLE_CONNECTION_LIMIT = 4;
+
+/** The one table the `readonly` line requires: what every Metabase question is built on. */
+export const READONLY_READABLE_TABLE = "hf_run";
+
 /** Past this share of `max_connections`, the next app to deploy is the one that cannot connect. */
 export const CONNECTIONS_WARN_FRACTION = 0.8;
 
@@ -36,7 +43,7 @@ export interface DoctorFinding {
   /** The app as the state cache names it. */
   app: string;
   /**
-   * `state`, `status`, `runs`, `version`, `budget`, `E006`, `connections`, `lock`,
+   * `state`, `status`, `runs`, `version`, `budget`, `E006`, `connections`, `lock`, `readonly`,
    * `restore-check`, `core-bump`.
    */
   check: string;
@@ -287,6 +294,7 @@ async function doctorApp(context: Context, name: string): Promise<DoctorFinding[
   if (names !== undefined) {
     await connectionFindings(context, names.applicationRole, add);
     await lockFindings(context, names, add);
+    await readonlyFindings(context, names, add);
   }
   restoreCheckFindings(context, state, add);
   if (repo !== undefined) await bumpFindings(context, repo, add);
@@ -608,6 +616,88 @@ async function lockFindings(context: Context, names: AppNames, add: Add): Promis
     return;
   }
   add("lock", "ok", `one worker holds ${key} in ${names.databaseName}`);
+}
+
+/**
+ * What the `_ro` role may read in one app's database, and what limit it was created with.
+ *
+ * One row per table: `yes`, `no`, or `absent` for a table the database does not have — a state of
+ * its own, because a `hf_run` nobody can read and a `hf_run` that is not there are different
+ * problems. No row at all is a role the cluster does not have, which is Metabase not installed.
+ *
+ * Text rather than booleans and a `LEFT JOIN` rather than `has_table_privilege(name, name)`
+ * because both transports hand every value back as a string, and the two-argument form errors on
+ * a table that is missing instead of answering about it.
+ */
+export function readonlyGrantsSql(role: string): string {
+  const tables = [READONLY_READABLE_TABLE, ...GRANT_RO_EXCLUDED_TABLES]
+    .map((table) => `(${quoteLiteral(table)})`)
+    .join(", ");
+  return (
+    "SELECT r.rolconnlimit, t.name, CASE WHEN c.oid IS NULL THEN 'absent' " +
+    "WHEN has_table_privilege(r.oid, c.oid, 'SELECT') THEN 'yes' ELSE 'no' END " +
+    `FROM pg_roles AS r CROSS JOIN (VALUES ${tables}) AS t(name) ` +
+    "LEFT JOIN pg_class AS c ON c.relname = t.name AND c.relnamespace = 'public'::regnamespace " +
+    `WHERE r.rolname = ${quoteLiteral(role)} ORDER BY t.name`
+  );
+}
+
+/**
+ * The role Metabase reads through: that it exists, that it reads `hf_run`, and that it reads none
+ * of the auth tables `grantReadOnly` revokes.
+ *
+ * An absent role is a warning rather than a failure — Metabase is optional per deployment, and
+ * `hf new` creates the role only when a password was supplied. Anything else is a failure: a
+ * reader that can see `hf_user` is a reader that can work towards a staff session.
+ */
+async function readonlyFindings(context: Context, names: AppNames, add: Add): Promise<void> {
+  const role = roleNames(names.appName).readonly;
+  let rows: string[][];
+  try {
+    const db = await context.database();
+    rows = (await db.query(readonlyGrantsSql(role), { database: names.databaseName })).rows;
+  } catch (error) {
+    add("readonly", "fail", flatten((error as Error).message));
+    return;
+  }
+
+  if (rows.length === 0) {
+    add("readonly", "warn", `no ${role} role on the cluster: no Metabase reads ${names.databaseName}`);
+    return;
+  }
+
+  const privileges = new Map(rows.map((row) => [row[1] ?? "", row[2] ?? ""]));
+  const limit = Number(rows[0]?.[0]);
+  const problems: string[] = [];
+
+  const run = privileges.get(READONLY_READABLE_TABLE);
+  if (run === "absent") {
+    problems.push(`no ${READONLY_READABLE_TABLE} in ${names.databaseName}: hf migrate has not run`);
+  } else if (run !== "yes") {
+    problems.push(`${role} cannot read ${READONLY_READABLE_TABLE} — rerun hf migrate`);
+  }
+
+  const readable = GRANT_RO_EXCLUDED_TABLES.filter((table) => privileges.get(table) === "yes");
+  if (readable.length > 0) {
+    problems.push(`${role} can read ${readable.join(", ")} — rerun hf migrate`);
+  }
+  if (limit !== READONLY_ROLE_CONNECTION_LIMIT) {
+    problems.push(
+      `connection limit is ${Number.isFinite(limit) ? String(limit) : UNKNOWN}, not ` +
+        String(READONLY_ROLE_CONNECTION_LIMIT),
+    );
+  }
+
+  if (problems.length > 0) {
+    add("readonly", "fail", problems.join("; "));
+    return;
+  }
+  add(
+    "readonly",
+    "ok",
+    `${role} reads ${READONLY_READABLE_TABLE}, none of the ` +
+      `${String(GRANT_RO_EXCLUDED_TABLES.length)} auth tables, connection limit ${String(limit)}`,
+  );
 }
 
 function tryNames(name: string): AppNames | undefined {

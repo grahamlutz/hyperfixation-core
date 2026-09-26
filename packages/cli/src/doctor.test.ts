@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { StatusReport } from "@hyperfixation/core";
 import { BootCheckFailure } from "@hyperfixation/db";
+import { GRANT_RO_EXCLUDED_TABLES } from "@hyperfixation/db/migrator";
 import { ADMIN_URL, asRole, createTestDatabase, type TestDatabase } from "@hyperfixation/testing";
 import { http, HttpResponse } from "msw";
 import { Client } from "pg";
@@ -14,7 +15,10 @@ import {
   checkAppRolePrivileges,
   doctor,
   doctorLines,
+  readonlyGrantsSql,
   workerLockSql,
+  READONLY_READABLE_TABLE,
+  READONLY_ROLE_CONNECTION_LIMIT,
   type DoctorOptions,
 } from "./doctor.js";
 import { openAppState, type AppState } from "./state.js";
@@ -136,6 +140,7 @@ function statusHandler(
 }
 
 const ROLE = "hf_demo_app";
+const READONLY_ROLE = "hf_demo_app_ro";
 const DATABASE = "hf_demo_app";
 
 interface ClusterStub {
@@ -144,6 +149,14 @@ interface ClusterStub {
   backends?: Record<string, number>;
   /** Per database: how many advisory locks are held, and how many carry the worker's key. */
   locks?: Record<string, { held: number; matching?: number }>;
+  /** The `_ro` role as the cluster has it; `null` for a cluster on which it was never created. */
+  readonlyRole?: {
+    connectionLimit?: number;
+    /** What it may read; every other table reads `no`. Defaults to `hf_run` alone. */
+    readable?: readonly string[];
+    /** Tables the database does not have at all. */
+    absent?: readonly string[];
+  } | null;
   /** A query whose SQL matches refuses, the way a tunnel that died under it does. */
   fails?: RegExp;
 }
@@ -169,6 +182,23 @@ function cluster(stub: ClusterStub = {}): {
             String(count),
           ]),
         });
+      }
+      if (sql.includes("has_table_privilege")) {
+        const role = stub.readonlyRole === undefined ? {} : stub.readonlyRole;
+        if (role === null) return Promise.resolve({ rows: [] });
+        const readable = role.readable ?? [READONLY_READABLE_TABLE];
+        const rows = [READONLY_READABLE_TABLE, ...GRANT_RO_EXCLUDED_TABLES]
+          .sort()
+          .map((table) => [
+            String(role.connectionLimit ?? READONLY_ROLE_CONNECTION_LIMIT),
+            table,
+            role.absent?.includes(table) === true
+              ? "absent"
+              : readable.includes(table)
+                ? "yes"
+                : "no",
+          ]);
+        return Promise.resolve({ rows });
       }
       const lock = stub.locks?.[queryOptions?.database ?? ""] ?? { held: 1 };
       return Promise.resolve({ rows: [[String(lock.held), String(lock.matching ?? lock.held)]] });
@@ -454,6 +484,74 @@ describe("hf doctor", () => {
     ]);
   });
 
+  it("reports what the read-only role may read, and its connection limit", async () => {
+    const dir = await stateDirWith();
+    harness.server.use(statusHandler(statusReport()));
+
+    const result = await doctor(options(dir, { name: APP }));
+
+    expect(result.ok).toBe(true);
+    expect(findingOf(doctorLines(result), "readonly")).toBe(
+      `  OK   readonly: ${READONLY_ROLE} reads hf_run, none of the ` +
+        `${String(GRANT_RO_EXCLUDED_TABLES.length)} auth tables, connection limit 4`,
+    );
+  });
+
+  it("fails when the read-only role can read an auth table", async () => {
+    const dir = await stateDirWith();
+    harness.server.use(statusHandler(statusReport()));
+
+    const result = await doctor(
+      options(dir, {
+        name: APP,
+        database: cluster({ readonlyRole: { readable: ["hf_run", "hf_user"] } }).open,
+      }),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(findingOf(doctorLines(result), "readonly")).toBe(
+      `  FAIL readonly: ${READONLY_ROLE} can read hf_user — rerun hf migrate`,
+    );
+  });
+
+  it("warns when the cluster has no read-only role: Metabase is optional", async () => {
+    const dir = await stateDirWith();
+    harness.server.use(statusHandler(statusReport()));
+
+    const result = await doctor(options(dir, { name: APP, database: cluster({ readonlyRole: null }).open }));
+
+    expect(result.ok).toBe(false);
+    expect(findingOf(doctorLines(result), "readonly")).toBe(
+      `  WARN readonly: no ${READONLY_ROLE} role on the cluster: no Metabase reads ${DATABASE}`,
+    );
+  });
+
+  it("fails on a read-only role that cannot read hf_run, and on a wrong connection limit", async () => {
+    const dir = await stateDirWith();
+    harness.server.use(statusHandler(statusReport()));
+
+    const unreadable = await doctor(
+      options(dir, {
+        name: APP,
+        database: cluster({ readonlyRole: { readable: [], connectionLimit: 25 } }).open,
+      }),
+    );
+    expect(unreadable.ok).toBe(false);
+    expect(findingOf(doctorLines(unreadable), "readonly")).toBe(
+      `  FAIL readonly: ${READONLY_ROLE} cannot read hf_run — rerun hf migrate; ` +
+        "connection limit is 25, not 4",
+    );
+
+    harness.server.use(statusHandler(statusReport()));
+    const missing = await doctor(
+      options(dir, { name: APP, database: cluster({ readonlyRole: { absent: ["hf_run"] } }).open }),
+    );
+    expect(missing.ok).toBe(false);
+    expect(findingOf(doctorLines(missing), "readonly")).toBe(
+      `  FAIL readonly: no hf_run in ${DATABASE}: hf migrate has not run`,
+    );
+  });
+
   it("fails, rather than crashes, when a cluster query refuses", async () => {
     const dir = await stateDirWith();
     harness.server.use(statusHandler(statusReport()));
@@ -670,6 +768,42 @@ describe("workerLockSql", () => {
       // under someone else's key, which is a FAIL line on a healthy app.
       expect(await count(db.appName)).toEqual(["1", "1"]);
       expect(await count(`${db.appName}_elsewhere`)).toEqual(["1", "0"]);
+    } finally {
+      await cluster.close();
+    }
+  }, 30_000);
+});
+
+describe("readonlyGrantsSql", () => {
+  let db: TestDatabase;
+
+  beforeAll(async () => {
+    db = await createTestDatabase();
+  }, 60_000);
+
+  afterAll(async () => {
+    await db.drop();
+  }, 30_000);
+
+  it("reads a migrated database's grants: hf_run yes, every auth table no", async () => {
+    const cluster = openDatabaseUrl(ADMIN_URL);
+    try {
+      const rows = (
+        await cluster.query(readonlyGrantsSql(db.roles.readonly), { database: db.databaseName })
+      ).rows;
+
+      expect(new Map(rows.map((row) => [row[1], row[2]]))).toEqual(
+        new Map([
+          [READONLY_READABLE_TABLE, "yes"],
+          ...GRANT_RO_EXCLUDED_TABLES.map((table) => [table, "no"] as const),
+        ]),
+      );
+      expect(rows[0]?.[0]).toBe(String(READONLY_ROLE_CONNECTION_LIMIT));
+
+      // A role the cluster does not have answers nothing at all, which is what WARNs.
+      expect(
+        (await cluster.query(readonlyGrantsSql(`${db.roles.readonly}_absent`))).rows,
+      ).toEqual([]);
     } finally {
       await cluster.close();
     }
