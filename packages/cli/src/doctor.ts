@@ -557,6 +557,10 @@ async function connectionFindings(context: Context, role: string, add: Add): Pro
  * `pg_try_advisory_lock(bigint)` splits its key across `classid` and `objid`, so the key is
  * reassembled rather than compared whole — and masked rather than only shifted, because
  * `hashtext` answers `int4` and a negative hash widens to a bigint of sign bits.
+ *
+ * Two counts, and only the second decides: an app's database holds advisory locks that are not
+ * the worker's — `fetch.get` takes one per host for the length of a request — so the total is
+ * diagnostic colour, never a verdict.
  */
 export function workerLockSql(appName: string): string {
   return (
@@ -582,19 +586,18 @@ async function lockFindings(context: Context, names: AppNames, add: Add): Promis
   const key = `hf-worker:${names.appName}`;
   const held = Number(row?.[0]);
   const matching = Number(row?.[1]);
-  if (!Number.isFinite(held)) {
+  if (!Number.isFinite(matching)) {
     add("lock", "fail", `pg_locks in ${names.databaseName} answered no count`);
     return;
   }
-  if (held === 0) {
-    add("lock", "fail", `no advisory lock in ${names.databaseName}: no worker holds ${key}`);
-    return;
-  }
-  if (held !== 1) {
+  if (matching === 0) {
     add(
       "lock",
       "fail",
-      `${String(held)} advisory locks in ${names.databaseName}; one worker per app holds one`,
+      held > 0
+        ? `no advisory lock in ${names.databaseName} carries hashtext('${key}'): ` +
+            `${String(held)} held, none the worker's`
+        : `no advisory lock in ${names.databaseName}: no worker holds ${key}`,
     );
     return;
   }
@@ -602,8 +605,8 @@ async function lockFindings(context: Context, names: AppNames, add: Add): Promis
     add(
       "lock",
       "fail",
-      `the one advisory lock in ${names.databaseName} is not hashtext('${key}'): ` +
-        "something other than the worker holds it",
+      `${String(matching)} advisory locks on ${key} in ${names.databaseName}; ` +
+        "one worker per app holds one",
     );
     return;
   }

@@ -11,6 +11,8 @@ import {
   urlHash,
   DEFAULT_FETCH_MIN_INTERVAL_MS,
   FETCH_BODY_LIMIT_BYTES,
+  FETCH_LOCK_TIMEOUT_MS,
+  fetchLockTimeoutStatement,
 } from "./fetch.js";
 
 /**
@@ -224,5 +226,21 @@ describe("a collector reading its source through fetch.get", () => {
 
     expect(second).toEqual(first);
     expect(requests).toHaveLength(1);
+  });
+});
+
+/**
+ * The queue behind one host is bounded, so a holder killed mid-fetch cannot wedge every other
+ * worker wanting that host until its connection is reaped.
+ */
+describe("the domain lock's timeout", () => {
+  it("bounds the wait, and clears a host spaced further apart than the bound", () => {
+    expect(fetchLockTimeoutStatement(DEFAULT_FETCH_MIN_INTERVAL_MS)).toBe(
+      `SET LOCAL lock_timeout = '${String(FETCH_LOCK_TIMEOUT_MS)}ms'`,
+    );
+    // Twice the interval, because a legitimate holder waits it out before it fetches.
+    expect(fetchLockTimeoutStatement(FETCH_LOCK_TIMEOUT_MS * 2)).toBe(
+      `SET LOCAL lock_timeout = '${String(FETCH_LOCK_TIMEOUT_MS * 4)}ms'`,
+    );
   });
 });

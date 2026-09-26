@@ -26,6 +26,26 @@ export const FETCH_CACHED_STATEMENT =
 export const FETCH_DOMAIN_LOCK_STATEMENT =
   "SELECT pg_advisory_xact_lock(hashtext('hf-fetch:' || $1::text))";
 
+/**
+ * The bound on queueing behind another worker's turn at one host. The holder keeps the lock across
+ * a request, so a process killed mid-fetch leaves its transaction idle until something reaps the
+ * connection — and without a bound every other worker wanting that host would queue behind it
+ * until then, which is one wedged host starving the whole step pool.
+ */
+export const FETCH_LOCK_TIMEOUT_MS = 60_000;
+
+/**
+ * `SET LOCAL`, so the bound lapses with the transaction that takes the lock, and `55P03` fails the
+ * one step rather than the worker. A legitimate holder waits out the host's interval before it
+ * fetches, so the bound clears twice that: a host deliberately spaced further apart than
+ * `FETCH_LOCK_TIMEOUT_MS` must still be waited for rather than timed out on.
+ */
+export function fetchLockTimeoutStatement(minIntervalMs: number): string {
+  const interval = Number.isFinite(minIntervalMs) ? Math.max(0, Math.ceil(minIntervalMs)) : 0;
+  const ms = Math.max(FETCH_LOCK_TIMEOUT_MS, interval * 2);
+  return `SET LOCAL lock_timeout = '${String(ms)}ms'`;
+}
+
 export const FETCH_DOMAIN_UPSERT_STATEMENT =
   "INSERT INTO hf_fetch_domain (domain, min_interval_ms) VALUES ($1, $2) " +
   "ON CONFLICT (domain) DO NOTHING";
@@ -152,6 +172,7 @@ export function fetchDomainOf(url: string): string {
  * lock is transaction-scoped and releasing it before the request would let two workers hit the
  * host together. This is the one place the package holds a transaction across a network call,
  * and the body cap is what bounds how long: an oversized body is abandoned, not read to the end.
+ * Waiting *for* the lock is bounded separately, by `fetchLockTimeoutStatement`.
  *
  * A body over `FETCH_BODY_LIMIT_BYTES` writes an error row and throws `FetchTooLarge`, and a hit
  * on that row throws again without a request — a URL that was too big stays too big, and
@@ -169,6 +190,7 @@ export async function fetchGet(ctx: StepContext, options: FetchGetOptions): Prom
 
   const taken = await ctx.tx<Taken>(async (db) => {
     const pg = stepClient(db);
+    await pg.query(fetchLockTimeoutStatement(minIntervalMs));
     await pg.query(FETCH_DOMAIN_LOCK_STATEMENT, [domain]);
     // Whoever held the lock may have filled this very URL while we waited behind them.
     const filled = await cached(pg, hash, method);

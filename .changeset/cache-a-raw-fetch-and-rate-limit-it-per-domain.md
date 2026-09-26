@@ -1,6 +1,7 @@
 ---
 "@hyperfixation/db": patch
 "@hyperfixation/core": patch
+"@hyperfixation/cli": patch
 ---
 
 A raw-fetch cache with per-host rate limits, so a collector reads its source over HTTP without
@@ -23,6 +24,16 @@ A body over 5 MB is refused rather than stored: `Content-Length` is checked befo
 and the stream is abandoned the moment the running total passes the cap, so 6 MB never lands in
 memory. The refusal is a committed row carrying the status it refused, and a hit on it throws
 again without a request — a URL that was too big stays too big.
+
+Waiting *for* that lock is bounded by a `SET LOCAL lock_timeout` of `FETCH_LOCK_TIMEOUT_MS`, or
+twice the host's own interval where that is longer: the holder keeps the lock across a request, so
+a process killed mid-fetch would otherwise leave every other worker wanting that host queued
+behind an idle transaction until something reaped the connection.
+
+`hf doctor`'s `lock` line now decides on the count of locks carrying `hashtext('hf-worker:<app>')`
+rather than on the count of advisory locks held. It counted every one, so an app caught mid-fetch —
+a second, unrelated advisory lock in the same database — reported a false `FAIL` on a healthy app,
+and `hf doctor` gates deploys. Two locks under the worker's own key still fail.
 
 New exports, every one additive: `fetch`, `fetchGet`, `fetchDomainOf`, `urlHash`,
 `FetchTooLarge`, `RawFetch`, `FetchGetOptions`, the five `FETCH_*` statements, the three
