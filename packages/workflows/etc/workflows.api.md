@@ -15,6 +15,7 @@ import * as schema from '@hyperfixation/db';
 import { StepDatabase } from '@hyperfixation/db';
 import { StepPool } from '@hyperfixation/db';
 import { WorkflowQueue } from '@dbos-inc/dbos-sdk';
+import * as z from 'zod';
 import { ZodType } from 'zod';
 
 // @public
@@ -376,6 +377,81 @@ export const LAUNCHED_MARKER = "hf-worker: DBOS launched";
 // @public
 export const LAUNCHING_MARKER = "hf-worker: calling DBOS.launch";
 
+// @public (undocumented)
+export const LOB_BASE_URL = "https://api.lob.com";
+
+// @public
+export const LOB_EXPLANATION_LIMIT = 500;
+
+// @public
+export const LOB_IDEMPOTENCY_WINDOW_MS: number;
+
+// @public
+export const LobAddress: z.ZodObject<{
+    name: z.ZodString;
+    line1: z.ZodString;
+    line2: z.ZodOptional<z.ZodString>;
+    city: z.ZodString;
+    state: z.ZodString;
+    zip: z.ZodString;
+}, z.core.$strip>;
+
+// @public (undocumented)
+export type LobAddress = z.infer<typeof LobAddress>;
+
+// @public
+export function lobChannel(options: LobChannelOptions): ActionChannel<LobLetterRequest>;
+
+// @public (undocumented)
+export interface LobChannelOptions {
+    apiKey: string;
+    // (undocumented)
+    baseUrl?: string;
+    // (undocumented)
+    fetch?: typeof globalThis.fetch;
+    live?: boolean;
+    name?: string;
+    schema?: z.ZodType<LobLetterRequest>;
+}
+
+// @public
+export const LobLetterRequest: z.ZodObject<{
+    to: z.ZodObject<{
+        name: z.ZodString;
+        line1: z.ZodString;
+        line2: z.ZodOptional<z.ZodString>;
+        city: z.ZodString;
+        state: z.ZodString;
+        zip: z.ZodString;
+    }, z.core.$strip>;
+    from: z.ZodObject<{
+        name: z.ZodString;
+        line1: z.ZodString;
+        line2: z.ZodOptional<z.ZodString>;
+        city: z.ZodString;
+        state: z.ZodString;
+        zip: z.ZodString;
+    }, z.core.$strip>;
+    subject: z.ZodString;
+    body: z.ZodString;
+    description: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
+
+// @public (undocumented)
+export type LobLetterRequest = z.infer<typeof LobLetterRequest>;
+
+// @public
+export class LobLiveKeyRefused extends Error {
+    constructor();
+}
+
+// @public
+export class LobRefused extends Error {
+    constructor(status: number, explanation: string | undefined);
+    // (undocumented)
+    readonly status: number;
+}
+
 // @public
 export const LOCK_ACQUIRED_MARKER = "hf-worker: advisory lock acquired";
 
@@ -553,6 +629,9 @@ export interface ReconcileReport {
 
 // @public
 export function registerLangfuse(env?: NodeJS.ProcessEnv): LangfuseRegistration | undefined;
+
+// @public
+export function renderLetter(letter: LobLetterRequest): string;
 
 // @public
 export function resetClient(): Promise<void>;
