@@ -78,6 +78,13 @@
       "when": 1789960837635,
       "tag": "0010_session_passkey_enrolment",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1790427456132,
+      "tag": "0011_raw_fetch_cache",
+      "breakpoints": true
     }
   ]
 }
