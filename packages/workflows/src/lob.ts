@@ -243,7 +243,8 @@ function scrubber(apiKey: string): (text: string) => string {
   // The groups that no appended byte can change. A key short enough to have none leaves the
   // base64 half off entirely rather than matching every base64-ish run in the message.
   const stable = encoded.slice(0, Math.floor(apiKey.length / 3) * 4);
-  const token = stable.length === 0 ? undefined : new RegExp(escapeRegExp(stable) + BASE64_TAIL, "g");
+  const token =
+    stable.length === 0 ? undefined : new RegExp(escapeRegExp(stable) + BASE64_TAIL, "g");
 
   return (text) => {
     const withoutKey = text.split(apiKey).join(REDACTED);
