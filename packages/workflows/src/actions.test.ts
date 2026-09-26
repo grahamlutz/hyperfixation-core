@@ -247,8 +247,14 @@ describe("actions.perform", () => {
       record_id: null,
       meta: { actionLogId: Number(row.id), key: "send", channel: "counting" },
     });
+    // `business` is registered because another case in this file puts it on its own rows, and the
+    // database is shared across the file: an empty registry made this assertion depend on running
+    // before that case, which only held for some shuffle seeds. What it is actually about is that
+    // the row *this* case wrote carries a NULL rather than a type nobody registered.
     await expect(
-      asRole(database.applicationUrl, (pg) => checkE002(pg, [])),
+      asRole(database.applicationUrl, (pg) =>
+        checkE002(pg, [{ table: "business", recordType: "business" }]),
+      ),
     ).resolves.toBeUndefined();
 
     // A retry of the step reports the same thing and never opens a second task.
