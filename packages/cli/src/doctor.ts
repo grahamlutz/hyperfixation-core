@@ -12,9 +12,11 @@ import {
 } from "./config.js";
 import { openDatabase, type Database } from "./database.js";
 import { deriveNames, type AppNames } from "./names.js";
+import { CoolifyClient } from "./providers/coolify.js";
 import { GithubClient, type GithubPullRequest } from "./providers/github.js";
 import type { FetchLike } from "./providers/http.js";
 import { quoteLiteral } from "./roles.js";
+import { ROTATABLE_ENV } from "./rotate-key.js";
 import { createSshRunner, type Runner } from "./runner.js";
 import { openAppState, stateDir, type AppState } from "./state.js";
 
@@ -30,13 +32,16 @@ export const CONNECTIONS_WARN_FRACTION = 0.8;
 /** The branch prefix Phase 4's core bumps open their pull requests on. */
 export const CORE_BUMP_BRANCH_PREFIX = "core-bump/";
 
+/** A provider or channel key this old — or of an age nothing recorded — is a warning. */
+export const KEY_MAX_AGE_DAYS = 90;
+
 export type Severity = "ok" | "warn" | "fail";
 
 export interface DoctorFinding {
   /** The app as the state cache names it. */
   app: string;
   /**
-   * `state`, `status`, `runs`, `version`, `budget`, `E006`, `connections`, `lock`,
+   * `state`, `status`, `runs`, `version`, `budget`, `keys`, `E006`, `connections`, `lock`,
    * `restore-check`, `core-bump`.
    */
   check: string;
@@ -60,6 +65,14 @@ export interface PrivilegeTarget {
 /** E006 for one app: resolves when both privileges are there, throws naming what is not. */
 export type PrivilegeCheck = (target: PrivilegeTarget) => Promise<void>;
 
+/**
+ * Which variables one app's Coolify environment holds, by name.
+ *
+ * Names only, and the type says so: Coolify hands back every value with them, and the `keys` line
+ * is built from a name and a date. Nothing downstream of this is given a value to leak.
+ */
+export type EnvNames = (appUuid: string) => Promise<readonly string[]>;
+
 export interface DoctorOptions {
   /** One app; otherwise every app the state cache knows about. */
   name?: string;
@@ -72,6 +85,8 @@ export interface DoctorOptions {
   now?: () => Date;
   /** How E006 is read. Defaults to the tunnel to `HF_SSH_HOST` as `postgres`. */
   privileges?: PrivilegeCheck;
+  /** Where the `keys` line learns what is set. Defaults to Coolify's own environment list. */
+  envNames?: EnvNames;
   /**
    * Where the connection counts and the worker locks are read: the whole cluster, as the admin
    * E006 already goes in as. Defaults to the same tunnel to `HF_SSH_HOST`.
@@ -105,6 +120,7 @@ export async function doctor(options: DoctorOptions = {}): Promise<DoctorResult>
     fetch: options.fetch ?? ((input, init) => globalThis.fetch(input, init)),
     now: options.now ?? (() => new Date()),
     privileges: options.privileges ?? defaultPrivilegeCheck(config, env),
+    envNames: options.envNames ?? defaultEnvNames(config, env, options.fetch),
     database: cluster.get,
     // One snapshot for the whole run: the counts are the box's, not any one app's, and an app
     // whose line is read a second later has not moved the cluster.
@@ -195,6 +211,7 @@ interface Context {
   fetch: FetchLike;
   now: () => Date;
   privileges: PrivilegeCheck;
+  envNames: EnvNames;
   database: () => Promise<Database>;
   backends: () => Promise<Backends>;
 }
@@ -205,6 +222,29 @@ function defaultPrivilegeCheck(config: OperatorConfig, env: NodeJS.ProcessEnv): 
     containers: postgresContainers(config),
     adminUser: pgAdminUser(config),
   });
+}
+
+/**
+ * Coolify's own list of the app's variables, asked for lazily.
+ *
+ * The config is required when the check runs rather than when `hf doctor` starts: every other
+ * finding is readable without a Coolify token, and one unset key must not take the whole report
+ * down with it — the `keys` line says what it could not read instead.
+ */
+function defaultEnvNames(
+  config: OperatorConfig,
+  env: NodeJS.ProcessEnv,
+  fetch: FetchLike | undefined,
+): EnvNames {
+  return async (appUuid) => {
+    const required = requireOperatorConfig(config, ["HF_COOLIFY_URL", "HF_COOLIFY_TOKEN"], { env });
+    const coolify = new CoolifyClient({
+      url: required.HF_COOLIFY_URL,
+      token: required.HF_COOLIFY_TOKEN,
+      fetch,
+    });
+    return (await coolify.listEnvs(appUuid)).map((entry) => entry.key);
+  };
 }
 
 function defaultDatabase(config: OperatorConfig, env: NodeJS.ProcessEnv): () => Promise<Database> {
@@ -280,6 +320,7 @@ async function doctorApp(context: Context, name: string): Promise<DoctorFinding[
     budgetFinding(report.budget.current, "current", add);
     budgetFinding(report.budget.previous, "previous", add);
   }
+  await keyFindings(context, name, state, add);
   await privilegeFindings(context, name, add);
   // A name `deriveNames` refuses has already failed E006 on that same message; the cluster checks
   // have no names to run under and say nothing more.
@@ -470,6 +511,66 @@ function budgetFinding(period: PeriodView | null, which: string, add: Add): void
     return;
   }
   add("budget", "ok", `${spend}, no drift`);
+}
+
+/**
+ * Which provider and channel variables the app has, and how long each has had the same value.
+ *
+ * Both halves come from somewhere that cannot hold a secret: which variables are *set* is Coolify's
+ * answer by name, and how old each one is comes from `keys.<VAR>.rotatedAt` in the state file, which
+ * `hf rotate-key` writes and which holds a date and nothing else. A variable set by hand — the state
+ * P0 leaves every new account's key in — therefore reads as an unknown age, which is a warning: an
+ * undatable key is exactly the one nobody is rotating.
+ */
+async function keyFindings(
+  context: Context,
+  name: string,
+  state: AppState,
+  add: Add,
+): Promise<void> {
+  const appUuid = state.coolify?.appUuid;
+  if (appUuid === undefined) {
+    add("keys", "warn", "no Coolify application uuid in state; which keys are set cannot be read");
+    return;
+  }
+
+  let present: readonly string[];
+  try {
+    present = await context.envNames(appUuid);
+  } catch (error) {
+    add("keys", "fail", flatten((error as Error).message));
+    return;
+  }
+
+  const set = ROTATABLE_ENV.filter((variable) => present.includes(variable));
+  if (set.length === 0) {
+    add("keys", "ok", `no provider or channel key set (${ROTATABLE_ENV.join(", ")} all absent)`);
+    return;
+  }
+
+  for (const variable of set) {
+    const rotatedAt = state.keys?.[variable]?.rotatedAt;
+    const at = rotatedAt === undefined ? Number.NaN : Date.parse(rotatedAt);
+    if (Number.isNaN(at)) {
+      add(
+        "keys",
+        "warn",
+        `${variable} is set and no rotation of it is recorded — age unknown; ` +
+          `run hf rotate-key ${name} ${variable}`,
+      );
+      continue;
+    }
+    const days = (context.now().getTime() - at) / 86_400_000;
+    const stale = days > KEY_MAX_AGE_DAYS;
+    add(
+      "keys",
+      stale ? "warn" : "ok",
+      `${variable} rotated ${days.toFixed(1)} day(s) ago (${rotatedAt})` +
+        (stale
+          ? ` — over ${String(KEY_MAX_AGE_DAYS)} days; run hf rotate-key ${name} ${variable}`
+          : ""),
+    );
+  }
 }
 
 async function privilegeFindings(context: Context, name: string, add: Add): Promise<void> {

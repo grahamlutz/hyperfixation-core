@@ -65,6 +65,8 @@ describe("the hf binary's argument handling", () => {
       "doctor",
       "restore-check",
       "version",
+      "budget",
+      "rotate-key",
     ]);
     for (const command of COMMANDS) expect(USAGE).toContain(`hf ${command}`);
   });
