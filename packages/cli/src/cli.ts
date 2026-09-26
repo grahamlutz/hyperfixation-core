@@ -80,8 +80,9 @@ export const USAGE = `hf — the hyperfixation CLI
 
   hf doctor [name]          every deployed app in the state cache, or one: /api/status under its
                             read token, the deployed version against main, E006 as the app role,
-                            the box's connection slots, the worker's advisory lock, the last
-                            restore check, and open core-bump PRs. Exits 1 on any finding
+                            the box's connection slots, the worker's advisory lock, what the
+                            read-only role may read, the last restore check, and open core-bump
+                            PRs. Exits 1 on any finding
 
   hf budget <name> --usd <n>
                             set hf_app_state.budget_usd — the default every new month's period is
