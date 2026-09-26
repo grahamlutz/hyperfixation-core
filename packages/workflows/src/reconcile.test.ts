@@ -90,12 +90,13 @@ async function insertActionRow(
   runId: string,
   recordType: string | null = null,
   recordId: string | null = null,
+  status: "started" | "failed" = "started",
 ): Promise<string> {
   const rows = await query<{ id: string }>(
     "INSERT INTO hf_action_log (run_id, key, workflow_id, channel, idempotency_key, status, " +
-      "record_type, record_id) VALUES ($1, 'send', $1, 'stub', $2, 'started', $3, $4) " +
+      "record_type, record_id) VALUES ($1, 'send', $1, 'stub', $2, $5, $3, $4) " +
       "RETURNING id::text AS id",
-    [runId, `${runId}:send`, recordType, recordId],
+    [runId, `${runId}:send`, recordType, recordId, status],
   );
   return rows[0]!.id;
 }
@@ -379,6 +380,25 @@ describe("reconcile() step (4) — ledger hygiene", () => {
     expect(
       await query("SELECT status FROM hf_action_log WHERE run_id = $1", [runId]),
     ).toEqual([{ status: "uncertain" }]);
+    expect((await pass()).uncertainActions).toBe(0);
+  });
+
+  it("sweeps a failed action row too, at any age", async () => {
+    const runId = runIdFor("action-failed");
+    await startRun(runId);
+    await query("UPDATE hf_run SET status = 'failed' WHERE run_id = $1", [runId]);
+    const actionLogId = await insertActionRow(runId, null, null, "failed");
+    // Older than any provider's idempotency window, which is the case the sweep used to miss: the
+    // row sat outside every review path and a re-entry could still re-send it.
+    await query("UPDATE hf_action_log SET started_at = now() - interval '30 days' WHERE id = $1", [
+      actionLogId,
+    ]);
+
+    expect((await pass()).uncertainActions).toBe(1);
+    expect(await query("SELECT status FROM hf_action_log WHERE run_id = $1", [runId])).toEqual([
+      { status: "uncertain" },
+    ]);
+    expect(await tasksFor(actionLogId)).toMatchObject([{ origin: "sweep" }]);
     expect((await pass()).uncertainActions).toBe(0);
   });
 

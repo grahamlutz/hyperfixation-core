@@ -93,10 +93,16 @@ export const ABANDON_LLM_CALLS_STATEMENT =
  * Step (4), actions half: the same predicate, into the status that already means this. The
  * `RETURNING` is what makes "one task per uncertain row, once" fall out of the status predicate —
  * a row this pass moved is never returned by the next one.
+ *
+ * `failed` joins `started`, for the reason `actions.perform`'s own re-entry already treats the two
+ * alike: a channel that threw *after* the provider accepted the send leaves a `failed` row, so it
+ * is as unaccounted-for as a row nobody finished. Left out, such a row sat outside every review
+ * path at any age and could be re-sent later by a re-entry, which is a second delivery with no
+ * human in it.
  */
 export const UNCERTAIN_ACTIONS_STATEMENT =
   "UPDATE hf_action_log a SET status = 'uncertain', finished_at = now() FROM hf_run r " +
-  "WHERE a.run_id = r.run_id AND a.status = 'started' " +
+  "WHERE a.run_id = r.run_id AND a.status IN ('started', 'failed') " +
   "AND (r.status IN ('done', 'failed', 'waiting', 'paused') " +
   "OR a.workflow_id <> r.current_workflow_id) " +
   "RETURNING a.id::text AS id, a.run_id, a.key, a.channel, a.record_type, a.record_id";

@@ -90,11 +90,15 @@ describe("actions.perform", () => {
     });
   }
 
-  function countingChannel(dedupes = true): ActionChannel & { sends: number } {
+  function countingChannel(
+    dedupes = true,
+    dedupeWindowMs?: number,
+  ): ActionChannel & { sends: number } {
     const stub = stubChannel("counting");
     const channel = {
       name: stub.name,
       dedupes,
+      ...(dedupeWindowMs === undefined ? {} : { dedupeWindowMs }),
       sends: 0,
       send: (dispatch: Parameters<ActionChannel["send"]>[0]) => {
         channel.sends += 1;
@@ -112,6 +116,16 @@ describe("actions.perform", () => {
            (run_id, key, workflow_id, channel, idempotency_key, status)
          VALUES ($1, 'send', $2, 'counting', $3, $4)`,
         [runId, `${runId}:9`, idempotencyKey(runId, "send"), status],
+      );
+    });
+  }
+
+  /** Backdates the first attempt, which is what the dedupe window is measured from. */
+  async function ageRow(runId: string, interval: string): Promise<void> {
+    await asRole(database.applicationUrl, async (pg) => {
+      await pg.query(
+        `UPDATE hf_action_log SET started_at = now() - $2::interval WHERE run_id = $1`,
+        [runId, interval],
       );
     });
   }
@@ -157,6 +171,53 @@ describe("actions.perform", () => {
     });
   });
 
+  it("re-sends inside the provider's window, under the row's original key", async () => {
+    const ctx = await context("action-inside-window", "send");
+    const channel = countingChannel(true, 24 * 60 * 60 * 1000);
+    await plantRow("action-inside-window", "started");
+    await ageRow("action-inside-window", "1 hour");
+
+    // The stub echoes the key it was dispatched with, so this asserts the provider is re-sent the
+    // *same* key — which is the only reason a second send is at most one delivery.
+    await expect(actions.perform(ctx, { key: ctx.key, channel })).resolves.toMatchObject({
+      externalId: idempotencyKey("action-inside-window", "send"),
+    });
+
+    expect(channel.sends).toBe(1);
+    expect(await rowOf("action-inside-window")).toMatchObject({
+      status: "ok",
+      idempotency_key: idempotencyKey("action-inside-window", "send"),
+    });
+  });
+
+  it("asks a human rather than re-sending once the provider's window has run out", async () => {
+    const ctx = await context("action-past-window", "send");
+    const channel = countingChannel(true, 24 * 60 * 60 * 1000);
+    await plantRow("action-past-window", "started");
+    await ageRow("action-past-window", "48 hours");
+
+    // `dedupes: true` is worth nothing here: the provider has forgotten the key, so a re-send is a
+    // second delivery — a second physical letter, on the channel this window was added for.
+    await expect(actions.perform(ctx, { key: ctx.key, channel })).rejects.toThrow(ActionUncertain);
+
+    expect(channel.sends).toBe(0);
+    const row = (await rowOf("action-past-window"))!;
+    expect(row.status).toBe("uncertain");
+    expect(await tasksOf(row.id)).toMatchObject([{ origin: "flow", origin_ref: row.id }]);
+  });
+
+  it("re-sends past any window on a channel that declares none", async () => {
+    const ctx = await context("action-no-window", "send");
+    const channel = countingChannel(true);
+    await plantRow("action-no-window", "started");
+    await ageRow("action-no-window", "30 days");
+
+    await actions.perform(ctx, { key: ctx.key, channel });
+
+    expect(channel.sends).toBe(1);
+    expect(await rowOf("action-no-window")).toMatchObject({ status: "ok" });
+  });
+
   it("asks a human rather than re-sending when the re-entered channel cannot dedupe", async () => {
     const ctx = await context("action-uncertain", "send");
     const channel = countingChannel(false);
@@ -186,8 +247,14 @@ describe("actions.perform", () => {
       record_id: null,
       meta: { actionLogId: Number(row.id), key: "send", channel: "counting" },
     });
+    // `business` is registered because another case in this file puts it on its own rows, and the
+    // database is shared across the file: an empty registry made this assertion depend on running
+    // before that case, which only held for some shuffle seeds. What it is actually about is that
+    // the row *this* case wrote carries a NULL rather than a type nobody registered.
     await expect(
-      asRole(database.applicationUrl, (pg) => checkE002(pg, [])),
+      asRole(database.applicationUrl, (pg) =>
+        checkE002(pg, [{ table: "business", recordType: "business" }]),
+      ),
     ).resolves.toBeUndefined();
 
     // A retry of the step reports the same thing and never opens a second task.
