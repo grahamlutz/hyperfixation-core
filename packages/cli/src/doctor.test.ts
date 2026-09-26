@@ -27,6 +27,7 @@ const STATUS_URL = `https://${APP}.${BASE_DOMAIN}/api/status`;
 const OTHER_APP = "other-app";
 const OTHER_STATUS_URL = `https://${OTHER_APP}.${BASE_DOMAIN}/api/status`;
 const GITHUB = "https://api.github.com";
+const COOLIFY = "https://coolify.test";
 const REPO = `grahamlutz/${APP}`;
 
 const MAIN_SHA = "1111111111111111111111111111111111111111";
@@ -42,7 +43,11 @@ const SECRETS = {
   readonlyPassword: "readonly-sekrit",
   langfuseSecretKey: "langfuse-sekrit",
   githubToken: "github-token-sekrit",
+  coolifyToken: "coolify-token-sekrit",
 };
+
+/** A value Coolify hands back beside every variable's name, and that no line may carry. */
+const ENV_VALUE = "env-value-sekrit";
 
 const ROUTES: StubRoute[] = [
   {
@@ -541,7 +546,7 @@ describe("hf doctor", () => {
     expect(findingOf(doctorLines(none), "keys")).toContain("no provider or channel key set");
   });
 
-  it("fails the keys line, rather than the report, when Coolify cannot be asked", async () => {
+  it("warns on the keys line, and reports the rest, when Coolify cannot be asked", async () => {
     const dir = await stateDirWith();
     harness.server.use(statusHandler(statusReport()));
 
@@ -554,9 +559,47 @@ describe("hf doctor", () => {
 
     expect(result.ok).toBe(false);
     expect(findingOf(doctorLines(result), "keys")).toBe(
-      "  FAIL keys: HF_COOLIFY_TOKEN unset: set it in config.json",
+      "  WARN keys: HF_COOLIFY_TOKEN unset: set it in config.json",
     );
     expect(findingOf(doctorLines(result), "E006")).toContain("OK");
+  });
+
+  it("reads Coolify's own env list for names alone, and counts no preview twin", async () => {
+    const dir = await stateDirWith();
+    harness.server.use(
+      statusHandler(statusReport()),
+      harness.handler({
+        spec: "coolify",
+        method: "get",
+        url: `${COOLIFY}/api/v1/applications/{uuid}/envs`,
+        json: [
+          { uuid: "env-1", key: "ANTHROPIC_API_KEY", value: ENV_VALUE, is_preview: false },
+          { uuid: "env-2", key: "SMTP_URL", value: ENV_VALUE, is_preview: true },
+          { uuid: "env-3", key: "DATABASE_URL", value: ENV_VALUE, is_preview: false },
+        ],
+      }),
+    );
+
+    // No `envNames` stub: this is the one path that is handed Coolify's values.
+    const result = await doctor(
+      options(dir, {
+        name: APP,
+        envNames: undefined,
+        config: {
+          HF_BASE_DOMAIN: BASE_DOMAIN,
+          HF_GITHUB_TOKEN: SECRETS.githubToken,
+          HF_COOLIFY_URL: COOLIFY,
+          HF_COOLIFY_TOKEN: SECRETS.coolifyToken,
+        },
+      }),
+    );
+    const lines = doctorLines(result);
+
+    expect(result.ok).toBe(true);
+    expect(lines.filter((line) => line.includes(" keys:"))).toEqual([
+      `  OK   keys: ANTHROPIC_API_KEY rotated 10.0 day(s) ago (${daysBefore(10)})`,
+    ]);
+    expect(lines.join("\n")).not.toContain(ENV_VALUE);
   });
 
   it("warns when no Coolify application uuid was ever recorded to ask about", async () => {

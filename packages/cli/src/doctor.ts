@@ -229,7 +229,8 @@ function defaultPrivilegeCheck(config: OperatorConfig, env: NodeJS.ProcessEnv): 
  *
  * The config is required when the check runs rather than when `hf doctor` starts: every other
  * finding is readable without a Coolify token, and one unset key must not take the whole report
- * down with it — the `keys` line says what it could not read instead.
+ * down with it. The `keys` line then warns with what it could not read — which does hold the exit
+ * code at 1, because a key-hygiene check nobody can run is a thing to fix and not a thing to hide.
  */
 function defaultEnvNames(
   config: OperatorConfig,
@@ -243,7 +244,11 @@ function defaultEnvNames(
       token: required.HF_COOLIFY_TOKEN,
       fetch,
     });
-    return (await coolify.listEnvs(appUuid)).map((entry) => entry.key);
+    // Non-preview only, the same half `hf rotate-key` writes: a preview twin Coolify materialised
+    // for a compose interpolation is not the variable the containers read.
+    return (await coolify.listEnvs(appUuid))
+      .filter((entry) => entry.is_preview !== true)
+      .map((entry) => entry.key);
   };
 }
 
@@ -538,7 +543,9 @@ async function keyFindings(
   try {
     present = await context.envNames(appUuid);
   } catch (error) {
-    add("keys", "fail", flatten((error as Error).message));
+    // A warning rather than a failure: an operator without a Coolify token has every other finding
+    // to read, and one check that could not be run must not decide the command's exit code.
+    add("keys", "warn", flatten((error as Error).message));
     return;
   }
 

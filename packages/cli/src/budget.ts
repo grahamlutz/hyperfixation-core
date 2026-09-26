@@ -119,7 +119,12 @@ export async function budgetApp(options: BudgetAppOptions): Promise<BudgetAppRes
     throw new InvalidBudget(options.budgetUsd);
   }
 
-  const operator = options.operator ?? env[OPERATOR_ENV] ?? userInfo().username;
+  // An empty `HF_OPERATOR` is unset, as `loadOperatorConfig` reads every other variable: an audit
+  // row whose actor is `hf-cli:` names nobody.
+  const configured = env[OPERATOR_ENV];
+  const operator =
+    options.operator ??
+    (configured === undefined || configured === "" ? userInfo().username : configured);
   const config = options.config ?? (await loadOperatorConfig({ env }));
   const open = options.database ?? defaultDatabase(config, env);
 

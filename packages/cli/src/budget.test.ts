@@ -109,6 +109,22 @@ describe("hf budget", () => {
     ).toEqual([{ actor_id: "hf-cli:ci-bot" }]);
   }, 30_000);
 
+  it("falls back to the login name when HF_OPERATOR is set to nothing", async () => {
+    const result = await budgetApp({
+      app: db.appName,
+      budgetUsd: "12.5",
+      database: cluster(),
+      env: { [OPERATOR_ENV]: "" },
+    });
+
+    // Whatever this machine's login name is, it is not the empty string: an audit row reading
+    // `hf-cli:` names nobody.
+    expect(result.operator).not.toBe("");
+    expect(
+      await query<{ actor_id: string }>("SELECT actor_id FROM hf_audit"),
+    ).toEqual([{ actor_id: `hf-cli:${result.operator}` }]);
+  }, 30_000);
+
   it("refuses an amount that is not a positive number, before it opens anything", async () => {
     for (const budgetUsd of ["0", "-5", "lots", ""]) {
       await expect(
