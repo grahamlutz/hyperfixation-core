@@ -24,6 +24,7 @@ export const ABANDON_LLM_CALLS_STATEMENT: string;
 // @public
 export interface ActionChannel<Req = unknown> {
     readonly dedupes: boolean;
+    readonly dedupeWindowMs?: number;
     // (undocumented)
     readonly name: string;
     // (undocumented)

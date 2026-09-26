@@ -157,8 +157,9 @@ function addressBody(address: LobAddress): Record<string, string> {
 
 /**
  * `dedupes: true` rests on the `Idempotency-Key` header alone, and Lob honours it for
- * `LOB_IDEMPOTENCY_WINDOW_MS`. A row re-entered later than that is not covered — that is the
- * `uncertain` path's problem, not this channel's, and it is still open.
+ * `LOB_IDEMPOTENCY_WINDOW_MS` — which is why that is declared as the channel's `dedupeWindowMs`
+ * rather than only documented: `perform` sends a row re-entered later than that to the `uncertain`
+ * path, because past the window the header buys nothing and a re-send is a second letter.
  */
 export function lobChannel(options: LobChannelOptions): ActionChannel<LobLetterRequest> {
   if (options.apiKey.startsWith(LIVE_KEY_PREFIX) && options.live !== true) {
@@ -170,10 +171,12 @@ export function lobChannel(options: LobChannelOptions): ActionChannel<LobLetterR
   const schema = options.schema ?? LobLetterRequest;
   const base = (options.baseUrl ?? LOB_BASE_URL).replace(/\/+$/, "");
   const authorization = `Basic ${Buffer.from(`${options.apiKey}:`).toString("base64")}`;
+  const scrub = scrubber(options.apiKey);
 
   return {
     name: options.name ?? "lob",
     dedupes: true,
+    dedupeWindowMs: LOB_IDEMPOTENCY_WINDOW_MS,
     async send(dispatch: ActionDispatch<LobLetterRequest>): Promise<ActionResult> {
       const letter = schema.parse(dispatch.request);
       // Looked up per send, so a test's mock server can replace `globalThis.fetch` after the
@@ -196,35 +199,74 @@ export function lobChannel(options: LobChannelOptions): ActionChannel<LobLetterR
       });
       const text = await response.text();
       if (!response.ok) {
-        throw new LobRefused(response.status, explain(text, [options.apiKey, authorization]));
+        throw new LobRefused(response.status, explain(text, scrub));
       }
-      const parsed = JSON.parse(text) as { id?: unknown };
+      // A 2xx means Lob took the letter, whatever shape the body arrived in. Throwing on an empty
+      // or non-JSON 200 — a proxy that ate the body — would leave the row `failed` on a send that
+      // did go out, and a later re-entry would mail a second letter. The id is all that is lost.
+      const parsed = parseJson(text) as { id?: unknown } | undefined;
       return {
-        ...(typeof parsed.id === "string" ? { externalId: parsed.id } : {}),
-        response: parsed,
+        ...(typeof parsed?.id === "string" ? { externalId: parsed.id } : {}),
+        ...(parsed === undefined ? {} : { response: parsed }),
       };
     },
   };
 }
 
-/**
- * Why Lob refused, out of its `error.message` and with every secret blanked — the key and the Basic
- * header it was encoded into, because a provider is free to quote what was sent back at it.
- * `undefined` when the body is not JSON or carries no message: a refusal that explained nothing
- * leaves the status to speak rather than putting a page of HTML in a log line.
- */
-function explain(body: string, secrets: readonly string[]): string | undefined {
-  let parsed: unknown;
+/** `undefined` rather than a throw, so a body that is not JSON is a fact instead of an error. */
+function parseJson(body: string): unknown {
   try {
-    parsed = JSON.parse(body);
+    return JSON.parse(body) as unknown;
   } catch {
     return undefined;
   }
+}
+
+/** What a blanked secret leaves behind. */
+const REDACTED = "***";
+
+/** The rest of a base64 token, so a match runs to its end rather than stopping inside it. */
+const BASE64_TAIL = "[A-Za-z0-9+/=]*";
+
+/**
+ * Blanks the key in any form a provider could quote it back in. Enumerating exact strings is what
+ * the first version did, and it missed two: the bare credential token without its `Basic ` prefix,
+ * and an encoding of the key with something other than `:` appended.
+ *
+ * So the base64 half is matched by *prefix* instead. Base64 encodes in three-byte groups, so every
+ * encoding of a string that begins with the key — `key`, `key:`, `key:anything` — shares the first
+ * `floor(len / 3) * 4` characters of `base64(key)`; from there the match runs to the end of the
+ * token. That covers `Basic <token>` too, since the token is a substring of it.
+ */
+function scrubber(apiKey: string): (text: string) => string {
+  const encoded = Buffer.from(apiKey).toString("base64");
+  // The groups that no appended byte can change. A key short enough to have none leaves the
+  // base64 half off entirely rather than matching every base64-ish run in the message.
+  const stable = encoded.slice(0, Math.floor(apiKey.length / 3) * 4);
+  const token = stable.length === 0 ? undefined : new RegExp(escapeRegExp(stable) + BASE64_TAIL, "g");
+
+  return (text) => {
+    const withoutKey = text.split(apiKey).join(REDACTED);
+    return token === undefined ? withoutKey : withoutKey.replace(token, REDACTED);
+  };
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Why Lob refused, out of its `error.message` and with the key blanked in every form it could have
+ * been quoted back in, because a provider is free to echo what was sent to it. `undefined` when the
+ * body is not JSON or carries no message: a refusal that explained nothing leaves the status to
+ * speak rather than putting a page of HTML in a log line.
+ */
+function explain(body: string, scrub: (text: string) => string): string | undefined {
+  const parsed = parseJson(body);
   if (parsed === null || typeof parsed !== "object") return undefined;
   const message = (parsed as { error?: { message?: unknown } }).error?.message;
   if (typeof message !== "string") return undefined;
-  let text = message;
-  for (const secret of secrets) text = text.split(secret).join("***");
+  const text = scrub(message);
   return text.length > LOB_EXPLANATION_LIMIT
     ? `${text.slice(0, LOB_EXPLANATION_LIMIT)}…`
     : text;

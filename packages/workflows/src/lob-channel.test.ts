@@ -9,6 +9,7 @@ import {
   renderLetter,
   LobLiveKeyRefused,
   LobRefused,
+  LOB_IDEMPOTENCY_WINDOW_MS,
   type LobLetterRequest,
 } from "./lob.js";
 import type { StepContext } from "./step.js";
@@ -55,6 +56,47 @@ function letters(status = 200, json: Record<string, unknown> = { id: "ltr_1" }) 
   });
 }
 
+/**
+ * A refusal that leaks the credential the way a provider actually might, rather than by echoing the
+ * exact strings the scrub was built from — which is what the first version of this test did, and it
+ * passed while the bare token and the colon-less encoding both survived.
+ *
+ * Every form here is derived from the `Authorization` header *as the channel sent it*: the header
+ * byte-for-byte, the bare base64 token with no `Basic ` prefix, the raw key decoded back out of it,
+ * and a re-encoding of that key without the trailing colon. All four sit in surrounding prose, so
+ * nothing is blanked by luck of being the whole string.
+ */
+function leakingLetters(status: number) {
+  return http.post(`${BASE}/v1/letters`, ({ request }) => {
+    const header = request.headers.get("authorization") ?? "";
+    const token = header.replace(/^Basic /, "");
+    const rawKey = Buffer.from(token, "base64").toString("utf8").replace(/:$/, "");
+    const noColon = Buffer.from(rawKey).toString("base64");
+    return HttpResponse.json(
+      {
+        error: {
+          message:
+            `address is undeliverable; request signed with ${header} was rejected, ` +
+            `credential=${token} unknown, key ${rawKey} disabled, ` +
+            `retry as Basic ${noColon} instead`,
+        },
+      },
+      { status },
+    );
+  });
+}
+
+/** The forms of the key that must not appear on a thrown error, whatever Lob echoed. */
+function keyForms(): Record<string, string> {
+  const withColon = Buffer.from(`${API_KEY}:`).toString("base64");
+  return {
+    "the raw key": API_KEY,
+    "the bare base64 token": withColon,
+    "the base64 of the key with nothing appended": Buffer.from(API_KEY).toString("base64"),
+    "the Basic header": `Basic ${withColon}`,
+  };
+}
+
 const server = setupServer(letters());
 
 beforeAll(() => {
@@ -79,6 +121,9 @@ async function send(request: LobLetterRequest, key = "abc"): Promise<void> {
 describe("lobChannel", () => {
   it("posts the letter with Basic auth and declares it dedupes", async () => {
     expect(channel().dedupes).toBe(true);
+    // The window is the other half of the declaration: `perform` needs it to know when the key it
+    // would re-send has stopped meaning anything to Lob.
+    expect(channel().dedupeWindowMs).toBe(LOB_IDEMPOTENCY_WINDOW_MS);
 
     await send(letter());
 
@@ -106,12 +151,7 @@ describe("lobChannel", () => {
   });
 
   it("names the status on a 4xx and carries the key nowhere in the failure", async () => {
-    const basic = `Basic ${Buffer.from(`${API_KEY}:`).toString("base64")}`;
-    server.resetHandlers(
-      letters(422, {
-        error: { message: `address is undeliverable (sent ${API_KEY} as ${basic})` },
-      }),
-    );
+    server.resetHandlers(leakingLetters(422));
 
     const error = await send(letter()).catch((e: unknown) => e);
 
@@ -119,12 +159,25 @@ describe("lobChannel", () => {
     const refused = error as LobRefused;
     expect(refused.status).toBe(422);
     expect(refused.message).toContain("HTTP 422");
+    // What Lob actually said still comes through; only the credential is gone.
     expect(refused.message).toContain("address is undeliverable");
-    // Neither the key nor the header it was encoded into survives the echo, anywhere on the error.
+
     const everything = JSON.stringify(refused, Object.getOwnPropertyNames(refused));
-    expect(everything).not.toContain(API_KEY);
-    expect(everything).not.toContain(basic);
-    expect(everything).not.toContain(Buffer.from(`${API_KEY}:`).toString("base64"));
+    for (const [form, secret] of Object.entries(keyForms())) {
+      expect(everything, `${form} survived onto the error`).not.toContain(secret);
+    }
+  });
+
+  it("treats a 2xx with no parseable body as sent, losing only the id", async () => {
+    server.resetHandlers(
+      http.post(`${BASE}/v1/letters`, () => new HttpResponse("", { status: 200 })),
+    );
+
+    // Throwing here would mark the row `failed` on a letter that did go out, and the row would then
+    // be re-sent by a later re-entry — a second letter for a proxy that ate the body.
+    await expect(
+      channel().send({ idempotencyKey: "abc", runId: "run-1", key: "letter", request: letter() }),
+    ).resolves.toEqual({});
   });
 
   it("parses the request against the app's own schema before anything is sent", async () => {
