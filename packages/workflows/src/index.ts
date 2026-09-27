@@ -97,6 +97,18 @@ export {
   type TelegramCallbackResult,
   type TelegramDecision,
 } from "./telegram.js";
+export {
+  lobChannel,
+  renderLetter,
+  LobAddress,
+  LobLetterRequest,
+  LobLiveKeyRefused,
+  LobRefused,
+  LOB_BASE_URL,
+  LOB_EXPLANATION_LIMIT,
+  LOB_IDEMPOTENCY_WINDOW_MS,
+  type LobChannelOptions,
+} from "./lob.js";
 export { UnknownFlow } from "./bump.js";
 export { Suspend, SUSPEND_STATUSES, type SuspendStatus } from "./suspend.js";
 export { currentRun, OutsideRun, type RunContext } from "./run-context.js";

@@ -44,6 +44,8 @@
     "@opentelemetry/sdk-trace-node": "2.11.0",
     "drizzle-orm": "^0.45.2",
     "pg": "^8.23.0",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
     "zod": "4.6.5"
   },
   "devDependencies": {
@@ -52,6 +54,9 @@
     "@microsoft/api-extractor": "^7.59.1",
     "@sentry/node": "^10.74.0",
     "@types/pg": "^8.23.1",
-    "eslint": "^10.10.0"
+    "@types/react": "19.2.2",
+    "@types/react-dom": "19.2.2",
+    "eslint": "^10.10.0",
+    "msw": "2.15.0"
   }
 }

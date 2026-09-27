@@ -21,6 +21,13 @@ export interface ActionChannel<Req = unknown> {
   readonly name: string;
   /** Whether a re-send with the same `idempotencyKey` is delivered at most once by the provider. */
   readonly dedupes: boolean;
+  /**
+   * How long the provider honours that `idempotencyKey`, measured from the row's first attempt.
+   * Left off, the dedupe never expires — a provider keying on a nonce it keeps, or a channel that
+   * dispatches nothing. A `dedupes: true` channel whose provider *does* forget must declare its
+   * window, or a re-entry past it is a second delivery.
+   */
+  readonly dedupeWindowMs?: number;
   send(dispatch: ActionDispatch<Req>): Promise<ActionResult>;
 }
 
@@ -40,6 +47,8 @@ interface ActionRow extends Record<string, unknown> {
   response: unknown;
   record_type: string | null;
   record_id: string | null;
+  /** Age of the row's first attempt, on the database's clock rather than any worker's. */
+  age_ms: number;
 }
 
 /**
@@ -114,6 +123,18 @@ async function existingTaskId(db: StepDatabase, actionLogId: string): Promise<nu
   return row === undefined ? null : Number(row.id);
 }
 
+/**
+ * Whether the provider can still be trusted to dedupe this row's `idempotencyKey`. A declared
+ * window that has run out makes `dedupes: true` worth nothing — the key means nothing to the
+ * provider any more, so a re-send is a second delivery — and the row belongs on the `uncertain`
+ * path with every other send nobody can account for.
+ */
+function withinDedupeWindow<Req>(channel: ActionChannel<Req>, row: ActionRow): boolean {
+  const window = channel.dedupeWindowMs;
+  if (window === undefined) return true;
+  return Number(row.age_ms) <= window;
+}
+
 /** A row somebody else already moved to `uncertain`: report it, write nothing. */
 async function uncertainOf(
   db: StepDatabase,
@@ -131,10 +152,11 @@ async function uncertainOf(
  * → `hf_action_log` → `hf_task`/`hf_activity`, which sit in the last tier.
  *
  * Re-entry of a row this attempt did not insert is where the channel's `dedupes` declaration is
- * spent. A channel the provider dedupes for is simply re-taken and re-sent. One that does not is
- * never re-sent: the row goes `uncertain`, a task asks a human whether the first send went out,
- * and `ActionUncertain` ends the run. A first dispatch always sends, so a non-deduping channel
- * gets at most one send per row ever.
+ * spent, and only for as long as the channel's own `dedupeWindowMs` says the provider honours the
+ * key. Inside it the row is simply re-taken and re-sent. Outside it — and on a channel that does
+ * not dedupe at all — the row is never re-sent: it goes `uncertain`, a task asks a human whether
+ * the first send went out, and `ActionUncertain` ends the run. A first dispatch always sends, so
+ * neither case can produce more than one send per row without a human in it.
  */
 export async function perform<Req>(
   ctx: StepContext,
@@ -151,7 +173,8 @@ export async function perform<Req>(
       ON CONFLICT (run_id, key) DO NOTHING
     `);
     const read = await db.execute<ActionRow>(sql`
-      SELECT id::text AS id, status, external_id, response, record_type, record_id
+      SELECT id::text AS id, status, external_id, response, record_type, record_id,
+             (EXTRACT(EPOCH FROM (now() - started_at)) * 1000)::double precision AS age_ms
       FROM hf_action_log WHERE run_id = ${ctx.runId} AND key = ${options.key}
     `);
     const row = read.rows[0]!;
@@ -162,7 +185,9 @@ export async function perform<Req>(
     // the one thing the task exists to prevent.
     if (row.status === "uncertain") return { uncertain: await uncertainOf(db, ctx, options, row) };
     if (insert.rowCount !== 1) {
-      if (options.channel.dedupes) {
+      if (options.channel.dedupes && withinDedupeWindow(options.channel, row)) {
+        // `started_at` is deliberately not rewritten: the window is measured from the row's first
+        // attempt, which is what the provider keyed its own dedupe on.
         await db.execute(sql`
           UPDATE hf_action_log
           SET status = 'started', workflow_id = ${ctx.workflowId}, finished_at = NULL
