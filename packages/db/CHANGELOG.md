@@ -1,5 +1,9 @@
 # @hyperfixation/db
 
+## 0.1.11
+
+No changes in this release.
+
 ## 0.1.10
 
 ### Patch Changes

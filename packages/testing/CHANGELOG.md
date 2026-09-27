@@ -1,5 +1,11 @@
 # @hyperfixation/testing
 
+## 0.1.11
+
+### Patch Changes
+
+- @hyperfixation/db@0.1.11
+
 ## 0.1.10
 
 ### Patch Changes
