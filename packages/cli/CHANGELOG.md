@@ -1,5 +1,13 @@
 # @hyperfixation/cli
 
+## 0.1.11
+
+### Patch Changes
+
+- @hyperfixation/core@0.1.11
+  - @hyperfixation/auth@0.1.11
+  - @hyperfixation/db@0.1.11
+
 ## 0.1.10
 
 ### Patch Changes
